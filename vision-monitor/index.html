@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vision Monitor — Streaming Perception & Filter Feed</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <div class="app-layout">
+      <!-- Top Navigation & System Status Bar -->
+      <header class="app-header">
+        <div class="header-brand">
+          <div class="brand-badge">OBSERVER</div>
+          <div class="brand-title">
+            <h1>Vision Monitor</h1>
+            <span class="brand-subtitle">Observation & Remote Configuration Panel</span>
+          </div>
+        </div>
+
+        <div class="model-info-chip">
+          <span class="chip-item"><strong>Vision:</strong> MiniMax M3</span>
+          <span class="chip-divider">|</span>
+          <span class="chip-item"><strong>Filter:</strong> DeepSeek V4 Flash</span>
+          <span class="chip-divider">|</span>
+          <span class="chip-item text-muted">via 9inference</span>
+        </div>
+
+        <div class="header-status-group">
+          <div id="backend-status-pill" class="status-pill disconnected">
+            <span class="status-dot"></span>
+            <span class="status-text">Monitor Server: Offline</span>
+          </div>
+          <div id="companion-status-pill" class="status-pill disconnected">
+            <span class="status-dot"></span>
+            <span class="status-text">Companion WS: Terputus</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Main Dashboard Grid -->
+      <main class="dashboard-grid">
+        <!-- LEFT COLUMN: Status, Remote Settings & Metrics -->
+        <aside class="sidebar-panel">
+          <!-- Companion Stream Status -->
+          <div class="card control-card">
+            <div class="card-header">
+              <h2>Status Screen Stream</h2>
+              <span id="monitoring-badge" class="badge idle">MENUNGGU STREAM</span>
+            </div>
+            <div class="card-body">
+              <div class="stream-source-info">
+                <div class="source-status-row">
+                  <span class="source-indicator-icon">🖥️</span>
+                  <div>
+                    <strong id="stream-status-title">Screen Share Belum Aktif</strong>
+                    <p id="stream-status-desc" class="text-muted">
+                      Klik tombol <strong>"Share Screen"</strong> di halaman avatar companion untuk memulai capture.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="timer-display">
+                <span class="timer-label">Durasi Sesi Pemantauan:</span>
+                <span id="session-timer" class="timer-value">00:00:00</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Remote Configuration -->
+          <div class="card">
+            <div class="card-header">
+              <h2>Remote Konfigurasi Capture</h2>
+              <span id="config-sync-badge" class="badge-subtle">Tersinkron</span>
+            </div>
+            <div class="card-body form-grid">
+              <div class="form-group">
+                <div class="label-with-value">
+                  <label for="interval-input">Interval Capture Frame (detik)</label>
+                  <span id="interval-val-display" class="val-tag">1 detik</span>
+                </div>
+                <div class="interval-input-row">
+                  <input
+                    type="range"
+                    id="interval-slider"
+                    min="1"
+                    max="10"
+                    step="1"
+                    value="1"
+                    class="range-slider"
+                  />
+                  <div class="slider-ticks">
+                    <span>1s (Default)</span>
+                    <span>2s</span>
+                    <span>3s</span>
+                    <span>5s</span>
+                    <span>10s</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <div class="label-with-value">
+                  <label for="buffer-slider">Buffer Window Filter (detik)</label>
+                  <span id="buffer-val-display" class="val-tag">30 detik</span>
+                </div>
+                <input
+                  type="range"
+                  id="buffer-slider"
+                  min="5"
+                  max="120"
+                  step="5"
+                  value="30"
+                  class="range-slider"
+                />
+                <div class="slider-ticks">
+                  <span>5s</span>
+                  <span>30s (Default)</span>
+                  <span>60s</span>
+                  <span>120s</span>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <div class="label-with-value">
+                  <label for="max-tokens-input">Max Tokens Deskripsi (MiniMax M3)</label>
+                  <span id="tokens-val-display" class="val-tag">100 tokens</span>
+                </div>
+                <input
+                  type="number"
+                  id="max-tokens-input"
+                  class="form-control"
+                  value="100"
+                  min="20"
+                  max="300"
+                  step="10"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- Running Counters & Estimated Cost -->
+          <div class="card metrics-card">
+            <div class="card-header">
+              <h2>Statistik & Biaya Sesi</h2>
+              <button id="reset-stats-btn" class="btn-text-action">Reset</button>
+            </div>
+            <div class="card-body">
+              <div class="metrics-grid">
+                <div class="metric-box">
+                  <span class="metric-num" id="stat-frames">0</span>
+                  <span class="metric-name">Frame Diterima</span>
+                </div>
+                <div class="metric-box">
+                  <span class="metric-num" id="stat-vision-calls">0</span>
+                  <span class="metric-name">MiniMax M3 Calls</span>
+                </div>
+                <div class="metric-box">
+                  <span class="metric-num" id="stat-filter-calls">0</span>
+                  <span class="metric-name">DeepSeek V4 Calls</span>
+                </div>
+                <div class="metric-box highlight-metric">
+                  <span class="metric-num" id="stat-comments">0</span>
+                  <span class="metric-name">Komentar Spontan</span>
+                </div>
+              </div>
+
+              <div class="cost-breakdown">
+                <div class="cost-row">
+                  <span>Vision (MiniMax M3):</span>
+                  <span id="cost-vision" class="mono">$0.0000</span>
+                </div>
+                <div class="cost-row">
+                  <span>Filter (DeepSeek V4):</span>
+                  <span id="cost-filter" class="mono">$0.0000</span>
+                </div>
+                <div class="cost-row total-row">
+                  <span>Total Estimasi Biaya:</span>
+                  <div class="total-cost-val">
+                    <strong id="cost-total-usd" class="mono">$0.0000</strong>
+                    <span id="cost-total-idr" class="cost-idr">(~Rp 0)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- RIGHT MAIN AREA: Video Preview & Description Log -->
+        <section class="main-content-area">
+          <!-- TOP: Live Preview Box -->
+          <div class="card preview-card">
+            <div class="preview-header">
+              <div class="preview-title-group">
+                <h2>Live Screen Preview (Push Feed)</h2>
+                <span id="stream-source-badge" class="badge-subtle">Menunggu Frame...</span>
+              </div>
+
+              <div class="preview-stats-pills">
+                <div class="pill-stat">
+                  <span class="pill-label">Buffer Count:</span>
+                  <span id="live-buffer-count" class="pill-val">0 frame</span>
+                </div>
+                <div class="pill-stat">
+                  <span class="pill-label">Next Filter:</span>
+                  <span id="filter-countdown" class="pill-val">--</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="video-container" id="video-wrapper">
+              <!-- Live Preview Image received from companion -->
+              <img id="live-preview-img" alt="Stream Preview" style="display: none; width: 100%; height: 100%; object-fit: contain;" />
+
+              <div id="video-placeholder" class="video-placeholder">
+                <div class="placeholder-content">
+                  <span class="placeholder-icon">🖥️</span>
+                  <h3>Menunggu Stream dari Companion Utama</h3>
+                  <p>Buka halaman utama companion dan klik tombol <strong>"Share Screen"</strong>. Frame akan otomatis muncul di sini secara real-time.</p>
+                </div>
+              </div>
+
+              <!-- Visual Capture Flash Indicator -->
+              <div id="capture-flash-overlay" class="capture-flash"></div>
+
+              <!-- Stream HUD overlay -->
+              <div class="stream-hud">
+                <span id="hud-res">-- × --</span>
+                <span id="hud-last-time">--:--:--</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- BOTTOM: Real-time Descriptions & Filter Log -->
+          <div class="card logs-card">
+            <div class="card-header">
+              <div class="log-title-area">
+                <h2>Description Feed & Filter Decisions</h2>
+                <span class="sub-counter" id="log-count-tag">(0 log)</span>
+              </div>
+              <div class="log-actions">
+                <label class="toggle-switch-label">
+                  <input type="checkbox" id="autoscroll-toggle" checked />
+                  <span>Auto-scroll</span>
+                </label>
+                <button id="clear-logs-btn" class="btn btn-ghost btn-small">
+                  Clear Log
+                </button>
+              </div>
+            </div>
+
+            <div class="card-body log-container" id="description-log-list">
+              <div class="empty-log-state" id="empty-log-message">
+                <p>Belum ada log deskripsi. Aktifkan <strong>Share Screen</strong> di halaman utama untuk mulai menerima persepsi visual real-time.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "name": "vision-monitor",
+  "version": "1.0.0",
+  "description": "Standalone real-time screen & webcam vision monitor with MiniMax M3 + DeepSeek V4 Flash periodic filter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "node server/server.js",
+    "start": "concurrently -k -n server,client -c magenta,cyan \"npm run server\" \"npm run dev\""
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "openai": "^4.67.3",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "vite": "^6.0.0"
+  }
+}
