@@ -68,15 +68,14 @@ Aplikasi AI companion interaktif berbasis browser yang menghadirkan karakter **A
 
 ---
 
-## 🛠️ Tech Stack
+## 🛠️ Tech Stack & Powered By
 
 - **Frontend Avatar**: Vanilla JavaScript, Vite, HTML5 Canvas, WebGL, Web Audio API, Official Live2D Cubism Core & Framework 5.0.
 - **Backend Server**: Node.js, Express, `ws` (WebSocket Server).
-- **AI Models & Services**:
-  - **LLM Chat & Filter**: DeepSeek V4 Flash (`deepseek-v4-flash`) via 9inference.
-  - **Vision Model**: MiniMax M3 (`minimax-m3`) via 9inference.
-  - **Speech-to-Text**: Whisper Large v3 Turbo (`whisper-large-v3-turbo`) via Groq SDK.
-  - **Text-to-Speech**: Fish Audio (`s2.1-pro-free` / custom model).
+- **AI Services & APIs**:
+  - **[9inference](https://9inference.cloud)**: LLM Chat & Buffer Filtering (`deepseek-v4-flash`), Visual Perception (`minimax-m3`).
+  - **[Groq](https://groq.com)**: Speech-to-Text inference ultra-cepat (`whisper-large-v3-turbo`).
+  - **[Fish Audio](https://fish.audio)**: Neural Speech Synthesis & real-time streaming TTS.
 
 ---
 
@@ -157,6 +156,24 @@ npm install
 npm run start
 ```
 Buka Vision Monitor di: **`http://localhost:5174`**
+
+---
+
+## 🙏 Credits & Attribution
+
+1. **Model Live2D — IceGirl**:
+   - Dibuat oleh **tianyelulu** dan tersedia secara gratis di [BOOTH (IceGirl Model)](https://tianyelulu.booth.pm/items/5975192).
+   - Model ini digunakan sebagai aset visual avatar dalam proyek companion ini sesuai dengan lisensi penggunaan yang diberikan oleh kreator di halaman BOOTH tersebut. Seluruh hak cipta, desain karakter, dan hak kekayaan intelektual model Live2D tetap menjadi milik kreator aslinya (**tianyelulu**). Proyek ini tidak mengklaim kepemilikan atas model tersebut.
+
+2. **Live2D Cubism SDK for Web**:
+   - Teknologi rendering Live2D ditenagai oleh [Live2D Cubism SDK for Web](https://www.live2d.com/en/sdk/about/) resmi dari **Live2D Inc.**
+   - Penggunaan Live2D Cubism Core dan Framework tunduk pada [Live2D Open Software License Agreement](https://www.live2d.com/eula/live2d-open-software-license-agreement_en.html) dan Live2D Proprietary License.
+   - *Catatan bagi pengembang yang meng-clone proyek ini:* Pastikan untuk mengunduh pustaka Live2D Cubism Core resmi secara langsung dari situs [Live2D Cubism SDK for Web](https://www.live2d.com/en/sdk/download/web/) untuk kepatuhan lisensi.
+
+3. **Layanan Pihak Ketiga & Infrastruktur**:
+   - **[9inference](https://9inference.cloud)** untuk API model bahasa & inferensi multimodal.
+   - **[Groq](https://groq.com)** untuk inferensi LPU Speech-to-Text berkecepatan tinggi.
+   - **[Fish Audio](https://fish.audio)** untuk sintesis suara waifu yang ekspresif.
 
 ---
 
