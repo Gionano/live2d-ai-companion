@@ -23,6 +23,9 @@ rollout-*.jsonl
 .vendor-cubism-*/
 live2d-test.png
 
-# Redundant raw extraction & legacy VRM assets
+# Legacy VRM assets, unused prototypes, and raw extraction
 live2d_models/
 public/models/*.vrm
+public/models/README.md
+src/legacy-vrm/
+src/visionMonitor.js
