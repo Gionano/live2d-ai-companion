@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Environment and secrets (CRITICAL)
+.env
+.env.*
+!.env.example
+*.local
+
+# OS / Editor temporary files
+.DS_Store
+Thumbs.db
+.serena/
+*.log
+rollout-*.jsonl
+
+# Temporary diagnostics and development caches
+.tmp-*
+.vendor-cubism-*/
+live2d-test.png
+
+# Redundant raw extraction & legacy VRM assets
+live2d_models/
+public/models/*.vrm

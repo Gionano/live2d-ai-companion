@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: amika-live2d-app
+    ports:
+      - "5173:5173"
+      - "8787:8787"
+    volumes:
+      # Mount current directory into the container to enable hot-reloading
+      - .:/app
+      # Exclude node_modules from being overwritten by the host
+      - /app/node_modules
+    env_file:
+      - .env
+    environment:
+      # Use polling for file changes inside Docker
+      - CHOKIDAR_USEPOLLING=true

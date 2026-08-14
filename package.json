@@ -1,0 +1,27 @@
+{
+  "name": "amika-live2d-companion",
+  "description": "Amika AI companion with official Live2D Cubism Web rendering, STT, LLM, and TTS",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "node server/index.js",
+    "dev:all": "concurrently -k -n server,vite -c yellow,cyan \"npm run server\" \"npm run dev\""
+  },
+  "dependencies": {
+    "@msgpack/msgpack": "^3.1.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "groq-sdk": "^1.5.0",
+    "openai": "^4.67.3",
+    "simplex-noise": "^4.0.3",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "vite": "^6.0.0"
+  }
+}
