@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Amika Live2D Companion</title>
+    <style>
+      :root {
+        --pip-width: 35vw;
+        --pip-top: 16px;
+        --pip-right: 16px;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; }
+      #app { width: 100vw; height: 100vh; display: block; position: relative; z-index: 2; }
+      #webcam { display: none; }
+
+      #debug-panel {
+        position: fixed;
+        top: 16px;
+        left: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 14px;
+        background: rgba(20, 20, 35, 0.82);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 10px;
+        font-family: system-ui, -apple-system, sans-serif;
+        color: #e8e8f0;
+        backdrop-filter: blur(6px);
+        z-index: 10;
+        max-width: 220px;
+      }
+      #debug-panel h3 {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        opacity: 0.85;
+        margin-bottom: 2px;
+      }
+      #debug-panel button {
+        padding: 8px 12px;
+        font-size: 13px;
+        color: #fff;
+        background: #3a3a5c;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      #debug-panel button:hover { background: #4d4d7a; }
+      #debug-panel button:active { background: #5f5f96; }
+      #debug-panel .debug-field { margin-top: 4px; font-size: 11px; color: #c4c4d4; }
+      #debug-panel select {
+        width: 100%;
+        padding: 8px;
+        color: #fff;
+        background: #30304d;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 6px;
+      }
+
+      #status {
+        position: fixed;
+        bottom: 16px;
+        left: 16px;
+        padding: 8px 14px;
+        font-family: system-ui, sans-serif;
+        font-size: 12px;
+        color: #a8a8c0;
+        background: rgba(20, 20, 35, 0.7);
+        border-radius: 6px;
+        z-index: 10;
+      }
+
+      #camera-switch-btn {
+        display: none; /* Sembunyikan di desktop */
+        position: fixed;
+        top: 16px;
+        left: 16px;
+        background: rgba(20, 20, 35, 0.82);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 50%;
+        width: 48px;
+        height: 48px;
+        color: #e8e8f0;
+        backdrop-filter: blur(6px);
+        z-index: 10;
+        cursor: pointer;
+        transition: background 0.2s ease, transform 0.2s ease;
+        align-items: center;
+        justify-content: center;
+      }
+      #camera-switch-btn:active {
+        transform: scale(0.9);
+        background: #3a3a5c;
+      }
+      #camera-switch-btn svg {
+        width: 24px;
+        height: 24px;
+      }
+
+      .camera-loading {
+        filter: blur(10px) brightness(0.5);
+        transition: filter 0.3s ease;
+      }
+
+
+      #companion-panel {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 300px;
+        max-height: calc(100vh - 32px);
+        padding: 14px;
+        background: rgba(20, 20, 35, 0.82);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 10px;
+        font-family: system-ui, -apple-system, sans-serif;
+        color: #e8e8f0;
+        backdrop-filter: blur(6px);
+        z-index: 10;
+      }
+      #companion-panel h3 {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        opacity: 0.85;
+      }
+      #chat-log {
+        flex: 1;
+        min-height: 180px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px;
+        font-size: 13px;
+        line-height: 1.4;
+        background: rgba(0, 0, 0, 0.25);
+        border-radius: 6px;
+      }
+      .log-line { word-wrap: break-word; }
+      .log-line.user { color: #cfe3ff; }
+      .log-line.assistant { color: #ffd9ec; }
+      .log-line.vision { color: #c8f0d0; }
+      .log-line.muted { color: #8a8aa0; font-style: italic; }
+      .log-line.error { color: #ff9b9b; }
+      .panel-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      #mic-status {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        color: #a8a8c0;
+      }
+      #mic-dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #6a6a80;
+        transition: background 0.2s ease;
+      }
+      #mic-status.live #mic-dot { background: #3ad07a; box-shadow: 0 0 6px #3ad07a; }
+
+      .screen-share-btn {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        color: #c4c4dc;
+        border-radius: 6px;
+        padding: 3px 8px;
+        font-size: 11px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        transition: all 0.15s ease;
+      }
+      .screen-share-btn:hover {
+        background: rgba(255, 255, 255, 0.15);
+        color: #ffffff;
+      }
+      .screen-share-btn.active {
+        background: rgba(37, 99, 235, 0.25);
+        border-color: #3b82f6;
+        color: #93c5fd;
+      }
+
+      @media (max-width: 768px) {
+        #webcam {
+          display: block;
+          position: fixed;
+          top: 0; left: 0;
+          width: 100vw; height: 100vh;
+          object-fit: cover;
+          z-index: 0;
+        }
+        #app {
+          position: fixed;
+          top: var(--pip-top);
+          right: var(--pip-right);
+          width: var(--pip-width);
+          height: calc(var(--pip-width) * 1.35);
+          border-radius: 12px;
+          box-shadow: 0 6px 16px rgba(0,0,0,0.5);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          z-index: 2;
+          background: transparent;
+        }
+        #companion-panel {
+          top: auto;
+          bottom: 16px;
+          right: 16px;
+          left: 16px;
+          width: auto;
+          max-height: 35vh;
+        }
+        #debug-panel {
+          display: none;
+        }
+        #camera-switch-btn {
+          display: flex; /* Munculkan di mobile */
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="app"></canvas>
+
+    <div id="debug-panel">
+      <h3>Emosi (Debug)</h3>
+      <button data-emotion="terkejut">😲 Terkejut</button>
+      <button data-emotion="marah">😠 Marah</button>
+      <button data-emotion="bingung">🤔 Bingung</button>
+      <button data-emotion="jengkel">🙄 Jengkel</button>
+      <button data-emotion="malu">😳 Malu</button>
+      <button data-emotion="kesal">😤 Kesal</button>
+      <button data-emotion="sedih">😢 Sedih</button>
+      <button data-emotion="kagum">🤩 Kagum</button>
+      <button data-emotion="sayang">🥰 Sayang</button>
+      <button data-emotion="jahil">😜 Jahil</button>
+      <button data-emotion="penasaran">🧐 Penasaran</button>
+      <button data-emotion="netral">😐 Netral</button>
+      <label class="debug-field" for="live2d-expression-select">Raw .exp3.json</label>
+      <select id="live2d-expression-select">
+        <option value="netral">Pilih expression?</option>
+      </select>
+      <button id="live2d-test-lipsync">Test audio + lip-sync</button>
+      <h3 style="margin-top: 8px;">Kostum / Aksesoris</h3>
+      <div id="costume-toggles" style="display: flex; flex-direction: column; gap: 4px;"></div>
+    </div>
+
+    <!-- Tombol Switch Kamera Khusus Mobile -->
+    <button id="camera-switch-btn" title="Ganti Kamera">
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-switch-camera">
+        <path d="M11 19H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/>
+        <path d="M13 5h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5"/>
+        <circle cx="12" cy="12" r="3"/>
+        <path d="m18 22-3-3 3-3"/>
+        <path d="m6 2 3 3-3 3"/>
+      </svg>
+    </button>
+
+    <div id="companion-panel">
+      <div class="panel-head">
+        <h3>Amika</h3>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button id="screen-share-btn" class="screen-share-btn" title="Aktifkan Share Screen agar Amika bisa melihat layar">
+            🖥️ Share Screen
+          </button>
+          <span id="mic-status">
+            <span id="mic-dot"></span>
+            <span id="mic-label">Diam</span>
+          </span>
+        </div>
+      </div>
+      <div id="chat-log"></div>
+    </div>
+
+    <video id="webcam" playsinline muted></video>
+    <canvas id="capture-canvas" style="display: none"></canvas>
+
+    <div id="status">Memuat model…</div>
+
+    <script src="/vendor/live2d/live2dcubismcore.min.js"></script>
+    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/companion.js"></script>
+  </body>
+</html>
