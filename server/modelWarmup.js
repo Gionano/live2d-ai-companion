@@ -3,7 +3,7 @@
 // Best-effort, fire-and-forget maintenance requests for 9inference models.
 // ---------------------------------------------------------------------------
 import { client } from './nineInferenceClient.js';
-import { CHAT_MODEL, VISION_MODEL } from './modelConfig.js';
+import { CHAT_MODEL } from './modelConfig.js';
 
 export const KEEP_ALIVE_IDLE_MS = 4.5 * 60 * 1000;
 
@@ -65,11 +65,10 @@ function pingDeepSeek(kind) {
 }
 
 export function warmUpModels() {
-  // Start both requests immediately. The server intentionally does not await
-  // this promise, but diagnostics can await it when an explicit check is needed.
+  // Only warm up 9inference DeepSeek. Vision (Qwen 3.8 27B) runs on Groq
+  // which doesn't need maintenance pings (always-on infrastructure).
   return Promise.allSettled([
     pingDeepSeek('warmup'),
-    pingModel(VISION_MODEL, 'warmup'),
   ]);
 }
 

@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // groqClient.js  (server-side)
-// Satu instance Groq client (dari groq-sdk) untuk STT. API key dari env
-// (GROQ_API_KEY) — server-side only, tidak pernah ke browser.
+// Satu instance Groq client (dari groq-sdk) untuk STT (Whisper) dan Vision
+// (Qwen 3.8 27B). API key dari env (GROQ_API_KEY) — server-side only.
 // ---------------------------------------------------------------------------
 import 'dotenv/config';
 import Groq from 'groq-sdk';

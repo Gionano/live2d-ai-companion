@@ -1,10 +1,12 @@
 // ---------------------------------------------------------------------------
 // visionCapture.js  (server-side)
 // Vision perception router & intent detection.
-// Distinguishes between "screen" vs "webcam" requests and calls MiniMax M3.
+// Distinguishes between "screen" vs "webcam" requests and calls
+// Qwen 3.8 27B (Groq) for frame description.
 // ---------------------------------------------------------------------------
-import { client } from './nineInferenceClient.js';
-import { VISION_MODEL } from './modelConfig.js';
+import { groq } from './groqClient.js';
+
+const VISION_MODEL = 'qwen/qwen3.8-27b';
 
 const WEBCAM_PROMPT =
   'Deskripsikan secara singkat 1-2 kalimat apa yang sedang ditunjukkan atau terlihat di kamera/webcam ini.';
@@ -13,15 +15,20 @@ const SCREEN_PROMPT =
   'Deskripsikan secara ringkas dan padat dalam 1-2 kalimat apa yang sedang terjadi atau terlihat di layar/monitor/game ini (fokus pada aksi penting, status UI, teks utama, atau objek).';
 
 /**
- * Send a frame to vision model (MiniMax M3)
+ * Send a frame to vision model — Qwen 3.8 27B (Groq)
  * @param {string} imageDataUrl - "data:image/jpeg;base64,..."
  * @param {'webcam'|'screen'} source
  */
 export async function describeFrame(imageDataUrl, source = 'webcam') {
   const promptText = source === 'screen' ? SCREEN_PROMPT : WEBCAM_PROMPT;
 
-  const res = await client.chat.completions.create({
+  const startTime = performance.now();
+
+  const res = await groq.chat.completions.create({
     model: VISION_MODEL,
+    reasoning_effort: 'none',   // Non-thinking / instruct mode for fast response
+    max_tokens: 150,
+    temperature: 0.2,
     messages: [
       {
         role: 'user',
@@ -33,7 +40,12 @@ export async function describeFrame(imageDataUrl, source = 'webcam') {
     ],
   });
 
-  return res.choices[0]?.message?.content?.trim() ?? '';
+  const latencyMs = Math.round(performance.now() - startTime);
+  const description = res.choices[0]?.message?.content?.trim() ?? '';
+
+  console.log(`[vision] Qwen 3.8 27B (Groq) ${source} — ${latencyMs}ms | "${description.slice(0, 80)}..."`);
+
+  return description;
 }
 
 // Keyword categorizations for source routing

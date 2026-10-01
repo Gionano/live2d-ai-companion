@@ -1,19 +1,22 @@
 // ---------------------------------------------------------------------------
 // streamingVisionManager.js (Main Companion Server)
-// Handles real-time continuous frame description via MiniMax M3,
-// buffer accumulation, periodic filtering via DeepSeek V4 Flash,
+// Handles real-time continuous frame description via Qwen 3.8 27B (Groq),
+// buffer accumulation, periodic filtering via DeepSeek V4 Flash (9inference),
 // spontaneous voice commentary execution, and telemetry broadcast to Vision Monitor.
 // ---------------------------------------------------------------------------
+import { groq } from './groqClient.js';
 import { client } from './nineInferenceClient.js';
-import { VISION_MODEL, CHAT_MODEL } from './modelConfig.js';
+import { CHAT_MODEL } from './modelConfig.js';
 import { generateSpeech } from './ttsGenerate.js';
 import { isVoiceConfigured } from './voiceConfig.js';
 import { markConversationActivity } from './modelWarmup.js';
 import { HISTORY_MESSAGE_LIMIT } from './llmChat.js';
 
-// Cost constants (9inference rates estimate)
-const VISION_COST_PER_1K_TOKENS = 0.001; // MiniMax M3
-const FILTER_COST_PER_1K_TOKENS = 0.0003; // DeepSeek V4 Flash
+const VISION_MODEL = 'qwen/qwen3.8-27b';
+
+// Cost constants (Groq vision is free-tier / very cheap; 9inference for filter)
+const VISION_COST_PER_1K_TOKENS = 0.0002; // Qwen 3.8 27B (Groq) — estimate
+const FILTER_COST_PER_1K_TOKENS = 0.0003; // DeepSeek V4 Flash (9inference)
 
 const VALID_EMOTIONS = new Set([
   'terkejut', 'marah', 'bingung', 'jengkel', 'malu', 'kesal',
@@ -135,7 +138,7 @@ class StreamingVisionManager {
       timestamp: Date.now(),
     });
 
-    // Avoid stacking MiniMax M3 calls if previous call is still processing
+    // Avoid stacking Qwen 3.8 27B (Groq) calls if previous call is still processing
     if (this.isDescribingInProgress) {
       return;
     }
@@ -147,8 +150,9 @@ class StreamingVisionManager {
     try {
       this.stats.totalVisionCalls++;
 
-      const response = await client.chat.completions.create({
+      const response = await groq.chat.completions.create({
         model: VISION_MODEL,
+        reasoning_effort: 'none',   // Non-thinking / instruct mode for speed
         max_tokens: this.settings.maxTokens,
         temperature: 0.2,
         messages: [
@@ -167,6 +171,8 @@ class StreamingVisionManager {
       const totalTokens = response.usage?.total_tokens || 120;
       const costUsd = (totalTokens / 1000) * VISION_COST_PER_1K_TOKENS;
       this.stats.totalVisionCostUsd += costUsd;
+
+      console.log(`[StreamingVision] Qwen 3.8 27B (Groq) — ${latencyMs}ms | "${description.slice(0, 60)}..."`);
 
       const entry = {
         id: 'desc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
@@ -187,7 +193,7 @@ class StreamingVisionManager {
         stats: this.stats,
       });
     } catch (err) {
-      console.error('[StreamingVision] Gagal mendeskripsikan frame (MiniMax M3):', err.message);
+      console.error('[StreamingVision] Gagal mendeskripsikan frame (Qwen 3.8 27B Groq):', err.message);
     } finally {
       this.isDescribingInProgress = false;
     }

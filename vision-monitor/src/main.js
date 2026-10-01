@@ -362,7 +362,7 @@ function appendRawDescription(entry) {
 
   item.innerHTML = `
     <div class="feed-item-header">
-      <span class="feed-badge badge-raw">MiniMax M3</span>
+      <span class="feed-badge badge-raw">Qwen 3.8 27B</span>
       <span class="mono">${entry.timestamp}</span>
     </div>
     <div class="feed-content">${escapeHtml(entry.description)}</div>
