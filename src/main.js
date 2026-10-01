@@ -10,16 +10,6 @@ window.addEventListener('waifu-emotion-cue', (event) => {
   companion.setEmotionCue(event.detail?.emotion ?? 'netral', event.detail?.endAt ?? 0);
 });
 
-// Debug panel: tombol emosi.
-document.querySelectorAll('#debug-panel button[data-emotion]').forEach((button) => {
-  button.addEventListener('click', () => companion.setEmotion(button.dataset.emotion));
-});
-
-// Debug panel: raw expression dropdown.
-document.querySelector('#live2d-expression-select')?.addEventListener('change', (event) => {
-  companion.setExpression(event.target.value);
-});
-
 // Debug panel: test lip-sync.
 document.querySelector('#live2d-test-lipsync')?.addEventListener('click', async () => {
   if (window.__waifuTestLipSync) {
@@ -80,16 +70,6 @@ function buildCostumeToggles() {
 // Initialize
 // ---------------------------------------------------------------------------
 companion.initialize().then(() => {
-  // Populate raw expression dropdown.
-  const select = document.querySelector('#live2d-expression-select');
-  if (select) {
-    for (const name of companion.getExpressionNames()) {
-      const option = document.createElement('option');
-      option.value = name;
-      option.textContent = name;
-      select.append(option);
-    }
-  }
   // Build costume toggle checkboxes.
   buildCostumeToggles();
 }).catch((error) => {
