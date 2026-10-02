@@ -1,0 +1,626 @@
+{
+  "idle": {
+    "angleXPeak": {
+      "value": 8,
+      "default": 8,
+      "min": 0,
+      "max": 20,
+      "step": 0.5,
+      "label": "Angle X Peak (deg)",
+      "desc": "Amplitudo goyang kepala kiri-kanan saat bernapas"
+    },
+    "angleXCycle": {
+      "value": 6.5345,
+      "default": 6.5345,
+      "min": 2,
+      "max": 15,
+      "step": 0.1,
+      "label": "Angle X Cycle (detik)",
+      "desc": "Durasi satu siklus napas sumbu X (makin besar makin lambat)"
+    },
+    "angleXWeight": {
+      "value": 0.35,
+      "default": 0.35,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "label": "Angle X Weight",
+      "desc": "Bobot pengaruh napas sumbu X (0 = mati, 1 = penuh)"
+    },
+    "angleYPeak": {
+      "value": 5,
+      "default": 5,
+      "min": 0,
+      "max": 20,
+      "step": 0.5,
+      "label": "Angle Y Peak (deg)",
+      "desc": "Amplitudo anggukan kepala atas-bawah saat bernapas"
+    },
+    "angleYCycle": {
+      "value": 3.5345,
+      "default": 3.5345,
+      "min": 2,
+      "max": 15,
+      "step": 0.1,
+      "label": "Angle Y Cycle (detik)",
+      "desc": "Durasi satu siklus napas kepala sumbu Y"
+    },
+    "angleYWeight": {
+      "value": 0.3,
+      "default": 0.3,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "label": "Angle Y Weight",
+      "desc": "Bobot pengaruh napas kepala sumbu Y"
+    },
+    "angleZPeak": {
+      "value": 6,
+      "default": 6,
+      "min": 0,
+      "max": 20,
+      "step": 0.5,
+      "label": "Angle Z Peak (deg)",
+      "desc": "Amplitudo miring kepala saat bernapas"
+    },
+    "angleZCycle": {
+      "value": 5.5345,
+      "default": 5.5345,
+      "min": 2,
+      "max": 15,
+      "step": 0.1,
+      "label": "Angle Z Cycle (detik)",
+      "desc": "Durasi satu siklus napas miring kepala sumbu Z"
+    },
+    "angleZWeight": {
+      "value": 0.3,
+      "default": 0.3,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "label": "Angle Z Weight",
+      "desc": "Bobot pengaruh napas miring kepala sumbu Z"
+    },
+    "chestOffset": {
+      "value": 0.5,
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "label": "Chest Offset",
+      "desc": "Posisi netral ekspansi dada saat bernapas"
+    },
+    "chestPeak": {
+      "value": 0.5,
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "label": "Chest Peak",
+      "desc": "Amplitudo kembang kempis dada saat bernapas"
+    },
+    "chestCycle": {
+      "value": 3.2345,
+      "default": 3.2345,
+      "min": 2,
+      "max": 10,
+      "step": 0.1,
+      "label": "Chest Cycle (detik)",
+      "desc": "Durasi satu siklus kembang kempis dada"
+    },
+    "chestWeight": {
+      "value": 1.0,
+      "default": 1.0,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "label": "Chest Weight",
+      "desc": "Bobot pengaruh gerakan dada bernapas"
+    },
+    "idleFadeIn": {
+      "value": 0.45,
+      "default": 0.45,
+      "min": 0.1,
+      "max": 2,
+      "step": 0.05,
+      "label": "Idle Fade-In (detik)",
+      "desc": "Durasi transisi saat memulai gerakan idle loop"
+    }
+  },
+  "tracking": {
+    "headNoiseSpeedX": {
+      "value": 0.15,
+      "default": 0.15,
+      "min": 0.01,
+      "max": 0.5,
+      "step": 0.01,
+      "label": "Head X Speed",
+      "desc": "Kecepatan noise gerakan kepala kiri-kanan (makin besar makin aktif)"
+    },
+    "headNoiseSpeedY": {
+      "value": 0.12,
+      "default": 0.12,
+      "min": 0.01,
+      "max": 0.5,
+      "step": 0.01,
+      "label": "Head Y Speed",
+      "desc": "Kecepatan noise gerakan kepala atas-bawah"
+    },
+    "headNoiseSpeedZ": {
+      "value": 0.10,
+      "default": 0.10,
+      "min": 0.01,
+      "max": 0.5,
+      "step": 0.01,
+      "label": "Head Z Speed",
+      "desc": "Kecepatan noise gerakan kepala miring (tilt)"
+    },
+    "headRangeX": {
+      "value": 15,
+      "default": 15,
+      "min": 0,
+      "max": 30,
+      "step": 1,
+      "label": "Head X Range (deg)",
+      "desc": "Jangkauan sudut tolehan kepala kiri-kanan"
+    },
+    "headRangeY": {
+      "value": 15,
+      "default": 15,
+      "min": 0,
+      "max": 30,
+      "step": 1,
+      "label": "Head Y Range (deg)",
+      "desc": "Jangkauan sudut anggukan kepala atas-bawah"
+    },
+    "headRangeZ": {
+      "value": 15,
+      "default": 15,
+      "min": 0,
+      "max": 30,
+      "step": 1,
+      "label": "Head Z Range (deg)",
+      "desc": "Jangkauan sudut kemiringan kepala"
+    },
+    "eyeSaccadeMin": {
+      "value": 2.0,
+      "default": 2.0,
+      "min": 0.5,
+      "max": 10,
+      "step": 0.5,
+      "label": "Eye Saccade Min (detik)",
+      "desc": "Jeda waktu paling cepat sebelum mata melirik ke titik baru"
+    },
+    "eyeSaccadeMax": {
+      "value": 5.0,
+      "default": 5.0,
+      "min": 1,
+      "max": 15,
+      "step": 0.5,
+      "label": "Eye Saccade Max (detik)",
+      "desc": "Jeda waktu paling lama sebelum mata melirik ke titik baru"
+    },
+    "eyeGazeRangeX": {
+      "value": 0.7,
+      "default": 0.7,
+      "min": 0.1,
+      "max": 1,
+      "step": 0.05,
+      "label": "Eye Gaze Range X",
+      "desc": "Jangkauan lirik mata horizontal (kiri-kanan)"
+    },
+    "eyeGazeRangeY": {
+      "value": 0.5,
+      "default": 0.5,
+      "min": 0.1,
+      "max": 1,
+      "step": 0.05,
+      "label": "Eye Gaze Range Y",
+      "desc": "Jangkauan lirik mata vertikal (atas-bawah)"
+    },
+    "eyeLerpSpeed": {
+      "value": 12.0,
+      "default": 12.0,
+      "min": 1,
+      "max": 30,
+      "step": 1,
+      "label": "Eye Snap Speed",
+      "desc": "Kecepatan gerakan bola mata saat melirik (makin besar makin cepat snap)"
+    },
+    "browNoiseAmp": {
+      "value": 0.15,
+      "default": 0.15,
+      "min": 0,
+      "max": 0.5,
+      "step": 0.01,
+      "label": "Brow Amplitude",
+      "desc": "Amplitudo naik-turun halus alis saat idle"
+    },
+    "browNoiseSpeed": {
+      "value": 0.08,
+      "default": 0.08,
+      "min": 0.01,
+      "max": 0.3,
+      "step": 0.01,
+      "label": "Brow Speed",
+      "desc": "Kecepatan perubahan posisi alis"
+    }
+  },
+  "talking": {
+    "l1AttackMs": {
+      "value": 50,
+      "default": 50,
+      "min": 10,
+      "max": 200,
+      "step": 5,
+      "label": "L1 Attack (ms)",
+      "desc": "Kecepatan reaksi goyangan tubuh saat suara mulai terdengar"
+    },
+    "l1ReleaseMs": {
+      "value": 250,
+      "default": 250,
+      "min": 50,
+      "max": 600,
+      "step": 10,
+      "label": "L1 Release (ms)",
+      "desc": "Kehalusan tubuh melambat kembali ke posisi netral saat suara berhenti"
+    },
+    "l1BodyXRange": {
+      "value": 10,
+      "default": 10,
+      "min": 0,
+      "max": 30,
+      "step": 1,
+      "label": "Body X Sway Range",
+      "desc": "Jarak goyang badan kiri-kanan saat berbicara"
+    },
+    "l1BodyYRange": {
+      "value": 5,
+      "default": 5,
+      "min": 0,
+      "max": 20,
+      "step": 1,
+      "label": "Body Y Bounce Range",
+      "desc": "Jarak goyang badan atas-bawah (pantulan napas bicara)"
+    },
+    "l1AngleYOutRange": {
+      "value": 30,
+      "default": 30,
+      "min": 0,
+      "max": 45,
+      "step": 1,
+      "label": "Angle Y Tilt Range",
+      "desc": "Jarak goyang kepala atas-bawah saat berbicara"
+    },
+    "l1AngleYLimitMin": {
+      "value": -30,
+      "default": -30,
+      "min": -45,
+      "max": 0,
+      "step": 1,
+      "label": "Angle Y Limit Min",
+      "desc": "Batas sudut bawah goyang kepala"
+    },
+    "l1AngleYLimitMax": {
+      "value": 12,
+      "default": 12,
+      "min": 0,
+      "max": 45,
+      "step": 1,
+      "label": "Angle Y Limit Max",
+      "desc": "Batas sudut atas goyang kepala (mencegah mendongak berlebihan)"
+    },
+    "l1SineFreqX": {
+      "value": 4.3,
+      "default": 4.3,
+      "min": 1,
+      "max": 10,
+      "step": 0.1,
+      "label": "Sine Freq X (rad/s)",
+      "desc": "Frekuensi ritme goyang badan kiri-kanan (~0.68 Hz)"
+    },
+    "l1SineFreqY": {
+      "value": 3.1,
+      "default": 3.1,
+      "min": 1,
+      "max": 10,
+      "step": 0.1,
+      "label": "Sine Freq Y (rad/s)",
+      "desc": "Frekuensi ritme pantulan badan atas-bawah (~0.49 Hz)"
+    },
+    "l1SineFreqAngle": {
+      "value": 2.7,
+      "default": 2.7,
+      "min": 1,
+      "max": 10,
+      "step": 0.1,
+      "label": "Sine Freq Angle (rad/s)",
+      "desc": "Frekuensi ritme anggukan kepala saat berbicara (~0.43 Hz)"
+    },
+    "l1PhaseX": {
+      "value": 0,
+      "default": 0,
+      "min": 0,
+      "max": 6.28,
+      "step": 0.1,
+      "label": "Phase X (rad)",
+      "desc": "Offset fase goyang badan X agar gerakan tidak simetris monoton"
+    },
+    "l1PhaseY": {
+      "value": 1.7,
+      "default": 1.7,
+      "min": 0,
+      "max": 6.28,
+      "step": 0.1,
+      "label": "Phase Y (rad)",
+      "desc": "Offset fase goyang badan Y"
+    },
+    "l1PhaseAngle": {
+      "value": 3.3,
+      "default": 3.3,
+      "min": 0,
+      "max": 6.28,
+      "step": 0.1,
+      "label": "Phase Angle (rad)",
+      "desc": "Offset fase anggukan kepala"
+    },
+    "lipSyncSmoothing": {
+      "value": 14,
+      "default": 14,
+      "min": 2,
+      "max": 30,
+      "step": 1,
+      "label": "Lip-Sync Smoothing",
+      "desc": "Kecepatan respons mulut terhadap audio (makin tinggi makin lincah)"
+    },
+    "lipSyncGain": {
+      "value": 1.8,
+      "default": 1.8,
+      "min": 0.5,
+      "max": 4,
+      "step": 0.1,
+      "label": "Lip-Sync Gain",
+      "desc": "Pengali kepekaan buka mulut (makin besar makin lebar membuka)"
+    },
+    "l2ProbTinggi": {
+      "value": 0.85,
+      "default": 0.85,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "label": "Gesture Prob (High Emotion)",
+      "desc": "Peluang memicu motion klip khusus di jeda kalimat saat emosi tinggi"
+    },
+    "l2ProbSedang": {
+      "value": 0.55,
+      "default": 0.55,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "label": "Gesture Prob (Med Emotion)",
+      "desc": "Peluang memicu motion klip khusus di jeda kalimat saat emosi sedang"
+    },
+    "l2ProbRendah": {
+      "value": 0.30,
+      "default": 0.30,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "label": "Gesture Prob (Low Emotion)",
+      "desc": "Peluang memicu motion klip khusus di jeda kalimat saat emosi rendah"
+    },
+    "intensityTinggi": {
+      "value": 1.6,
+      "default": 1.6,
+      "min": 0.5,
+      "max": 3,
+      "step": 0.1,
+      "label": "Multiplier High Emotion",
+      "desc": "Pengali ekspresi dan gerakan saat emosi tinggi (marah, terkejut, dll)"
+    },
+    "intensitySedang": {
+      "value": 1.0,
+      "default": 1.0,
+      "min": 0.3,
+      "max": 2,
+      "step": 0.1,
+      "label": "Multiplier Med Emotion",
+      "desc": "Pengali ekspresi dan gerakan baseline (normal)"
+    },
+    "intensityRendah": {
+      "value": 0.5,
+      "default": 0.5,
+      "min": 0.1,
+      "max": 1.5,
+      "step": 0.1,
+      "label": "Multiplier Low Emotion",
+      "desc": "Pengali ekspresi dan gerakan saat emosi halus (sedih, malu, dll)"
+    }
+  },
+  "vad": {
+    "vadStart": {
+      "value": 0.055,
+      "default": 0.055,
+      "min": 0.01,
+      "max": 0.2,
+      "step": 0.005,
+      "label": "VAD Start Threshold",
+      "desc": "Ambang batas volume suara mulai terdeteksi (makin kecil makin sensitif)"
+    },
+    "vadStop": {
+      "value": 0.035,
+      "default": 0.035,
+      "min": 0.005,
+      "max": 0.15,
+      "step": 0.005,
+      "label": "VAD Stop Threshold",
+      "desc": "Ambang batas volume hening (harus lebih kecil dari Start Threshold)"
+    },
+    "silenceMs": {
+      "value": 900,
+      "default": 900,
+      "min": 300,
+      "max": 3000,
+      "step": 50,
+      "label": "Silence Duration (ms)",
+      "desc": "Durasi hening sebelum kalimat dianggap selesai dan dikirim ke server"
+    },
+    "minSegMs": {
+      "value": 400,
+      "default": 400,
+      "min": 100,
+      "max": 1500,
+      "step": 50,
+      "label": "Min Segment (ms)",
+      "desc": "Durasi rekam minimal; suara di bawah ini diabaikan (anti ketukan/noise)"
+    },
+    "speakTail": {
+      "value": 0.15,
+      "default": 0.15,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "label": "Speak Tail (detik)",
+      "desc": "Jeda setelah avatar selesai bicara sebelum mic menyala lagi (anti echo)"
+    },
+    "noSpeechThreshold": {
+      "value": 0.5,
+      "default": 0.5,
+      "min": 0.1,
+      "max": 0.9,
+      "step": 0.05,
+      "label": "Whisper No-Speech Threshold",
+      "desc": "Probabilitas no_speech dari Whisper di atas nilai ini akan disaring sebagai noise"
+    },
+    "fftSize": {
+      "value": 256,
+      "default": 256,
+      "min": 64,
+      "max": 1024,
+      "step": 64,
+      "label": "Audio Analyser FFT Size",
+      "desc": "Ukuran resolusi frekuensi analyser audio TTS"
+    },
+    "smoothing": {
+      "value": 0.6,
+      "default": 0.6,
+      "min": 0,
+      "max": 0.95,
+      "step": 0.05,
+      "label": "Analyser Smoothing Constant",
+      "desc": "Tingkat kehalusan pergerakan grafik amplitudo audio"
+    }
+  },
+  "vision": {
+    "captureInterval": {
+      "value": 1,
+      "default": 1,
+      "min": 1,
+      "max": 15,
+      "step": 1,
+      "label": "Capture Interval (detik)",
+      "desc": "Jeda waktu pengambilan frame layar saat Share Screen aktif"
+    },
+    "bufferDuration": {
+      "value": 30,
+      "default": 30,
+      "min": 5,
+      "max": 180,
+      "step": 5,
+      "label": "Buffer Duration (detik)",
+      "desc": "Rentang waktu kumpulan frame yang dianalisis untuk komentar spontan"
+    },
+    "visionMaxTokens": {
+      "value": 100,
+      "default": 100,
+      "min": 20,
+      "max": 300,
+      "step": 10,
+      "label": "Vision Max Tokens",
+      "desc": "Batas panjang deskripsi tiap frame layar dari model Qwen Vision"
+    },
+    "visionTemperature": {
+      "value": 0.2,
+      "default": 0.2,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "label": "Vision Temperature",
+      "desc": "Tingkat variasi deskripsi frame (rendah = lebih konsisten & akurat)"
+    },
+    "filterTemperature": {
+      "value": 0.3,
+      "default": 0.3,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "label": "Filter Temperature",
+      "desc": "Kreativitas LLM dalam memilih momen yang pantas dikomentari"
+    },
+    "filterMaxTokens": {
+      "value": 150,
+      "default": 150,
+      "min": 50,
+      "max": 400,
+      "step": 10,
+      "label": "Filter Max Tokens",
+      "desc": "Batas token output alasan dan ucapan komentar spontan"
+    },
+    "screenMaxWidth": {
+      "value": 1280,
+      "default": 1280,
+      "min": 640,
+      "max": 1920,
+      "step": 160,
+      "label": "Screen Max Width (px)",
+      "desc": "Resolusi lebar maksimum gambar layar yang dikirim (hemat bandwidth)"
+    },
+    "screenJpegQuality": {
+      "value": 0.75,
+      "default": 0.75,
+      "min": 0.3,
+      "max": 1,
+      "step": 0.05,
+      "label": "Screen JPEG Quality",
+      "desc": "Kualitas kompresi gambar layar yang dikirim ke vision AI"
+    },
+    "webcamJpegQuality": {
+      "value": 0.7,
+      "default": 0.7,
+      "min": 0.3,
+      "max": 1,
+      "step": 0.05,
+      "label": "Webcam JPEG Quality",
+      "desc": "Kualitas kompresi gambar webcam"
+    }
+  },
+  "models": {
+    "sttModel": {
+      "type": "select",
+      "value": "whisper-large-v3",
+      "default": "whisper-large-v3",
+      "options": ["whisper-large-v3", "whisper-large-v3-turbo"],
+      "label": "STT Model (Groq)",
+      "desc": "Model Whisper yang digunakan untuk Speech-to-Text"
+    },
+    "visionModel": {
+      "type": "select",
+      "value": "qwen/qwen3.8-27b",
+      "default": "qwen/qwen3.8-27b",
+      "options": ["qwen/qwen3.8-27b"],
+      "label": "Vision Model (Groq)",
+      "desc": "Model multimodal untuk mendeskripsikan frame kamera & layar"
+    },
+    "voiceId": {
+      "type": "select",
+      "value": "3095f8e1d1fa4b82acaa8aca720a7f83",
+      "default": "3095f8e1d1fa4b82acaa8aca720a7f83",
+      "options": [
+        "3095f8e1d1fa4b82acaa8aca720a7f83",
+        "default"
+      ],
+      "label": "Voice Reference ID (Fish Audio)",
+      "desc": "Karakter suara TTS Fish Audio (default: Klee / Amika Cute Anime Voice)"
+    }
+  }
+}

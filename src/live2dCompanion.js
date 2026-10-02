@@ -12,8 +12,9 @@ import { CubismEyeBlink } from '@framework/effect/cubismeyeblink';
 import { BreathParameterData, CubismBreath } from '@framework/effect/cubismbreath';
 import { CubismMatrix44 } from '@framework/math/cubismmatrix44';
 import { CubismMotionManager } from '@framework/motion/cubismmotionmanager';
-import { EMOTION_MAP, INTENSITY_MULTIPLIER } from './expressionMap.js';
+import { EMOTION_MAP } from './expressionMap.js';
 import { SyntheticTracker } from './syntheticTracking.js';
+import { tuning } from './tuningConfig.js';
 
 const MODEL_URL = '/models/live2d/IceGirl.model3.json';
 const SHADER_PATH = '/vendor/live2d/shaders/';
@@ -22,33 +23,11 @@ const PRIORITY_TALKING = 3;
 
 // Helper fungsi untuk mapping ala VTube Studio
 function mapVTS(value, config, multiplier = 1.0) {
-  // Normalize input ke 0..1 berdasarkan inMin dan inMax
   const t = (value - config.inMin) / (config.inMax - config.inMin);
-  // Lerp ke range output
   const out = config.outMin + t * (config.outMax - config.outMin);
-  // Kalikan dengan intensitas emosi, lalu clamp ke limitMin dan limitMax
   const finalValue = out * multiplier;
   return Math.max(config.limitMin, Math.min(config.limitMax, finalValue));
 }
-
-// --- Layer 1 tuning knobs ---------------------------------------------------
-// EMA smoothing: attack cepat supaya responsif, release lambat supaya halus.
-const L1_ATTACK_MS = 50;
-const L1_RELEASE_MS = 250;
-
-// Konfigurasi Mapping VTube Studio untuk Layer 1 (Audio Reactive)
-// Input berupa (audio_envelope * sine_wave) yang nilainya berkisar antara -1.0 sampai 1.0
-const L1_BODY_X_CONFIG = { inMin: -1, inMax: 1, outMin: -10, outMax: 10, limitMin: -10, limitMax: 10 };
-const L1_BODY_Y_CONFIG = { inMin: -1, inMax: 1, outMin: -5,  outMax: 5,  limitMin: -10, limitMax: 10 };
-const L1_ANGLE_Y_CONFIG = { inMin: -1, inMax: 1, outMin: -30, outMax: 30, limitMin: -30, limitMax: 12 };
-// Noise offsets agar gerakan tidak terlalu simetris.
-const L1_PHASE_X = 0;
-const L1_PHASE_Y = 1.7;
-const L1_PHASE_ANGLE = 3.3;
-
-// --- Layer 2 tuning ---------------------------------------------------------
-// Probabilitas trigger motion di jeda kalimat, per intensity.
-const L2_TRIGGER_PROB = { tinggi: 0.85, sedang: 0.55, rendah: 0.3 };
 
 // Debug logging throttle for Layer 1 magnitude.
 let lastL1LogTime = 0;
@@ -183,6 +162,13 @@ class CompanionCubismModel extends CubismUserModel {
     this.getRenderer().loadShaders(SHADER_PATH);
     this.ready = true;
     this.startIdleMotion();
+
+    // Re-setup breath in real-time when breathing parameters change
+    tuning.onChange((group) => {
+      if (group === 'idle') {
+        this.setupBreath();
+      }
+    });
   }
 
   async loadExpressions() {
@@ -232,11 +218,12 @@ class CompanionCubismModel extends CubismUserModel {
   setupBreath() {
     const id = (name) => CubismFramework.getIdManager().getId(name);
     this.breath = CubismBreath.create();
+    const b = tuning.group('idle');
     this.breath.setParameters([
-      new BreathParameterData(id('ParamAngleX'), 0, 8, 6.5345, 0.35),
-      new BreathParameterData(id('ParamAngleY'), 0, 5, 3.5345, 0.3),
-      new BreathParameterData(id('ParamAngleZ'), 0, 6, 5.5345, 0.3),
-      new BreathParameterData(id('ParamBreath'), 0.5, 0.5, 3.2345, 1),
+      new BreathParameterData(id('ParamAngleX'), 0, b.angleXPeak ?? 8, b.angleXCycle ?? 6.5345, b.angleXWeight ?? 0.35),
+      new BreathParameterData(id('ParamAngleY'), 0, b.angleYPeak ?? 5, b.angleYCycle ?? 3.5345, b.angleYWeight ?? 0.3),
+      new BreathParameterData(id('ParamAngleZ'), 0, b.angleZPeak ?? 6, b.angleZCycle ?? 5.5345, b.angleZWeight ?? 0.3),
+      new BreathParameterData(id('ParamBreath'), b.chestOffset ?? 0.5, b.chestPeak ?? 0.5, b.chestCycle ?? 3.2345, b.chestWeight ?? 1),
     ]);
     console.log('[Live2D] Breath controller active: ParamBreath + ParamAngleX/Y/Z');
   }
@@ -327,7 +314,8 @@ class CompanionCubismModel extends CubismUserModel {
   }
 
   getCurrentIntensityMultiplier() {
-    return INTENSITY_MULTIPLIER[this.currentIntensity] ?? 1.0;
+    const key = `talking.intensity${this.currentIntensity.charAt(0).toUpperCase() + this.currentIntensity.slice(1)}`;
+    return tuning.get(key) ?? 1.0;
   }
 
   // ---------------------------------------------------------------------------
@@ -383,7 +371,8 @@ class CompanionCubismModel extends CubismUserModel {
     if (this.talkMotionPool.length === 0) return;
 
     // Bias: intensity rendah → sering skip; tinggi → hampir selalu trigger.
-    const prob = L2_TRIGGER_PROB[this.currentIntensity] ?? 0.55;
+    const probKey = `talking.l2Prob${this.currentIntensity.charAt(0).toUpperCase() + this.currentIntensity.slice(1)}`;
+    const prob = tuning.get(probKey) ?? 0.55;
     if (Math.random() > prob) {
       console.log(`[Live2D L2] Skip motion (prob ${prob.toFixed(2)}, intensity: ${this.currentIntensity})`);
       return;
@@ -413,20 +402,26 @@ class CompanionCubismModel extends CubismUserModel {
     // Asymmetric EMA: use fast alpha when level is rising, slow when falling.
     const target = Math.max(0, Math.min(1, mouthLevel));
     const rising = target > this.l1Envelope;
-    const alpha = emaAlpha(rising ? L1_ATTACK_MS : L1_RELEASE_MS, delta);
+    const alpha = emaAlpha(rising ? tuning.get('talking.l1AttackMs') : tuning.get('talking.l1ReleaseMs'), delta);
     this.l1Envelope += (target - this.l1Envelope) * alpha;
 
     this.l1Time += delta;
     const env = this.l1Envelope;
     const mult = this.getCurrentIntensityMultiplier();
 
-    // Input sine waves menghasilkan -1 sampai 1.
-    // Dikalikan dengan env (0..1) jadi input total -env sampai +env.
-    const sineX = Math.sin(this.l1Time * 4.3 + L1_PHASE_X);
-    const sineY = Math.sin(this.l1Time * 3.1 + L1_PHASE_Y);
-    const sineAngle = Math.sin(this.l1Time * 2.7 + L1_PHASE_ANGLE);
+    // Read sine frequencies and phases from tuning config
+    const sineX = Math.sin(this.l1Time * tuning.get('talking.l1SineFreqX') + tuning.get('talking.l1PhaseX'));
+    const sineY = Math.sin(this.l1Time * tuning.get('talking.l1SineFreqY') + tuning.get('talking.l1PhaseY'));
+    const sineAngle = Math.sin(this.l1Time * tuning.get('talking.l1SineFreqAngle') + tuning.get('talking.l1PhaseAngle'));
 
-    // Proses mapping ala VTube Studio
+    // Build VTS configs from tuning
+    const bodyXRange = tuning.get('talking.l1BodyXRange');
+    const bodyYRange = tuning.get('talking.l1BodyYRange');
+    const angleYOutRange = tuning.get('talking.l1AngleYOutRange');
+    const L1_BODY_X_CONFIG = { inMin: -1, inMax: 1, outMin: -bodyXRange, outMax: bodyXRange, limitMin: -bodyXRange, limitMax: bodyXRange };
+    const L1_BODY_Y_CONFIG = { inMin: -1, inMax: 1, outMin: -bodyYRange, outMax: bodyYRange, limitMin: -10, limitMax: 10 };
+    const L1_ANGLE_Y_CONFIG = { inMin: -1, inMax: 1, outMin: -angleYOutRange, outMax: angleYOutRange, limitMin: tuning.get('talking.l1AngleYLimitMin'), limitMax: tuning.get('talking.l1AngleYLimitMax') };
+
     const bodyX = mapVTS(env * sineX, L1_BODY_X_CONFIG, mult);
     const bodyY = mapVTS(env * sineY, L1_BODY_Y_CONFIG, mult);
     const angleY = mapVTS(env * sineAngle, L1_ANGLE_Y_CONFIG, mult);
@@ -492,7 +487,7 @@ class CompanionCubismModel extends CubismUserModel {
     // Lip sync smoothing.
     this.smoothedMouth +=
       (Math.max(0, Math.min(1, mouthLevel)) - this.smoothedMouth) *
-      (1 - Math.exp(-14 * delta));
+      (1 - Math.exp(-tuning.get('talking.lipSyncSmoothing') * delta));
     if (this.mouthParameterIndex >= 0) {
       this._model.setParameterValueByIndex(this.mouthParameterIndex, this.smoothedMouth);
     }

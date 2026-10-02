@@ -8,35 +8,18 @@
 // parameter yang sudah ada dari controller lain (breath, emotion, talking).
 // ---------------------------------------------------------------------------
 import { createNoise2D } from 'simplex-noise';
+import { tuning } from './tuningConfig.js';
 
 // ===========================================================================
-//  TUNING CONSTANTS — ubah di sini untuk fine-tune perilaku
+//  TUNING CONSTANTS — now read from tuningConfig.js (Live2D Tuning Panel)
+//  Kept as local getters so the render loop always reads current values.
 // ===========================================================================
 
-// --- HEAD MICRO-MOVEMENT (ParamAngleX/Y/Z) ---------------------------------
-// Input noise dari generator (-1 sampai 1).
-export const HEAD_X_CONFIG = { inMin: -1, inMax: 1, outMin: -15, outMax: 15, limitMin: -30, limitMax: 30 }; // yaw (kiri-kanan)
-export const HEAD_Y_CONFIG = { inMin: -1, inMax: 1, outMin: -15, outMax: 15, limitMin: -30, limitMax: 30 }; // pitch (atas-bawah)
-export const HEAD_Z_CONFIG = { inMin: -1, inMax: 1, outMin: -15, outMax: 15, limitMin: -30, limitMax: 30 }; // roll (miring)
-// Speed: seberapa cepat noise berubah. Nilai kecil = lambat, organik.
-// ~0.15 → sekitar 0.15 Hz efektif, artinya satu siklus penuh ~6-7 detik.
-export const HEAD_NOISE_SPEED_X = 0.15;
-export const HEAD_NOISE_SPEED_Y = 0.12;
-export const HEAD_NOISE_SPEED_Z = 0.10;
-
-// --- EYE GAZE SACCADE (ParamEyeBallX/Y) ------------------------------------
-// Interval random antara saccade (detik).
-export const EYE_SACCADE_INTERVAL_MIN = 2.0;
-export const EYE_SACCADE_INTERVAL_MAX = 5.0;
-// Range target gaze: ±nilai ini.
-export const EYE_GAZE_RANGE_X = 0.7;   // kiri-kanan
-export const EYE_GAZE_RANGE_Y = 0.5;   // atas-bawah
-// Kecepatan lerp menuju target (semakin besar → semakin cepat snap).
-export const EYE_SACCADE_LERP_SPEED = 12.0;
-
-// --- EYEBROW SUBTLE MOVEMENT (ParamBrowLAngle/RAngle) -----------------------
-export const BROW_NOISE_AMP = 0.15;    // amplitude sangat kecil
-export const BROW_NOISE_SPEED = 0.08;  // sangat lambat
+// Helper: build a VTS config object from current tuning values per-frame.
+function headConfig(axis) {
+  const range = tuning.get(`tracking.headRange${axis}`);
+  return { inMin: -1, inMax: 1, outMin: -range, outMax: range, limitMin: -30, limitMax: 30 };
+}
 
 // --- DEBUG LOGGING ----------------------------------------------------------
 export const TRACKING_LOG_INTERVAL_MS = 5000; // log setiap 5 detik
@@ -130,13 +113,13 @@ export class SyntheticTracker {
 
     // ----- HEAD MICRO-MOVEMENT (noise-based) -----
     // Noise value berkisar dari -1 sampai 1
-    const noiseX = this.noise(this.time * HEAD_NOISE_SPEED_X, this.headSeedX);
-    const noiseY = this.noise(this.time * HEAD_NOISE_SPEED_Y, this.headSeedY);
-    const noiseZ = this.noise(this.time * HEAD_NOISE_SPEED_Z, this.headSeedZ);
+    const noiseX = this.noise(this.time * tuning.get('tracking.headNoiseSpeedX'), this.headSeedX);
+    const noiseY = this.noise(this.time * tuning.get('tracking.headNoiseSpeedY'), this.headSeedY);
+    const noiseZ = this.noise(this.time * tuning.get('tracking.headNoiseSpeedZ'), this.headSeedZ);
 
-    const headX = mapVTS(noiseX, HEAD_X_CONFIG);
-    const headY = mapVTS(noiseY, HEAD_Y_CONFIG);
-    const headZ = mapVTS(noiseZ, HEAD_Z_CONFIG);
+    const headX = mapVTS(noiseX, headConfig('X'));
+    const headY = mapVTS(noiseY, headConfig('Y'));
+    const headZ = mapVTS(noiseZ, headConfig('Z'));
 
     this._addClamped(model, this.indices.angleX, headX);
     this._addClamped(model, this.indices.angleY, headY);
@@ -149,12 +132,12 @@ export class SyntheticTracker {
     this.eyeNextSaccadeIn -= delta;
     if (this.eyeNextSaccadeIn <= 0) {
       // Pick a new random fixation point.
-      this.eyeTargetX = (Math.random() * 2 - 1) * EYE_GAZE_RANGE_X;
-      this.eyeTargetY = (Math.random() * 2 - 1) * EYE_GAZE_RANGE_Y;
+      this.eyeTargetX = (Math.random() * 2 - 1) * tuning.get('tracking.eyeGazeRangeX');
+      this.eyeTargetY = (Math.random() * 2 - 1) * tuning.get('tracking.eyeGazeRangeY');
       this.eyeNextSaccadeIn = this._randomSaccadeInterval();
     }
     // Fast lerp toward target (saccade snap, then hold = fixation).
-    const eyeAlpha = 1 - Math.exp(-EYE_SACCADE_LERP_SPEED * delta);
+    const eyeAlpha = 1 - Math.exp(-tuning.get('tracking.eyeLerpSpeed') * delta);
     this.eyeCurrentX += (this.eyeTargetX - this.eyeCurrentX) * eyeAlpha;
     this.eyeCurrentY += (this.eyeTargetY - this.eyeCurrentY) * eyeAlpha;
 
@@ -164,8 +147,8 @@ export class SyntheticTracker {
     outputs.eyeY = this.eyeCurrentY;
 
     // ----- EYEBROW SUBTLE MOVEMENT (noise-based) -----
-    const browL = this.noise(this.time * BROW_NOISE_SPEED, this.browSeedL) * BROW_NOISE_AMP;
-    const browR = this.noise(this.time * BROW_NOISE_SPEED, this.browSeedR) * BROW_NOISE_AMP;
+    const browL = this.noise(this.time * tuning.get('tracking.browNoiseSpeed'), this.browSeedL) * tuning.get('tracking.browNoiseAmp');
+    const browR = this.noise(this.time * tuning.get('tracking.browNoiseSpeed'), this.browSeedR) * tuning.get('tracking.browNoiseAmp');
 
     this._addClamped(model, this.indices.browLA, browL);
     this._addClamped(model, this.indices.browRA, browR);
@@ -190,8 +173,8 @@ export class SyntheticTracker {
   // --- Internal helpers ---
 
   _randomSaccadeInterval() {
-    return EYE_SACCADE_INTERVAL_MIN +
-      Math.random() * (EYE_SACCADE_INTERVAL_MAX - EYE_SACCADE_INTERVAL_MIN);
+    return tuning.get('tracking.eyeSaccadeMin') +
+      Math.random() * (tuning.get('tracking.eyeSaccadeMax') - tuning.get('tracking.eyeSaccadeMin'));
   }
 
   /**

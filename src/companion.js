@@ -16,6 +16,7 @@ const video = document.getElementById('webcam');
 const canvas = document.getElementById('capture-canvas');
 const micStatusEl = document.getElementById('mic-status');
 const micLabelEl = document.getElementById('mic-label');
+import { tuning } from './tuningConfig.js';
 
 function log(text, cls = '') {
   const div = document.createElement('div');
@@ -180,19 +181,22 @@ function captureWebcamFrame() {
   canvas.width = w;
   canvas.height = h;
   canvas.getContext('2d').drawImage(video, 0, 0, w, h);
-  return canvas.toDataURL('image/jpeg', 0.7);
+  const q = tuning.get('vision.webcamJpegQuality') ?? 0.7;
+  return canvas.toDataURL('image/jpeg', q);
 }
 
 function captureScreenFrame() {
   if (!screenStream || !screenVideo.videoWidth || !screenVideo.videoHeight) {
     return null;
   }
-  const w = Math.min(screenVideo.videoWidth, 1280);
+  const maxW = tuning.get('vision.screenMaxWidth') ?? 1280;
+  const w = Math.min(screenVideo.videoWidth, maxW);
   const h = Math.round((w / screenVideo.videoWidth) * screenVideo.videoHeight);
   canvas.width = w;
   canvas.height = h;
   canvas.getContext('2d').drawImage(screenVideo, 0, 0, w, h);
-  return canvas.toDataURL('image/jpeg', 0.75);
+  const q = tuning.get('vision.screenJpegQuality') ?? 0.75;
+  return canvas.toDataURL('image/jpeg', q);
 }
 
 function captureFrame() {
@@ -225,7 +229,7 @@ function ensureAudio() {
   window.__waifuLipSync = sampleMouth; // jembatan ke main.js (VRM)
   window.__waifuAudioTime = () => audioCtx.currentTime;
   window.__waifuIsSpeaking = () =>
-    audioCtx.currentTime < Math.max(playCursor, scheduledEmotionEnd) + SPEAK_TAIL;
+    audioCtx.currentTime < Math.max(playCursor, scheduledEmotionEnd) + (tuning.get('vad.speakTail') ?? 0.15);
 }
 
 // Amplitudo audio yang lagi diputar -> 0..1 buat buka mulut.
@@ -235,7 +239,8 @@ function sampleMouth() {
   let sum = 0;
   for (let i = 0; i < freqData.length; i++) sum += freqData[i];
   const avg = sum / freqData.length / 255;
-  return Math.min(1, avg * 1.8);
+  const gain = tuning.get('talking.lipSyncGain') ?? 1.8;
+  return Math.min(1, avg * gain);
 }
 
 // Debug audio sample: a short speech-like oscillator pattern routed through the
@@ -393,15 +398,9 @@ let speaking = false; // user sedang bicara (segmen berjalan)
 let silenceStart = 0; // timestamp mulai hening
 let listening = false;
 
-// Tuning knobs (ponytail: setel di sini kalau kepekaan kurang/lebih):
-const VAD_START = 0.055; // ambang mulai bicara (RMS 0..1)
-const VAD_STOP = 0.035; // ambang hening (hysteresis, < START biar stabil)
-const SILENCE_MS = 900; // hening selama ini -> anggap kalimat selesai
-const MIN_SEG_MS = 400; // segmen < ini -> buang (noise/ketuk)
-const SPEAK_TAIL = 0.15; // detik ekstra setelah TTS selesai sebelum dengar lagi
-
 function isamikaSpeaking() {
-  return audioCtx && playCursor > audioCtx.currentTime + SPEAK_TAIL;
+  const speakTail = tuning.get('vad.speakTail') ?? 0.15;
+  return audioCtx && playCursor > audioCtx.currentTime + speakTail;
 }
 
 function micLevel() {
@@ -448,7 +447,8 @@ async function flushSegment() {
   const blob = new Blob(segChunks, { type });
   segRecorder = null;
   segChunks = [];
-  if (dur < MIN_SEG_MS || blob.size < 1024) return; // noise pendek -> buang
+  const minSeg = tuning.get('vad.minSegMs') ?? 400;
+  if (dur < minSeg || blob.size < 1024) return; // noise pendek -> buang
 
   const data = await new Promise((res) => {
     const r = new FileReader();
@@ -485,20 +485,24 @@ function vadLoop() {
 
   const level = micLevel();
   const now = performance.now();
+  const vadStart = tuning.get('vad.vadStart') ?? 0.055;
+  const vadStop = tuning.get('vad.vadStop') ?? 0.035;
+  const silenceMs = tuning.get('vad.silenceMs') ?? 900;
+
   if (!speaking) {
     setMicStatus(true, 'Mendengarkan…');
-    if (level > VAD_START) {
+    if (level > vadStart) {
       speaking = true;
       silenceStart = 0;
       beginSegment();
     }
   } else {
     setMicStatus(true, '● Merekam…');
-    if (level > VAD_STOP) {
+    if (level > vadStop) {
       silenceStart = 0;
     } else if (!silenceStart) {
       silenceStart = now;
-    } else if (now - silenceStart > SILENCE_MS) {
+    } else if (now - silenceStart > silenceMs) {
       speaking = false;
       silenceStart = 0;
       endSegment();

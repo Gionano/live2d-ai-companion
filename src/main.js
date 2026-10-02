@@ -1,9 +1,27 @@
 import { Live2DCompanion } from './live2dCompanion.js';
 import { COSTUME_TOGGLES } from './expressionMap.js';
+import { initTuningPanel, togglePanel } from './tuningPanel.js';
 
 const canvas = document.getElementById('app');
 const status = document.getElementById('status');
 const companion = new Live2DCompanion(canvas, status);
+
+// Inisialisasi Live2D Tuning Panel
+initTuningPanel();
+
+// Tombol buka Tuning Panel
+document.querySelector('#open-tuning-btn')?.addEventListener('click', () => {
+  togglePanel();
+});
+
+// Shortcut keyboard 'T' untuk toggle Tuning Panel
+window.addEventListener('keydown', (e) => {
+  // Hanya jika tidak sedang mengetik di input/textarea
+  if (e.key === 't' || e.key === 'T') {
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+    togglePanel();
+  }
+});
 
 // Emotion cue dari companion.js (via CustomEvent).
 window.addEventListener('waifu-emotion-cue', (event) => {

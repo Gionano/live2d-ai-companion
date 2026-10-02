@@ -6,6 +6,7 @@
 // ---------------------------------------------------------------------------
 import { toFile } from 'groq-sdk';
 import { groq } from './groqClient.js';
+import { getServerTuning } from './serverConfig.js';
 
 const STT_MODEL = 'whisper-large-v3';
 
@@ -29,9 +30,10 @@ export async function transcribeAudio(audioBuffer, filename = 'audio.webm') {
   if (res.segments && res.segments.length > 0) {
     // Ambil rata-rata no_speech_prob dari semua segmen
     const noSpeechProb = res.segments.reduce((acc, seg) => acc + seg.no_speech_prob, 0) / res.segments.length;
-    // Jika kemungkinan besar bukan suara (> 0.5), anggap sebagai noise dan buang
-    if (noSpeechProb > 0.5) {
-      console.log(`[STT] Filtered non-speech audio (ketukan/noise). no_speech_prob: ${noSpeechProb.toFixed(2)}`);
+    const threshold = getServerTuning('vad', 'noSpeechThreshold', 0.5);
+    // Jika kemungkinan besar bukan suara, anggap sebagai noise dan buang
+    if (noSpeechProb > threshold) {
+      console.log(`[STT] Filtered non-speech audio (ketukan/noise). no_speech_prob: ${noSpeechProb.toFixed(2)} (threshold: ${threshold})`);
       return '';
     }
   }

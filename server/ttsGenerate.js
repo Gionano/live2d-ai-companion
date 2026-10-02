@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 import WebSocket from 'ws';
 import { encode, decode } from '@msgpack/msgpack';
-import { WAIFU_VOICE_REFERENCE_ID } from './voiceConfig.js';
+import { getVoiceId, WAIFU_VOICE_REFERENCE_ID } from './voiceConfig.js';
 
 const TTS_ENDPOINT = 'wss://api.fish.audio/v1/tts/live';
 const TTS_MODEL = 's2.1-pro-free'; // tier gratis. 's2.1-pro' (tanpa -free) berbayar -> 402 kalau saldo 0.
@@ -60,8 +60,7 @@ export async function* generateSpeech(text, emotion = 'neutral') {
       encode({
         event: 'start',
         request: {
-          text: '',
-          reference_id: WAIFU_VOICE_REFERENCE_ID,
+          reference_id: getVoiceId(),
           format: TTS_FORMAT,
           latency: 'low',
         },

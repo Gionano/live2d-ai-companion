@@ -35,6 +35,57 @@ const app = express();
 // Frame base64 bisa lumayan besar — naikkan limit body JSON.
 app.use(express.json({ limit: '12mb' }));
 
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __serverFilename = fileURLToPath(import.meta.url);
+const __serverDir = path.dirname(__serverFilename);
+const CONFIG_FILE_PATH = path.resolve(__serverDir, '../config/animationConfig.json');
+
+app.get('/api/config', async (req, res) => {
+  try {
+    const raw = await fs.promises.readFile(CONFIG_FILE_PATH, 'utf-8');
+    res.json(JSON.parse(raw));
+  } catch (err) {
+    console.error('[config] Failed to read config:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/config', async (req, res) => {
+  try {
+    const newConfig = req.body;
+    if (!newConfig || typeof newConfig !== 'object') {
+      return res.status(400).json({ error: 'Config object required' });
+    }
+
+    let current = {};
+    try {
+      current = JSON.parse(await fs.promises.readFile(CONFIG_FILE_PATH, 'utf-8'));
+    } catch (_) {}
+
+    // Merge values while keeping schema metadata (min, max, step, desc, default)
+    for (const [group, entries] of Object.entries(newConfig)) {
+      if (!current[group]) current[group] = {};
+      for (const [key, val] of Object.entries(entries)) {
+        if (current[group][key]) {
+          current[group][key].value = typeof val === 'object' && val !== null && 'value' in val ? val.value : val;
+        } else if (typeof val === 'object' && val !== null) {
+          current[group][key] = val;
+        }
+      }
+    }
+
+    await fs.promises.writeFile(CONFIG_FILE_PATH, JSON.stringify(current, null, 2), 'utf-8');
+    console.log('[config] animationConfig.json updated successfully on disk.');
+    res.json({ success: true, config: current });
+  } catch (err) {
+    console.error('[config] Failed to write config:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/vision', async (req, res) => {
   try {
     const { image } = req.body ?? {};

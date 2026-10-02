@@ -11,6 +11,7 @@ import { generateSpeech } from './ttsGenerate.js';
 import { isVoiceConfigured } from './voiceConfig.js';
 import { markConversationActivity } from './modelWarmup.js';
 import { HISTORY_MESSAGE_LIMIT } from './llmChat.js';
+import { getServerTuning } from './serverConfig.js';
 
 const VISION_MODEL = 'qwen/qwen3.8-27b';
 
@@ -56,9 +57,9 @@ class StreamingVisionManager {
     this.lastFilterTimestamp = Date.now();
 
     this.settings = {
-      intervalSeconds: 1,      // capture interval in seconds
-      bufferDurationSec: 30,  // filter evaluation window
-      maxTokens: 100,         // max tokens for vision description
+      intervalSeconds: getServerTuning('vision', 'captureInterval', 1),
+      bufferDurationSec: getServerTuning('vision', 'bufferDuration', 30),
+      maxTokens: getServerTuning('vision', 'visionMaxTokens', 100),
     };
 
     this.buffer = [];
@@ -150,11 +151,14 @@ class StreamingVisionManager {
     try {
       this.stats.totalVisionCalls++;
 
+      const maxTokens = getServerTuning('vision', 'visionMaxTokens', this.settings.maxTokens);
+      const temperature = getServerTuning('vision', 'visionTemperature', 0.2);
+
       const response = await groq.chat.completions.create({
         model: VISION_MODEL,
         reasoning_effort: 'none',   // Non-thinking / instruct mode for speed
-        max_tokens: this.settings.maxTokens,
-        temperature: 0.2,
+        max_tokens: maxTokens,
+        temperature: temperature,
         messages: [
           {
             role: 'user',
@@ -283,10 +287,13 @@ Putuskan apakah Amika harus berkomentar secara spontan sekarang atau SKIP:
 `.trim();
 
     try {
+      const filterTemp = getServerTuning('vision', 'filterTemperature', 0.3);
+      const filterMaxTok = getServerTuning('vision', 'filterMaxTokens', 150);
+
       const response = await client.chat.completions.create({
         model: CHAT_MODEL,
-        temperature: 0.3,
-        max_tokens: 150,
+        temperature: filterTemp,
+        max_tokens: filterMaxTok,
         messages: [
           { role: 'system', content: FILTER_SYSTEM_PROMPT },
           { role: 'user', content: userPrompt },
