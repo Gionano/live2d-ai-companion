@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
 // llmChat.js  (server-side)
-// Percakapan utama waifu lewat model "deepseek-v4-flash" (streaming).
+// Percakapan utama waifu lewat model "gpt-oss-120b" via Groq (streaming).
 // generateReply() adalah async generator: yield potongan teks (delta) begitu
 // datang, supaya route /api/chat bisa mem-forward token demi token ke browser
 // (dan nanti gampang dipecah per-kalimat untuk TTS).
 // ---------------------------------------------------------------------------
-import { client } from './nineInferenceClient.js';
+import { groq } from './groqClient.js';
 import { CHAT_MODEL } from './modelConfig.js';
 import { WAIFU_SYSTEM_PROMPT } from './personality.js';
 export const HISTORY_MESSAGE_LIMIT = 8;
@@ -173,12 +173,26 @@ export async function* generateReply(
       ` ~${context.estimatedTokens} tokens`,
   );
 
-  const stream = await client.chat.completions.create({
-    model: CHAT_MODEL,
-    messages,
-    stream: true,
-    response_format: { type: 'json_object' },
-  });
+  let stream;
+  try {
+    stream = await groq.chat.completions.create({
+      model: CHAT_MODEL,
+      messages,
+      stream: true,
+      response_format: { type: 'json_object' },
+      reasoning_effort: 'low',
+      reasoning_format: 'hidden',
+    });
+  } catch (error) {
+    if (error?.status === 429 || error?.statusCode === 429) {
+      console.error(
+        '[llm-chat] ⚠️  Groq 429 RATE LIMIT — STT + Vision + LLM Chat semua' +
+          ' lewat Groq, kemungkinan akumulasi RPM melebihi batas.',
+        error?.message ?? '',
+      );
+    }
+    throw error;
+  }
   const parser = new StructuredReplyParser();
 
   for await (const chunk of stream) {
@@ -261,15 +275,15 @@ if (process.argv[1] && process.argv[1].endsWith('llmChat.js')) {
   assert(c && c.sentence === 'Baris satu' && c.rest === 'Baris dua', 'newline-batas');
   const parser = new StructuredReplyParser();
   const events = [
-    ...parser.push('```json\n{"emotion":"happy","te'),
+    ...parser.push('```json\n{"emotion":"kagum","te'),
     ...parser.push('xt":"Halo\nSayang!"}\n```'),
     ...parser.finish(),
   ];
-  assert(events[0]?.type === 'emotion' && events[0].emotion === 'happy', 'json-emotion');
+  assert(events[0]?.type === 'emotion' && events[0].emotion === 'kagum', 'json-emotion');
   assert(events.filter((e) => e.type === 'delta').map((e) => e.text).join('') === 'Halo\nSayang!', 'json-text');
   const unicodeParser = new StructuredReplyParser();
   const unicodeEvents = [
-    ...unicodeParser.push('{"emotion":"shy","text":"Aku \\u00'),
+    ...unicodeParser.push('{"emotion":"malu","text":"Aku \\u00'),
     ...unicodeParser.push('e9 malu"}'),
   ];
   assert(unicodeEvents.filter((e) => e.type === 'delta').map((e) => e.text).join('') === 'Aku ' + String.fromCharCode(0x00e9) + ' malu', 'split-unicode');

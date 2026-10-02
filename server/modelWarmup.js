@@ -3,7 +3,7 @@
 // Best-effort, fire-and-forget maintenance requests for 9inference models.
 // ---------------------------------------------------------------------------
 import { client } from './nineInferenceClient.js';
-import { CHAT_MODEL } from './modelConfig.js';
+import { FILTER_MODEL } from './modelConfig.js';
 
 export const KEEP_ALIVE_IDLE_MS = 4.5 * 60 * 1000;
 
@@ -58,7 +58,7 @@ function pingDeepSeek(kind) {
   // Avoid stacking maintenance calls if 9inference is responding slowly.
   if (deepSeekMaintenanceInFlight) return deepSeekMaintenanceInFlight;
 
-  deepSeekMaintenanceInFlight = pingModel(CHAT_MODEL, kind).finally(() => {
+  deepSeekMaintenanceInFlight = pingModel(FILTER_MODEL, kind).finally(() => {
     deepSeekMaintenanceInFlight = null;
   });
   return deepSeekMaintenanceInFlight;

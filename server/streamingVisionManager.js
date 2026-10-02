@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 import { groq } from './groqClient.js';
 import { client } from './nineInferenceClient.js';
-import { CHAT_MODEL } from './modelConfig.js';
+import { FILTER_MODEL } from './modelConfig.js';
 import { generateSpeech } from './ttsGenerate.js';
 import { isVoiceConfigured } from './voiceConfig.js';
 import { markConversationActivity } from './modelWarmup.js';
@@ -291,7 +291,7 @@ Putuskan apakah Amika harus berkomentar secara spontan sekarang atau SKIP:
       const filterMaxTok = getServerTuning('vision', 'filterMaxTokens', 150);
 
       const response = await client.chat.completions.create({
-        model: CHAT_MODEL,
+        model: FILTER_MODEL,
         temperature: filterTemp,
         max_tokens: filterMaxTok,
         messages: [
