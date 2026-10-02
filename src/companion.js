@@ -16,7 +16,12 @@ const video = document.getElementById('webcam');
 const canvas = document.getElementById('capture-canvas');
 const micStatusEl = document.getElementById('mic-status');
 const micLabelEl = document.getElementById('mic-label');
+const pttBtn = document.getElementById('mobile-ptt-btn');
 import { tuning } from './tuningConfig.js';
+
+function isMobile() {
+  return window.innerWidth <= 768;
+}
 
 function log(text, cls = '') {
   const div = document.createElement('div');
@@ -27,8 +32,13 @@ function log(text, cls = '') {
   return div;
 }
 
-function setMicStatus(live, label) {
-  micStatusEl.classList.toggle('live', live);
+function setMicStatus(live, label, stateClass = '') {
+  micStatusEl.classList.remove('live', 'processing', 'speaking', 'recording');
+  if (stateClass) {
+    micStatusEl.classList.add(stateClass);
+  } else if (live) {
+    micStatusEl.classList.add('live');
+  }
   micLabelEl.textContent = label;
 }
 
@@ -218,6 +228,76 @@ let pendingChunks = []; // chunk mp3 kalimat yang sedang diterima
 let pendingEmotion = 'netral';
 let scheduledEmotionEnd = 0;
 
+let currentConversationState = 'idle'; // 'idle' | 'processing' | 'speaking'
+let isGeneratingAudio = false;
+let audioPlayChain = Promise.resolve();
+const activeAudioSources = new Set();
+
+function updateUiForState(state, isPttRecording = false) {
+  const mobile = isMobile();
+
+  if (mobile) {
+    if (state === 'idle') {
+      if (isPttRecording) {
+        if (pttBtn) {
+          pttBtn.disabled = false;
+          pttBtn.classList.add('recording');
+          pttBtn.classList.remove('disabled');
+          pttBtn.innerHTML = '<span class="ptt-icon">🔴</span><span class="ptt-text">Merekam... Lepas untuk Kirim</span>';
+        }
+        setMicStatus(true, '● Merekam…', 'recording');
+      } else {
+        if (pttBtn) {
+          pttBtn.disabled = false;
+          pttBtn.classList.remove('recording', 'disabled');
+          pttBtn.innerHTML = '<span class="ptt-icon">🎙️</span><span class="ptt-text">Tekan &amp; Tahan untuk Bicara</span>';
+        }
+        setMicStatus(true, 'Tekan untuk bicara');
+      }
+    } else if (state === 'processing') {
+      if (pttBtn) {
+        pttBtn.disabled = true;
+        pttBtn.classList.remove('recording');
+        pttBtn.classList.add('disabled');
+        pttBtn.innerHTML = '<span class="ptt-icon">⏳</span><span class="ptt-text">Amika sedang berpikir...</span>';
+      }
+      setMicStatus(false, 'Amika sedang berpikir…', 'processing');
+    } else if (state === 'speaking') {
+      if (pttBtn) {
+        pttBtn.disabled = true;
+        pttBtn.classList.remove('recording');
+        pttBtn.classList.add('disabled');
+        pttBtn.innerHTML = '<span class="ptt-icon">🔊</span><span class="ptt-text">Amika sedang bicara...</span>';
+      }
+      setMicStatus(false, 'Amika sedang bicara…', 'speaking');
+    }
+  } else {
+    // Desktop layout
+    if (state === 'idle') {
+      if (speaking) {
+        setMicStatus(true, '● Merekam…', 'recording');
+      } else {
+        setMicStatus(true, 'Mendengarkan…');
+      }
+    } else if (state === 'processing') {
+      setMicStatus(false, 'Amika sedang berpikir…', 'processing');
+    } else if (state === 'speaking') {
+      setMicStatus(false, 'Amika sedang bicara…', 'speaking');
+    }
+  }
+}
+
+function checkPlaybackFinished() {
+  if (!isGeneratingAudio && activeAudioSources.size === 0) {
+    if (currentConversationState === 'speaking' || currentConversationState === 'processing') {
+      console.log('[turn] Playback selesai di client, kirim playback_finished');
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'playback_finished' }));
+      }
+    }
+  }
+}
+
 function ensureAudio() {
   if (audioCtx) return;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -294,6 +374,7 @@ async function playSentenceAudio(chunks) {
     buffer = await audioCtx.decodeAudioData(merged.buffer);
   } catch (err) {
     log(`Audio decode gagal: ${err.message}`, 'error');
+    checkPlaybackFinished();
     return;
   }
 
@@ -303,6 +384,13 @@ async function playSentenceAudio(chunks) {
   const startAt = Math.max(audioCtx.currentTime, playCursor);
   const endAt = startAt + buffer.duration;
   const emotion = pendingEmotion;
+
+  activeAudioSources.add(src);
+  src.onended = () => {
+    activeAudioSources.delete(src);
+    checkPlaybackFinished();
+  };
+
   src.start(startAt);
   playCursor = endAt; // dipakai VAD untuk tahu amika masih bicara
   scheduledEmotionEnd = Math.max(scheduledEmotionEnd, endAt);
@@ -327,6 +415,16 @@ function connectWS() {
       return;
     }
     switch (msg.type) {
+      case 'conversation_state':
+        currentConversationState = msg.state;
+        if (msg.state === 'processing' || msg.state === 'speaking') {
+          isGeneratingAudio = true;
+        } else if (msg.state === 'idle') {
+          isGeneratingAudio = false;
+          activeAudioSources.clear();
+        }
+        updateUiForState(msg.state);
+        break;
       case 'user_said':
         log(`Kamu: ${msg.text}`, 'user');
         break;
@@ -334,7 +432,12 @@ function connectWS() {
         log(`👁️ ${msg.text}`, 'vision');
         break;
       case 'amika_replied':
-        log(`amika: ${msg.text}`, 'assistant');
+        log(`Amika: ${msg.text}`, 'assistant');
+        // Tunggu antrian decode audio selesai sebelum evaluasi playback
+        audioPlayChain.then(() => {
+          isGeneratingAudio = false;
+          checkPlaybackFinished();
+        });
         break;
       case 'emotion':
         pendingEmotion = msg.emotion || 'netral';
@@ -349,7 +452,10 @@ function connectWS() {
         const cs = pendingChunks;
         pendingChunks = [];
         if (cs.length) {
-          playSentenceAudio(cs);
+          audioPlayChain = audioPlayChain.then(() => playSentenceAudio(cs)).catch((err) => {
+            console.error('[playback] Audio playback gagal:', err);
+            checkPlaybackFinished();
+          });
           // Notify Live2D Layer 2: a sentence just completed → trigger motion.
           window.dispatchEvent(new CustomEvent('waifu-sentence-break'));
         }
@@ -377,16 +483,160 @@ function connectWS() {
         break;
     }
   });
-  ws.addEventListener('close', () => setTimeout(connectWS, 1500)); // sambung ulang
+  ws.addEventListener('close', () => {
+    currentConversationState = 'idle';
+    isGeneratingAudio = false;
+    activeAudioSources.clear();
+    updateUiForState('idle');
+    setTimeout(connectWS, 1500);
+  }); // sambung ulang
   ws.addEventListener('error', () => ws.close());
 }
 connectWS();
 
 // ---------------------------------------------------------------------------
-// Hands-free listening (VAD)
+// Mobile Push-to-Talk (Press-and-Hold)
+// Khusus layout mobile (<=768px): Continuous VAD digantikan tombol tekan-tahan.
+// ---------------------------------------------------------------------------
+let pttRecorder = null;
+let pttChunks = [];
+let pttStartAt = 0;
+let isPttRecording = false;
+
+async function startPttRecording() {
+  if (currentConversationState !== 'idle') {
+    console.log('[ptt] Diabaikan: status percakapan saat ini adalah', currentConversationState);
+    return;
+  }
+  if (isPttRecording) return;
+
+  try {
+    ensureAudio();
+    if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
+    if (!micStream) {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+    }
+  } catch (err) {
+    log(`Mic gagal: ${err.message}`, 'error');
+    return;
+  }
+
+  isPttRecording = true;
+  pttChunks = [];
+  pttStartAt = performance.now();
+
+  try {
+    const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+    pttRecorder = new MediaRecorder(micStream, mime ? { mimeType: mime } : undefined);
+    pttRecorder.ondataavailable = (ev) => {
+      if (ev.data.size) pttChunks.push(ev.data);
+    };
+    pttRecorder.onstop = async () => {
+      const dur = performance.now() - pttStartAt;
+      const type = (pttRecorder && pttRecorder.mimeType) || 'audio/webm';
+      const blob = new Blob(pttChunks, { type });
+      pttChunks = [];
+      pttRecorder = null;
+
+      if (dur < 400 || blob.size < 512) {
+        console.log('[ptt] Audio terlalu pendek / noise, dibatalkan:', dur);
+        updateUiForState(currentConversationState);
+        return;
+      }
+
+      // Langsung perbarui UI ke state processing
+      updateUiForState('processing');
+
+      const data = await new Promise((res) => {
+        const r = new FileReader();
+        r.onloadend = () => res(String(r.result).split(',')[1]);
+        r.readAsDataURL(blob);
+      });
+      const image = captureWebcamFrame();
+      const screenImage = captureScreenFrame();
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: 'audio_input',
+            data,
+            mime: blob.type,
+            image,
+            screenImage,
+            durationMs: dur,
+          }),
+        );
+      }
+    };
+    pttRecorder.start();
+    updateUiForState('idle', true);
+  } catch (err) {
+    isPttRecording = false;
+    pttRecorder = null;
+    console.error('[ptt] Gagal start MediaRecorder:', err);
+    updateUiForState(currentConversationState);
+  }
+}
+
+function stopPttRecording() {
+  if (!isPttRecording) return;
+  isPttRecording = false;
+  if (pttRecorder && pttRecorder.state === 'recording') {
+    pttRecorder.stop();
+  } else {
+    updateUiForState(currentConversationState);
+  }
+}
+
+if (pttBtn) {
+  // Cegah long-press context menu pada mobile
+  pttBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  pttBtn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    if (currentConversationState !== 'idle') return;
+    try {
+      pttBtn.setPointerCapture(e.pointerId);
+    } catch {}
+    startPttRecording();
+  });
+
+  const handlePointerEnd = (e) => {
+    e.preventDefault();
+    try {
+      pttBtn.releasePointerCapture(e.pointerId);
+    } catch {}
+    stopPttRecording();
+  };
+
+  pttBtn.addEventListener('pointerup', handlePointerEnd);
+  pttBtn.addEventListener('pointercancel', handlePointerEnd);
+
+  // Fallback perangkat sentuh lama
+  if (!window.PointerEvent) {
+    pttBtn.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      if (currentConversationState !== 'idle') return;
+      startPttRecording();
+    });
+    pttBtn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      stopPttRecording();
+    });
+    pttBtn.addEventListener('touchcancel', (e) => {
+      e.preventDefault();
+      stopPttRecording();
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Hands-free listening (VAD - Khusus Desktop)
 // Mic -> AnalyserNode; loop rAF baca RMS. State machine: diam -> (volume naik)
 // mulai rekam segmen -> (hening SILENCE_MS) stop & kirim -> ulang. Saat amika
-// bicara, VAD di-pause (playCursor > sekarang) biar tak dengar suara sendiri.
+// bicara atau turn bukan IDLE, VAD di-pause.
 // ---------------------------------------------------------------------------
 let micStream = null;
 let vadAnalyser = null;
@@ -429,7 +679,7 @@ function endSegment() {
   if (segRecorder && segRecorder.state === 'recording') segRecorder.stop(); // -> flushSegment
 }
 
-// Batalkan segmen berjalan tanpa kirim (mis. amika keburu mulai bicara).
+// Batalkan segmen berjalan tanpa kirim (mis. amika keburu mulai bicara atau turn berganti).
 function abortSegment() {
   if (segRecorder && segRecorder.state === 'recording') {
     segRecorder.onstop = null;
@@ -449,6 +699,8 @@ async function flushSegment() {
   segChunks = [];
   const minSeg = tuning.get('vad.minSegMs') ?? 400;
   if (dur < minSeg || blob.size < 1024) return; // noise pendek -> buang
+
+  updateUiForState('processing');
 
   const data = await new Promise((res) => {
     const r = new FileReader();
@@ -476,10 +728,20 @@ function vadLoop() {
   requestAnimationFrame(vadLoop);
   if (!vadAnalyser) return;
 
+  // Layout mobile tidak memakai VAD (menggunakan Push-to-Talk)
+  if (isMobile()) return;
+
+  // Turn-taking: jika bukan IDLE (sedang PROCESSING atau SPEAKING), nonaktifkan deteksi
+  if (currentConversationState !== 'idle') {
+    if (segRecorder) abortSegment();
+    updateUiForState(currentConversationState);
+    return;
+  }
+
   // amika lagi bicara -> jangan dengar (cegah loop suara sendiri).
   if (isamikaSpeaking()) {
     if (segRecorder) abortSegment();
-    setMicStatus(false, 'amika bicara…');
+    setMicStatus(false, 'Amika sedang bicara…', 'speaking');
     return;
   }
 
@@ -497,7 +759,7 @@ function vadLoop() {
       beginSegment();
     }
   } else {
-    setMicStatus(true, '● Merekam…');
+    setMicStatus(true, '● Merekam…', 'recording');
     if (level > vadStop) {
       silenceStart = 0;
     } else if (!silenceStart) {
@@ -516,16 +778,23 @@ async function startListening() {
   try {
     ensureAudio();
     if (audioCtx.state === 'suspended') await audioCtx.resume();
-    micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
-    vadAnalyser = audioCtx.createAnalyser();
-    vadAnalyser.fftSize = 512;
-    vadData = new Uint8Array(vadAnalyser.fftSize);
-    // Sambung mic -> analyser SAJA (jangan ke destination, nanti feedback).
-    audioCtx.createMediaStreamSource(micStream).connect(vadAnalyser);
-    setMicStatus(true, 'Mendengarkan…');
-    requestAnimationFrame(vadLoop);
+    if (!micStream) {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+    }
+
+    if (!isMobile()) {
+      vadAnalyser = audioCtx.createAnalyser();
+      vadAnalyser.fftSize = 512;
+      vadData = new Uint8Array(vadAnalyser.fftSize);
+      // Sambung mic -> analyser SAJA (jangan ke destination, nanti feedback).
+      audioCtx.createMediaStreamSource(micStream).connect(vadAnalyser);
+      setMicStatus(true, 'Mendengarkan…');
+      requestAnimationFrame(vadLoop);
+    } else {
+      updateUiForState(currentConversationState);
+    }
   } catch (err) {
     listening = false;
     setMicStatus(false, 'Mic gagal');
@@ -533,10 +802,28 @@ async function startListening() {
   }
 }
 
+// Tampilan awal sesuai layout
+if (isMobile()) {
+  updateUiForState('idle');
+} else {
+  setMicStatus(false, 'Klik untuk mulai');
+}
+
 // Satu gesture untuk unlock AudioContext + izin mic (aturan browser).
-setMicStatus(false, 'Klik untuk mulai');
 const kick = () => startListening();
 document.addEventListener('pointerdown', kick, { once: true });
 document.addEventListener('keydown', kick, { once: true });
+
+// Responsif saat resize browser
+window.addEventListener('resize', () => {
+  updateUiForState(currentConversationState);
+  if (!isMobile() && micStream && !vadAnalyser) {
+    vadAnalyser = audioCtx.createAnalyser();
+    vadAnalyser.fftSize = 512;
+    vadData = new Uint8Array(vadAnalyser.fftSize);
+    audioCtx.createMediaStreamSource(micStream).connect(vadAnalyser);
+    requestAnimationFrame(vadLoop);
+  }
+});
 
 initWebcam();

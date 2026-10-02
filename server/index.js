@@ -213,7 +213,37 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 
 wss.on('connection', (socket) => {
   companionSessionOpened();
-  socket.once('close', companionSessionClosed);
+
+  let conversationState = 'idle'; // 'idle' | 'processing' | 'speaking'
+  let safetyTimer = null;
+
+  function clearSafetyTimer() {
+    if (safetyTimer) {
+      clearTimeout(safetyTimer);
+      safetyTimer = null;
+    }
+  }
+
+  function setConversationState(newState) {
+    if (conversationState === newState) return;
+    clearSafetyTimer();
+    const oldState = conversationState;
+    conversationState = newState;
+    console.log(`[turn] State transition: ${oldState} -> ${newState}`);
+    send({ type: 'conversation_state', state: conversationState });
+
+    if (conversationState !== 'idle') {
+      safetyTimer = setTimeout(() => {
+        console.warn(`[turn] Safety timeout (30s) reached while in state "${conversationState}". Forcing reset to idle.`);
+        setConversationState('idle');
+      }, 30000);
+    }
+  }
+
+  socket.once('close', () => {
+    clearSafetyTimer();
+    companionSessionClosed();
+  });
 
   const history = []; // histori percakapan per-koneksi
   const send = (obj) => {
@@ -232,6 +262,12 @@ wss.on('connection', (socket) => {
   streamingVisionManager.setBroadcaster(broadcastToAll);
   streamingVisionManager.setHistoryRef(history);
 
+  // Kirim status awal percakapan ke client
+  send({
+    type: 'conversation_state',
+    state: conversationState,
+  });
+
   // Kirim status awal vision streaming ke client yang baru terhubung
   send({
     type: 'init_vision_state',
@@ -246,6 +282,13 @@ wss.on('connection', (socket) => {
     try {
       msg = JSON.parse(raw.toString());
     } catch {
+      return;
+    }
+
+    // 0. Sinyal selesai playback dari client untuk turn-taking
+    if (msg.type === 'playback_finished') {
+      console.log(`[turn] Client playback_finished received (current state: ${conversationState})`);
+      setConversationState('idle');
       return;
     }
 
@@ -269,6 +312,10 @@ wss.on('connection', (socket) => {
 
     // 4. Handler untuk komentar spontan eksternal (jika ada)
     if (msg.type === 'spontaneous_vision_comment') {
+      if (conversationState !== 'idle') {
+        console.log(`[spontaneous] Diabaikan: percakapan sedang "${conversationState}"`);
+        return;
+      }
       const { text, emotion = 'netral' } = msg;
       if (!text) return;
       console.log(`[spontaneous] Komentar visual diterima dari vision-monitor: "${text}" (${emotion})`);
@@ -284,7 +331,12 @@ wss.on('connection', (socket) => {
 
       if (isVoiceConfigured()) {
         try {
+          let sentFirstChunk = false;
           for await (const chunk of generateSpeech(text, emotion)) {
+            if (!sentFirstChunk) {
+              sentFirstChunk = true;
+              setConversationState('speaking');
+            }
             broadcastToAll({
               type: 'audio_output',
               data: chunk.toString('base64'),
@@ -292,8 +344,12 @@ wss.on('connection', (socket) => {
             });
           }
           broadcastToAll({ type: 'audio_end' });
+          if (!sentFirstChunk) {
+            setConversationState('idle');
+          }
         } catch (err) {
           console.error('[tts:spontaneous] Gagal TTS komentar spontan:', err.message);
+          setConversationState('idle');
         }
       }
 
@@ -302,6 +358,12 @@ wss.on('connection', (socket) => {
     }
 
     if (msg.type !== 'audio_input') return;
+
+    // Turn-taking: jika bukan IDLE (sedang PROCESSING atau SPEAKING), abaikan audio baru
+    if (conversationState !== 'idle') {
+      console.log(`[turn] Ignored audio_input: current state is "${conversationState}"`);
+      return;
+    }
 
     const { data, mime, image, screenImage, durationMs } = msg;
 
@@ -312,6 +374,9 @@ wss.on('connection', (socket) => {
     try {
       const buf = Buffer.from(data, 'base64');
       if (buf.length < 512) return;
+
+      // Audio valid mulai diproses -> masuk state PROCESSING
+      setConversationState('processing');
 
       // --- timing diagnostics (ponytail: hapus blok [timing] kalau tak perlu) --
       // Semua durasi relatif ke saat audio_input valid diterima (tPipe).
@@ -330,6 +395,7 @@ wss.on('connection', (socket) => {
       // ganti sttTranscribe ke verbose_json & saring no_speech_prob.
       if (text.length < 3) {
         console.log('[stt] skip, noise/pendek:', JSON.stringify(text));
+        setConversationState('idle');
         return;
       }
       send({ type: 'user_said', text });
@@ -392,6 +458,7 @@ wss.on('connection', (socket) => {
       let tTtsFirstChunk = 0;
       let tFirstAudioOut = 0;
       let sentenceIdx = 0;
+      let sentFirstAudio = false;
 
       let replyEmotion = 'netral';
 
@@ -400,6 +467,10 @@ wss.on('connection', (socket) => {
           const isFirst = idx === 0;
           if (isFirst) tTtsStart = performance.now();
           for await (const chunk of generateSpeech(sentence, replyEmotion)) {
+            if (!sentFirstAudio) {
+              sentFirstAudio = true;
+              setConversationState('speaking');
+            }
             if (isFirst && !tTtsFirstChunk) tTtsFirstChunk = performance.now();
             send({
               type: 'audio_output',
@@ -451,6 +522,13 @@ wss.on('connection', (socket) => {
       await ttsChain; // pastikan semua audio ke-flush sebelum turn ditutup
       send({ type: 'amika_replied', text: full, emotion: replyEmotion });
 
+      // Jika tidak ada audio TTS yang terkirim (misal TTS nonaktif atau gagal),
+      // kembalikan state ke IDLE karena tidak akan ada event playback_finished dari client
+      if (!sentFirstAudio) {
+        console.log('[turn] Tidak ada audio TTS yang dikirim; mereset state ke idle');
+        setConversationState('idle');
+      }
+
       history.push({ role: 'user', content: text });
       history.push({ role: 'assistant', content: full });
       if (history.length > HISTORY_MESSAGE_LIMIT) {
@@ -458,6 +536,7 @@ wss.on('connection', (socket) => {
       }
     } catch (err) {
       console.error('[stt] error:', err);
+      setConversationState('idle');
       send({ type: 'error', message: err.message ?? 'STT gagal.' });
     }
   });
