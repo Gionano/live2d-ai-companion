@@ -25,11 +25,12 @@ function loadConfig() {
 // Initial load
 loadConfig();
 
-// Watch for file changes
+// Watch for file changes without holding process open
 try {
-  fs.watch(CONFIG_PATH, () => {
+  const watcher = fs.watch(CONFIG_PATH, () => {
     loadConfig();
   });
+  watcher.unref?.();
 } catch (_) {}
 
 /**
