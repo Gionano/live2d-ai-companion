@@ -150,6 +150,28 @@
         color: #93c5fd;
       }
 
+      .framing-select {
+        background: rgba(30, 30, 48, 0.85);
+        color: #e2e8f0;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 6px;
+        padding: 3px 6px;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        outline: none;
+        backdrop-filter: blur(4px);
+        transition: border-color 0.15s ease, background 0.15s ease;
+      }
+      .framing-select:hover {
+        background: rgba(45, 45, 70, 0.95);
+        border-color: rgba(255, 255, 255, 0.3);
+      }
+      .framing-select option {
+        background: #1e1e30;
+        color: #fff;
+      }
+
       @media (max-width: 768px) {
         #webcam {
           display: block;
@@ -202,7 +224,12 @@
     <div id="companion-panel">
       <div class="panel-head">
         <h3>Amika</h3>
-        <div style="display: flex; align-items: center; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <select id="framing-select" class="framing-select" title="Framing Kamera Avatar (Full Body / Half Body / Close-up)">
+            <option value="full">🧍 Full Body</option>
+            <option value="half">👗 Half Body</option>
+            <option value="closeup">🔍 Close-up</option>
+          </select>
           <button id="screen-share-btn" class="screen-share-btn" title="Aktifkan Share Screen agar Amika bisa melihat layar">
             🖥️ Share Screen
           </button>

@@ -15,6 +15,7 @@ import { CubismMotionManager } from '@framework/motion/cubismmotionmanager';
 import { EMOTION_MAP, INTENSITY_MULTIPLIER } from './expressionMap.js';
 import { SyntheticTracker } from './syntheticTracking.js';
 import { tuning } from './tuningConfig.js';
+import { FRAMING_PRESETS } from './framingConfig.js';
 
 const MODEL_URL = '/models/live2d/IceGirl.model3.json';
 const SHADER_PATH = '/vendor/live2d/shaders/';
@@ -112,6 +113,10 @@ class CompanionCubismModel extends CubismUserModel {
     this.physicsFrameCount = 0;
     this.ready = false;
     this.textures = [];
+
+    // --- Camera / Viewport framing ---
+    this.currentFraming = { scale: 1.0, x: 0.0, y: 0.0 };
+    this.targetFraming = { scale: 1.0, x: 0.0, y: 0.0 };
 
     // --- Parameter Availability Map (Requirement 4) ---
     this.availableParams = new Map();
@@ -685,6 +690,13 @@ class CompanionCubismModel extends CubismUserModel {
     this._model.update();
   }
 
+  setFraming(scale = 1.0, x = 0.0, y = 0.0, immediate = false) {
+    this.targetFraming = { scale, x, y };
+    if (immediate || !this.currentFraming) {
+      this.currentFraming = { scale, x, y };
+    }
+  }
+
   draw() {
     if (!this.ready) return;
     const projection = new CubismMatrix44();
@@ -695,6 +707,26 @@ class CompanionCubismModel extends CubismUserModel {
     } else {
       projection.scale(height / width, 1);
     }
+
+    // Camera / Viewport framing transform (scale & offset Y)
+    if (this.targetFraming) {
+      if (!this.currentFraming) {
+        this.currentFraming = { ...this.targetFraming };
+      } else {
+        const factor = 0.15; // Smooth camera interpolation
+        this.currentFraming.scale += (this.targetFraming.scale - this.currentFraming.scale) * factor;
+        this.currentFraming.x += (this.targetFraming.x - this.currentFraming.x) * factor;
+        this.currentFraming.y += (this.targetFraming.y - this.currentFraming.y) * factor;
+      }
+      const { scale, x, y } = this.currentFraming;
+      if (scale !== 1.0) {
+        projection.scaleRelative(scale, scale);
+      }
+      if (x !== 0.0 || y !== 0.0) {
+        projection.translateRelative(x, y);
+      }
+    }
+
     projection.multiplyByMatrix(this.getModelMatrix());
     const renderer = this.getRenderer();
     renderer.setMvpMatrix(projection);
@@ -714,6 +746,8 @@ export class Live2DCompanion {
     this.gl = null;
     this.lastFrame = performance.now();
     this.emotionEndsAt = 0;
+    this.currentPresetName = 'full';
+    this.currentFramingConfig = FRAMING_PRESETS.desktop.full;
   }
 
   async initialize() {
@@ -771,6 +805,16 @@ export class Live2DCompanion {
     this.model = new CompanionCubismModel(this.gl, this.canvas, homeDir);
     await this.model.load(file);
 
+    // Apply active camera framing transform immediately on load
+    if (this.currentFramingConfig) {
+      this.model.setFraming(
+        this.currentFramingConfig.scale,
+        this.currentFramingConfig.x,
+        this.currentFramingConfig.y,
+        true
+      );
+    }
+
     this.currentModelPath = modelPath;
     const modelInfo = this.model.getModelInfo();
 
@@ -793,6 +837,28 @@ export class Live2DCompanion {
 
   getModelInfo() {
     return this.model?.getModelInfo() ?? null;
+  }
+
+  setFramingPreset(presetName, layout = null, immediate = false) {
+    const activeLayout = layout || (window.innerWidth <= 768 ? 'mobile' : 'desktop');
+    const presets = FRAMING_PRESETS[activeLayout] || FRAMING_PRESETS.desktop;
+    const target = presets[presetName] || presets.full;
+    this.currentPresetName = presetName;
+    this.currentFramingConfig = target;
+    if (this.model) {
+      this.model.setFraming(target.scale, target.x, target.y, immediate);
+    }
+  }
+
+  setFraming(scale, x, y, immediate = false) {
+    this.currentFramingConfig = { scale, x, y };
+    if (this.model) {
+      this.model.setFraming(scale, x, y, immediate);
+    }
+  }
+
+  getFramingPresets() {
+    return FRAMING_PRESETS;
   }
 
   resize() {
