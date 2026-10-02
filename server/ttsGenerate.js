@@ -60,6 +60,7 @@ export async function* generateSpeech(text, emotion = 'neutral') {
       encode({
         event: 'start',
         request: {
+          text: '',
           reference_id: getVoiceId(),
           format: TTS_FORMAT,
           latency: 'low',
@@ -93,7 +94,10 @@ export async function* generateSpeech(text, emotion = 'neutral') {
     finished = true;
     signal();
   });
-  ws.on('close', () => {
+  ws.on('close', (code, reason) => {
+    if (!finished && queue.length === 0 && !failure) {
+      failure = new Error(`Fish Audio WS ditutup sebelum selesai (code: ${code}, reason: ${reason.toString() || 'none'})`);
+    }
     finished = true;
     signal();
   });
