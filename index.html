@@ -21,27 +21,317 @@
         left: 16px;
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 10px;
         padding: 14px;
-        background: rgba(20, 20, 35, 0.82);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 10px;
-        font-family: system-ui, -apple-system, sans-serif;
+        background: rgba(20, 20, 35, 0.88);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 12px;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         color: #e8e8f0;
-        backdrop-filter: blur(6px);
+        backdrop-filter: blur(10px);
         z-index: 10;
-        max-width: 220px;
+        width: 320px;
+        max-width: 90vw;
+        max-height: calc(100vh - 32px);
+        overflow-y: auto;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
       }
-      #debug-panel h3 {
+      #debug-panel::-webkit-scrollbar {
+        width: 5px;
+      }
+      #debug-panel::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 4px;
+      }
+
+      /* Panel Tabs */
+      .panel-tabs {
+        display: flex;
+        gap: 4px;
+        background: rgba(0, 0, 0, 0.28);
+        padding: 4px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .panel-tab-btn {
+        flex: 1;
+        padding: 6px 8px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #a4a4c4;
+        background: transparent;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        text-align: center;
+      }
+      .panel-tab-btn:hover {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.06);
+      }
+      .panel-tab-btn.active {
+        color: #fff;
+        background: #484872;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+      }
+      .tab-content {
+        display: none;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .tab-content.active {
+        display: flex;
+      }
+
+      /* Model Switcher UI */
+      .section-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: #b0b0cc;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .models-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-height: 180px;
+        overflow-y: auto;
+        padding-right: 2px;
+      }
+      .model-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 10px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        transition: all 0.15s ease;
+      }
+      .model-card:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.18);
+      }
+      .model-card.active {
+        background: rgba(72, 72, 114, 0.35);
+        border-color: #6d6db2;
+      }
+      .model-card-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+      .model-thumb {
+        width: 36px;
+        height: 36px;
+        border-radius: 6px;
+        object-fit: cover;
+        background: #1e1e30;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        flex-shrink: 0;
+      }
+      .model-thumb-placeholder {
+        width: 36px;
+        height: 36px;
+        border-radius: 6px;
+        background: #25253e;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        flex-shrink: 0;
+      }
+      .model-card-info {
+        min-width: 0;
+      }
+      .model-name {
         font-size: 13px;
         font-weight: 600;
-        letter-spacing: 0.3px;
-        opacity: 0.85;
-        margin-bottom: 2px;
+        color: #fff;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
+      .model-meta {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin-top: 2px;
+        font-size: 10px;
+        color: #9898b8;
+      }
+      .meta-tag {
+        background: rgba(255, 255, 255, 0.08);
+        padding: 1px 4px;
+        border-radius: 4px;
+      }
+      .meta-badge {
+        background: rgba(80, 140, 255, 0.2);
+        color: #9cc0ff;
+        padding: 1px 4px;
+        border-radius: 4px;
+        font-weight: 500;
+      }
+      .meta-badge.physics {
+        background: rgba(80, 220, 140, 0.2);
+        color: #8ae4aa;
+      }
+      .badge-active {
+        font-size: 11px;
+        font-weight: 600;
+        color: #4ade80;
+        background: rgba(74, 222, 128, 0.15);
+        padding: 4px 8px;
+        border-radius: 6px;
+        border: 1px solid rgba(74, 222, 128, 0.3);
+      }
+      .btn-load-model {
+        padding: 5px 12px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #fff;
+        background: #424268;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .btn-load-model:hover {
+        background: #555584;
+      }
+
+      /* Upload Button */
+      .model-upload-section {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .btn-action {
+        width: 100%;
+        padding: 8px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        border-radius: 7px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        transition: all 0.15s ease;
+      }
+      .btn-action.primary {
+        background: linear-gradient(135deg, #4f46e5, #6366f1);
+        color: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 2px 8px rgba(79, 70, 229, 0.3);
+      }
+      .btn-action.primary:hover {
+        background: linear-gradient(135deg, #4338ca, #4f46e5);
+      }
+      .status-hint {
+        font-size: 11px;
+        color: #a0a0c0;
+        min-height: 14px;
+      }
+
+      /* Auto-Detect Capabilities Card (Requirement 3) */
+      .capabilities-card {
+        background: rgba(0, 0, 0, 0.28);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cap-title {
+        font-size: 12px;
+        font-weight: 700;
+        color: #e0e0f0;
+      }
+      .cap-stats-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+      .cap-stat-item {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        padding: 6px 8px;
+        border-radius: 6px;
+        display: flex;
+        flex-direction: column;
+      }
+      .cap-stat-label {
+        font-size: 10px;
+        color: #8c8ca8;
+        text-transform: uppercase;
+      }
+      .cap-stat-value {
+        font-size: 12px;
+        font-weight: 600;
+        color: #fff;
+        margin-top: 2px;
+      }
+      .text-success { color: #4ade80 !important; }
+      .text-muted { color: #888899 !important; }
+
+      .cap-details details {
+        font-size: 11px;
+        color: #a0a0be;
+        margin-top: 4px;
+      }
+      .cap-details summary {
+        cursor: pointer;
+        user-select: none;
+        padding: 3px 0;
+      }
+      .cap-details summary:hover {
+        color: #fff;
+      }
+      .cap-tags-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 6px;
+        max-height: 100px;
+        overflow-y: auto;
+        padding: 4px;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 6px;
+      }
+      .cap-tag {
+        font-size: 9px;
+        font-family: ui-monospace, monospace;
+        background: rgba(255, 255, 255, 0.06);
+        color: #c4c4d4;
+        padding: 2px 5px;
+        border-radius: 3px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+      }
+      .cap-tag.expr {
+        background: rgba(147, 51, 234, 0.15);
+        color: #d8b4fe;
+        border-color: rgba(147, 51, 234, 0.3);
+      }
+      .cap-tag.motion {
+        background: rgba(14, 165, 233, 0.15);
+        color: #7dd3fc;
+        border-color: rgba(14, 165, 233, 0.3);
+      }
+      .empty-hint {
+        font-size: 11px;
+        color: #777788;
+        font-style: italic;
+        padding: 4px;
+      }
+
       #debug-panel button {
         padding: 8px 12px;
-        font-size: 13px;
+        font-size: 12px;
         color: #fff;
         background: #3a3a5c;
         border: 1px solid rgba(255, 255, 255, 0.1);
@@ -51,15 +341,6 @@
       }
       #debug-panel button:hover { background: #4d4d7a; }
       #debug-panel button:active { background: #5f5f96; }
-      #debug-panel .debug-field { margin-top: 4px; font-size: 11px; color: #c4c4d4; }
-      #debug-panel select {
-        width: 100%;
-        padding: 8px;
-        color: #fff;
-        background: #30304d;
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        border-radius: 6px;
-      }
 
       #status {
         position: fixed;
@@ -236,10 +517,81 @@
     <canvas id="app"></canvas>
 
     <div id="debug-panel">
-      <h3>Kostum / Aksesoris</h3>
-      <div id="costume-toggles" style="display: flex; flex-direction: column; gap: 4px;"></div>
-      <button id="live2d-test-lipsync" style="margin-top: 8px;">Test audio + lip-sync</button>
-      <button id="open-tuning-btn" style="margin-top: 8px; background: #263852; border: 1px solid rgba(125, 243, 225, 0.35); color: #7df3e1; font-weight: 500;">⚙️ Tuning Panel</button>
+      <!-- Tabs Navigation -->
+      <div class="panel-tabs">
+        <button class="panel-tab-btn active" data-tab="models-tab">🎭 Model</button>
+        <button class="panel-tab-btn" data-tab="costumes-tab">👗 Kostum</button>
+        <button class="panel-tab-btn" data-tab="tools-tab">⚙️ Tools</button>
+      </div>
+
+      <!-- TAB 1: MODEL SELECTOR & AUTO-DETECT INFO -->
+      <div id="models-tab" class="tab-content active">
+        <!-- Upload Section (Requirement 2) -->
+        <div class="model-upload-section">
+          <input type="file" id="model-file-input" accept=".zip" style="display: none;" />
+          <button id="upload-model-btn" class="btn-action primary">
+            📤 Upload Model (.zip)
+          </button>
+          <span id="upload-status" class="status-hint"></span>
+        </div>
+
+        <!-- Model List (Requirement 1) -->
+        <div class="section-title">Daftar Model Tersedia</div>
+        <div id="models-list" class="models-grid">
+          <!-- Dynamically populated via modelSwitcher.js -->
+        </div>
+
+        <!-- Read-only Auto-Detect Info Panel (Requirement 3) -->
+        <div class="section-title" style="margin-top: 6px;">Info & Kemampuan Model</div>
+        <div id="model-capabilities-panel" class="capabilities-card">
+          <div id="cap-model-name" class="cap-title">Memuat info model...</div>
+          <div class="cap-stats-grid">
+            <div class="cap-stat-item">
+              <span class="cap-stat-label">Parameters</span>
+              <span id="cap-param-count" class="cap-stat-value">-</span>
+            </div>
+            <div class="cap-stat-item">
+              <span class="cap-stat-label">Expressions</span>
+              <span id="cap-expr-count" class="cap-stat-value">-</span>
+            </div>
+            <div class="cap-stat-item">
+              <span class="cap-stat-label">Motions</span>
+              <span id="cap-motion-count" class="cap-stat-value">-</span>
+            </div>
+            <div class="cap-stat-item">
+              <span class="cap-stat-label">Physics</span>
+              <span id="cap-physics-status" class="cap-stat-value">-</span>
+            </div>
+          </div>
+          <div class="cap-details">
+            <details>
+              <summary>Detail Parameter (<span id="cap-param-summary">0</span>)</summary>
+              <div id="cap-param-list" class="cap-tags-container"></div>
+            </details>
+            <details>
+              <summary>Detail Expression (<span id="cap-expr-summary">0</span>)</summary>
+              <div id="cap-expr-list" class="cap-tags-container"></div>
+            </details>
+            <details>
+              <summary>Detail Motion (<span id="cap-motion-summary">0</span>)</summary>
+              <div id="cap-motion-list" class="cap-tags-container"></div>
+            </details>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: KOSTUM & AKSESORIS -->
+      <div id="costumes-tab" class="tab-content">
+        <div class="section-title">Kostum / Aksesoris</div>
+        <div id="costume-toggles" style="display: flex; flex-direction: column; gap: 4px;"></div>
+      </div>
+
+      <!-- TAB 3: TOOLS -->
+      <div id="tools-tab" class="tab-content">
+        <div class="section-title">Debug Tools</div>
+        <button id="live2d-test-lipsync">Test audio + lip-sync</button>
+        <button id="open-tuning-btn" style="margin-top: 4px; background: #263852; border: 1px solid rgba(125, 243, 225, 0.35); color: #7df3e1; font-weight: 500;">⚙️ Tuning Panel (T)</button>
+      </div>
     </div>
 
     <!-- Tombol Switch Kamera Khusus Mobile -->

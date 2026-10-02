@@ -17,7 +17,7 @@ import { tuning } from './tuningConfig.js';
 
 // Helper: build a VTS config object from current tuning values per-frame.
 function headConfig(axis) {
-  const range = tuning.get(`tracking.headRange${axis}`);
+  const range = tuning.get(`tracking.headRange${axis}`) ?? 15;
   return { inMin: -1, inMax: 1, outMin: -range, outMax: range, limitMin: -30, limitMax: 30 };
 }
 
@@ -89,13 +89,22 @@ export class SyntheticTracker {
     const found = Object.entries(this.indices)
       .filter(([, v]) => v >= 0)
       .map(([k, v]) => `${k}=${v}`);
-    const missing = Object.entries(this.indices)
-      .filter(([, v]) => v < 0)
-      .map(([k]) => k);
-
     console.log(`[SyntheticTracking] Resolved params: ${found.join(', ')}`);
-    if (missing.length) {
-      console.warn(`[SyntheticTracking] Missing params (will skip): ${missing.join(', ')}`);
+
+    // Requirement 4: log peringatan sekali saat load kalau parameter tertentu tidak ada
+    const featureMap = {
+      angleX: 'ParamAngleX (Head Yaw)',
+      angleY: 'ParamAngleY (Head Pitch)',
+      angleZ: 'ParamAngleZ (Head Roll)',
+      eyeBallX: 'ParamEyeBallX (Eye Gaze X)',
+      eyeBallY: 'ParamEyeBallY (Eye Gaze Y)',
+      browLA: 'ParamBrowLAngle (Alis Kiri)',
+      browRA: 'ParamBrowRAngle (Alis Kanan)',
+    };
+    for (const [key, index] of Object.entries(this.indices)) {
+      if (index < 0) {
+        console.warn(`[SyntheticTracking] Model ini tidak punya ${featureMap[key] || key}, fitur terkait dinonaktifkan.`);
+      }
     }
   }
 
@@ -113,9 +122,13 @@ export class SyntheticTracker {
 
     // ----- HEAD MICRO-MOVEMENT (noise-based) -----
     // Noise value berkisar dari -1 sampai 1
-    const noiseX = this.noise(this.time * tuning.get('tracking.headNoiseSpeedX'), this.headSeedX);
-    const noiseY = this.noise(this.time * tuning.get('tracking.headNoiseSpeedY'), this.headSeedY);
-    const noiseZ = this.noise(this.time * tuning.get('tracking.headNoiseSpeedZ'), this.headSeedZ);
+    const speedX = tuning.get('tracking.headNoiseSpeedX') ?? 0.15;
+    const speedY = tuning.get('tracking.headNoiseSpeedY') ?? 0.12;
+    const speedZ = tuning.get('tracking.headNoiseSpeedZ') ?? 0.10;
+
+    const noiseX = this.noise(this.time * speedX, this.headSeedX);
+    const noiseY = this.noise(this.time * speedY, this.headSeedY);
+    const noiseZ = this.noise(this.time * speedZ, this.headSeedZ);
 
     const headX = mapVTS(noiseX, headConfig('X'));
     const headY = mapVTS(noiseY, headConfig('Y'));
@@ -132,12 +145,15 @@ export class SyntheticTracker {
     this.eyeNextSaccadeIn -= delta;
     if (this.eyeNextSaccadeIn <= 0) {
       // Pick a new random fixation point.
-      this.eyeTargetX = (Math.random() * 2 - 1) * tuning.get('tracking.eyeGazeRangeX');
-      this.eyeTargetY = (Math.random() * 2 - 1) * tuning.get('tracking.eyeGazeRangeY');
+      const rangeX = tuning.get('tracking.eyeGazeRangeX') ?? 0.7;
+      const rangeY = tuning.get('tracking.eyeGazeRangeY') ?? 0.5;
+      this.eyeTargetX = (Math.random() * 2 - 1) * rangeX;
+      this.eyeTargetY = (Math.random() * 2 - 1) * rangeY;
       this.eyeNextSaccadeIn = this._randomSaccadeInterval();
     }
     // Fast lerp toward target (saccade snap, then hold = fixation).
-    const eyeAlpha = 1 - Math.exp(-tuning.get('tracking.eyeLerpSpeed') * delta);
+    const lerpSpeed = tuning.get('tracking.eyeLerpSpeed') ?? 12.0;
+    const eyeAlpha = 1 - Math.exp(-lerpSpeed * delta);
     this.eyeCurrentX += (this.eyeTargetX - this.eyeCurrentX) * eyeAlpha;
     this.eyeCurrentY += (this.eyeTargetY - this.eyeCurrentY) * eyeAlpha;
 
@@ -147,8 +163,10 @@ export class SyntheticTracker {
     outputs.eyeY = this.eyeCurrentY;
 
     // ----- EYEBROW SUBTLE MOVEMENT (noise-based) -----
-    const browL = this.noise(this.time * tuning.get('tracking.browNoiseSpeed'), this.browSeedL) * tuning.get('tracking.browNoiseAmp');
-    const browR = this.noise(this.time * tuning.get('tracking.browNoiseSpeed'), this.browSeedR) * tuning.get('tracking.browNoiseAmp');
+    const browSpeed = tuning.get('tracking.browNoiseSpeed') ?? 0.08;
+    const browAmp = tuning.get('tracking.browNoiseAmp') ?? 0.15;
+    const browL = this.noise(this.time * browSpeed, this.browSeedL) * browAmp;
+    const browR = this.noise(this.time * browSpeed, this.browSeedR) * browAmp;
 
     this._addClamped(model, this.indices.browLA, browL);
     this._addClamped(model, this.indices.browRA, browR);
@@ -173,8 +191,9 @@ export class SyntheticTracker {
   // --- Internal helpers ---
 
   _randomSaccadeInterval() {
-    return tuning.get('tracking.eyeSaccadeMin') +
-      Math.random() * (tuning.get('tracking.eyeSaccadeMax') - tuning.get('tracking.eyeSaccadeMin'));
+    const min = tuning.get('tracking.eyeSaccadeMin') ?? 2.0;
+    const max = tuning.get('tracking.eyeSaccadeMax') ?? 5.0;
+    return min + Math.random() * (max - min);
   }
 
   /**

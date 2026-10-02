@@ -30,6 +30,13 @@ import {
   markConversationActivity,
   warmUpModels,
 } from './modelWarmup.js';
+import multer from 'multer';
+import {
+  scanAvailableModels,
+  getActiveModelPath,
+  setActiveModelPath,
+  extractZipModel,
+} from './modelManager.js';
 
 const app = express();
 // Frame base64 bisa lumayan besar — naikkan limit body JSON.
@@ -82,6 +89,63 @@ app.post('/api/config', async (req, res) => {
     res.json({ success: true, config: current });
   } catch (err) {
     console.error('[config] Failed to write config:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB limit
+});
+
+// --- Model Switcher APIs ---
+app.get('/api/models', (req, res) => {
+  try {
+    const data = scanAvailableModels();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/models/active', (req, res) => {
+  try {
+    const activeModelPath = getActiveModelPath();
+    res.json({ activeModelPath });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/models/active', (req, res) => {
+  try {
+    const { modelPath } = req.body ?? {};
+    if (!modelPath) {
+      return res.status(400).json({ error: 'Field "modelPath" wajib diisi.' });
+    }
+    const success = setActiveModelPath(modelPath);
+    res.json({ success, activeModelPath: modelPath });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/models/upload', upload.single('modelFile'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'File upload tidak ditemukan.' });
+    }
+    const originalName = req.file.originalname || 'model.zip';
+    if (!originalName.toLowerCase().endsWith('.zip')) {
+      return res.status(400).json({ error: 'Format file harus berupa arsip .zip Live2D.' });
+    }
+    const result = await extractZipModel(req.file.buffer, originalName);
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('[upload] error:', err);
     res.status(500).json({ error: err.message });
   }
 });
