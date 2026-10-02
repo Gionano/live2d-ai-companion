@@ -15,7 +15,16 @@ import { CubismMotionManager } from '@framework/motion/cubismmotionmanager';
 import { EMOTION_MAP, INTENSITY_MULTIPLIER } from './expressionMap.js';
 import { SyntheticTracker } from './syntheticTracking.js';
 import { tuning } from './tuningConfig.js';
-import { FRAMING_PRESETS } from './framingConfig.js';
+
+// Konfigurasi Framing Half Body (Langsung & Permanen)
+export const HALF_BODY_FRAMING = {
+  desktop: { scale: 1.45, x: 0.0, y: -0.50 },
+  mobile: { scale: 1.45, x: 0.0, y: -0.40 },
+};
+
+export function getHalfBodyConfig() {
+  return window.innerWidth <= 768 ? HALF_BODY_FRAMING.mobile : HALF_BODY_FRAMING.desktop;
+}
 
 const MODEL_URL = '/models/live2d/IceGirl.model3.json';
 const SHADER_PATH = '/vendor/live2d/shaders/';
@@ -746,8 +755,7 @@ export class Live2DCompanion {
     this.gl = null;
     this.lastFrame = performance.now();
     this.emotionEndsAt = 0;
-    this.currentPresetName = 'full';
-    this.currentFramingConfig = FRAMING_PRESETS.desktop.full;
+    this.currentFramingConfig = getHalfBodyConfig();
   }
 
   async initialize() {
@@ -805,15 +813,14 @@ export class Live2DCompanion {
     this.model = new CompanionCubismModel(this.gl, this.canvas, homeDir);
     await this.model.load(file);
 
-    // Apply active camera framing transform immediately on load
-    if (this.currentFramingConfig) {
-      this.model.setFraming(
-        this.currentFramingConfig.scale,
-        this.currentFramingConfig.x,
-        this.currentFramingConfig.y,
-        true
-      );
-    }
+    // Langsung terapkan framing Half Body saat model di-load
+    this.currentFramingConfig = getHalfBodyConfig();
+    this.model.setFraming(
+      this.currentFramingConfig.scale,
+      this.currentFramingConfig.x,
+      this.currentFramingConfig.y,
+      true
+    );
 
     this.currentModelPath = modelPath;
     const modelInfo = this.model.getModelInfo();
@@ -839,26 +846,11 @@ export class Live2DCompanion {
     return this.model?.getModelInfo() ?? null;
   }
 
-  setFramingPreset(presetName, layout = null, immediate = false) {
-    const activeLayout = layout || (window.innerWidth <= 768 ? 'mobile' : 'desktop');
-    const presets = FRAMING_PRESETS[activeLayout] || FRAMING_PRESETS.desktop;
-    const target = presets[presetName] || presets.full;
-    this.currentPresetName = presetName;
-    this.currentFramingConfig = target;
-    if (this.model) {
-      this.model.setFraming(target.scale, target.x, target.y, immediate);
-    }
-  }
-
   setFraming(scale, x, y, immediate = false) {
     this.currentFramingConfig = { scale, x, y };
     if (this.model) {
       this.model.setFraming(scale, x, y, immediate);
     }
-  }
-
-  getFramingPresets() {
-    return FRAMING_PRESETS;
   }
 
   resize() {

@@ -16,7 +16,6 @@ const video = document.getElementById('webcam');
 const canvas = document.getElementById('capture-canvas');
 const micStatusEl = document.getElementById('mic-status');
 const micLabelEl = document.getElementById('mic-label');
-const pttBtn = document.getElementById('mobile-ptt-btn');
 import { tuning } from './tuningConfig.js';
 
 function isMobile() {
@@ -239,36 +238,13 @@ function updateUiForState(state, isPttRecording = false) {
   if (mobile) {
     if (state === 'idle') {
       if (isPttRecording) {
-        if (pttBtn) {
-          pttBtn.disabled = false;
-          pttBtn.classList.add('recording');
-          pttBtn.classList.remove('disabled');
-          pttBtn.innerHTML = '<span class="ptt-icon">🔴</span><span class="ptt-text">Merekam... Lepas untuk Kirim</span>';
-        }
         setMicStatus(true, '● Merekam…', 'recording');
       } else {
-        if (pttBtn) {
-          pttBtn.disabled = false;
-          pttBtn.classList.remove('recording', 'disabled');
-          pttBtn.innerHTML = '<span class="ptt-icon">🎙️</span><span class="ptt-text">Tekan &amp; Tahan untuk Bicara</span>';
-        }
-        setMicStatus(true, 'Tekan untuk bicara');
+        setMicStatus(true, 'Diam');
       }
     } else if (state === 'processing') {
-      if (pttBtn) {
-        pttBtn.disabled = true;
-        pttBtn.classList.remove('recording');
-        pttBtn.classList.add('disabled');
-        pttBtn.innerHTML = '<span class="ptt-icon">⏳</span><span class="ptt-text">Amika sedang berpikir...</span>';
-      }
       setMicStatus(false, 'Amika sedang berpikir…', 'processing');
     } else if (state === 'speaking') {
-      if (pttBtn) {
-        pttBtn.disabled = true;
-        pttBtn.classList.remove('recording');
-        pttBtn.classList.add('disabled');
-        pttBtn.innerHTML = '<span class="ptt-icon">🔊</span><span class="ptt-text">Amika sedang bicara...</span>';
-      }
       setMicStatus(false, 'Amika sedang bicara…', 'speaking');
     }
   } else {
@@ -590,47 +566,68 @@ function stopPttRecording() {
   }
 }
 
-if (pttBtn) {
-  // Cegah long-press context menu pada mobile
-  pttBtn.addEventListener('contextmenu', (e) => e.preventDefault());
-
-  pttBtn.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    if (currentConversationState !== 'idle') return;
-    try {
-      pttBtn.setPointerCapture(e.pointerId);
-    } catch {}
-    startPttRecording();
-  });
-
-  const handlePointerEnd = (e) => {
-    e.preventDefault();
-    try {
-      pttBtn.releasePointerCapture(e.pointerId);
-    } catch {}
-    stopPttRecording();
-  };
-
-  pttBtn.addEventListener('pointerup', handlePointerEnd);
-  pttBtn.addEventListener('pointercancel', handlePointerEnd);
-
-  // Fallback perangkat sentuh lama
-  if (!window.PointerEvent) {
-    pttBtn.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      if (currentConversationState !== 'idle') return;
-      startPttRecording();
-    });
-    pttBtn.addEventListener('touchend', (e) => {
-      e.preventDefault();
-      stopPttRecording();
-    });
-    pttBtn.addEventListener('touchcancel', (e) => {
-      e.preventDefault();
-      stopPttRecording();
-    });
+function abortPttRecording() {
+  if (!isPttRecording) return;
+  isPttRecording = false;
+  if (pttRecorder && pttRecorder.state === 'recording') {
+    pttRecorder.onstop = null;
+    pttRecorder.stop();
   }
+  pttRecorder = null;
+  pttChunks = [];
+  updateUiForState(currentConversationState);
 }
+
+const companionPanel = document.getElementById('companion-panel');
+if (companionPanel) {
+  companionPanel.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+let pttTouchStartX = 0;
+let pttTouchStartY = 0;
+let isPttScrolling = false;
+
+window.addEventListener('pointerdown', (e) => {
+  if (!isMobile()) return;
+  // Abaikan jika menekan tombol kontrol interaktif
+  if (e.target.closest('#screen-share-btn, #camera-switch-btn, button, select, a')) {
+    return;
+  }
+  // Area sekitar UI: pada #companion-panel atau area layar sekitarnya (bagian bawah)
+  const isAroundUi = Boolean(e.target.closest('#companion-panel')) || e.clientY >= window.innerHeight * 0.40;
+  if (!isAroundUi) return;
+
+  if (currentConversationState !== 'idle') return;
+
+  pttTouchStartX = e.clientX;
+  pttTouchStartY = e.clientY;
+  isPttScrolling = false;
+
+  startPttRecording();
+});
+
+window.addEventListener('pointermove', (e) => {
+  if (!isMobile() || !isPttRecording) return;
+  const dx = Math.abs(e.clientX - pttTouchStartX);
+  const dy = Math.abs(e.clientY - pttTouchStartY);
+  // Jika user menggeser (misal scroll riwayat chat), batalkan rekaman
+  if (dx > 12 || dy > 12) {
+    isPttScrolling = true;
+    abortPttRecording();
+  }
+});
+
+const handlePointerRelease = () => {
+  if (!isMobile() || !isPttRecording) return;
+  if (isPttScrolling) {
+    abortPttRecording();
+    return;
+  }
+  stopPttRecording();
+};
+
+window.addEventListener('pointerup', handlePointerRelease);
+window.addEventListener('pointercancel', handlePointerRelease);
 
 // ---------------------------------------------------------------------------
 // Hands-free listening (VAD - Khusus Desktop)

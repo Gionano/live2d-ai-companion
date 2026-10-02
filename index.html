@@ -135,48 +135,6 @@
         50% { opacity: 0.4; transform: scale(1.25); }
       }
 
-      .mobile-ptt-btn {
-        display: none; /* Sembunyikan default di desktop */
-        width: 100%;
-        padding: 12px 14px;
-        background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-        color: #ffffff;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 8px;
-        font-family: system-ui, -apple-system, sans-serif;
-        font-size: 13px;
-        font-weight: 600;
-        letter-spacing: 0.3px;
-        cursor: pointer;
-        outline: none;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        user-select: none;
-        -webkit-user-select: none;
-        touch-action: none;
-        transition: all 0.15s ease;
-        box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
-      }
-      .mobile-ptt-btn:active,
-      .mobile-ptt-btn.recording {
-        background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
-        border-color: rgba(255, 255, 255, 0.4);
-        box-shadow: 0 0 16px rgba(239, 68, 68, 0.6);
-        transform: scale(0.98);
-      }
-      .mobile-ptt-btn.disabled,
-      .mobile-ptt-btn:disabled {
-        background: rgba(45, 45, 65, 0.65);
-        color: #7e7e9a;
-        border-color: rgba(255, 255, 255, 0.06);
-        box-shadow: none;
-        cursor: not-allowed;
-        opacity: 0.65;
-        pointer-events: none;
-        transform: none;
-      }
-
       .screen-share-btn {
         background: rgba(255, 255, 255, 0.08);
         border: 1px solid rgba(255, 255, 255, 0.15);
@@ -198,28 +156,6 @@
         background: rgba(37, 99, 235, 0.25);
         border-color: #3b82f6;
         color: #93c5fd;
-      }
-
-      .framing-select {
-        background: rgba(30, 30, 48, 0.85);
-        color: #e2e8f0;
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        border-radius: 6px;
-        padding: 3px 6px;
-        font-size: 11px;
-        font-weight: 500;
-        cursor: pointer;
-        outline: none;
-        backdrop-filter: blur(4px);
-        transition: border-color 0.15s ease, background 0.15s ease;
-      }
-      .framing-select:hover {
-        background: rgba(45, 45, 70, 0.95);
-        border-color: rgba(255, 255, 255, 0.3);
-      }
-      .framing-select option {
-        background: #1e1e30;
-        color: #fff;
       }
 
       @media (max-width: 768px) {
@@ -250,12 +186,11 @@
           left: 16px;
           width: auto;
           max-height: 35vh;
+          user-select: none;
+          -webkit-user-select: none;
         }
         #camera-switch-btn {
           display: flex; /* Munculkan di mobile */
-        }
-        .mobile-ptt-btn {
-          display: flex; /* Munculkan di mobile di atas chat log */
         }
         .panel-head {
           flex-wrap: wrap;
@@ -281,12 +216,7 @@
     <div id="companion-panel">
       <div class="panel-head">
         <h3>Amika</h3>
-        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-          <select id="framing-select" class="framing-select" title="Framing Kamera Avatar (Full Body / Half Body / Close-up)">
-            <option value="full">🧍 Full Body</option>
-            <option value="half">👗 Half Body</option>
-            <option value="closeup">🔍 Close-up</option>
-          </select>
+        <div style="display: flex; align-items: center; gap: 6px;">
           <button id="screen-share-btn" class="screen-share-btn" title="Aktifkan Share Screen agar Amika bisa melihat layar">
             🖥️ Share Screen
           </button>
@@ -296,10 +226,6 @@
           </span>
         </div>
       </div>
-      <button id="mobile-ptt-btn" class="mobile-ptt-btn" type="button">
-        <span class="ptt-icon">🎙️</span>
-        <span class="ptt-text">Tekan &amp; Tahan untuk Bicara</span>
-      </button>
       <div id="chat-log"></div>
     </div>
 
