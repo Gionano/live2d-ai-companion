@@ -8,13 +8,13 @@
 export const FRAMING_PRESETS = {
   desktop: {
     full: { scale: 1.0, x: 0.0, y: 0.0, label: 'Full Body' },
-    half: { scale: 2.0, x: 0.0, y: -0.85, label: 'Half Body' },
-    closeup: { scale: 3.0, x: 0.0, y: -1.5, label: 'Close-up' },
+    half: { scale: 1.45, x: 0.0, y: -0.50, label: 'Half Body' },
+    closeup: { scale: 2.4, x: 0.0, y: -1.05, label: 'Close-up' },
   },
   mobile: {
     full: { scale: 1.0, x: 0.0, y: 0.0, label: 'Full Body' },
-    half: { scale: 1.9, x: 0.0, y: -0.65, label: 'Half Body' },
-    closeup: { scale: 2.8, x: 0.0, y: -1.15, label: 'Close-up' },
+    half: { scale: 1.45, x: 0.0, y: -0.40, label: 'Half Body' },
+    closeup: { scale: 2.2, x: 0.0, y: -0.85, label: 'Close-up' },
   },
 };
 
