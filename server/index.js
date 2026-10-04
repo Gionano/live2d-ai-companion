@@ -404,9 +404,10 @@ wss.on('connection', (socket) => {
       // 2) Vision — periksa intent & pisahkan source (screen vs webcam)
       let vision = null;
       if (detectVisionIntent(text)) {
-        const source = detectVisionSource(text);
-        const isStreamActive = source === 'screen' ? Boolean(screenImage) : Boolean(image);
-        console.log(`[vision] intent terdeteksi: source=${source}, stream aktif=${isStreamActive}`);
+        const hasWebcam = Boolean(image);
+        const hasScreen = Boolean(screenImage);
+        const source = detectVisionSource(text, { hasWebcam, hasScreen });
+        console.log(`[vision] intent terdeteksi: source=${source}, hasWebcam=${hasWebcam}, hasScreen=${hasScreen}`);
 
         if (source === 'screen') {
           if (screenImage) {
@@ -420,7 +421,8 @@ wss.on('connection', (socket) => {
               send({ type: 'error', message: `Vision layar gagal: ${err.message}` });
             }
           } else {
-            // Screen share TIDAK aktif -> jangan fallback ke webcam diam-diam!
+            // Screen share TIDAK aktif — pesan ini HANYA muncul kalau ucapan
+            // secara eksplisit meminta lihat layar/screen/game.
             vision = 'screen belum di-share. User meminta kamu melihat layar/game/aplikasinya, tetapi user belum mengaktifkan Share Screen.';
             send({ type: 'vision', text: `⚠️ Layar belum di-share. Aktifkan tombol "Share Screen" terlebih dahulu.` });
           }

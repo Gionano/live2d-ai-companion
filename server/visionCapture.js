@@ -60,11 +60,14 @@ export const SCREEN_HINTS = [
 ];
 
 export const WEBCAM_HINTS = [
+  'kamera', 'webcam', 'kameraku', 'di kamera',
+  'wajah', 'wajahku', 'mukaku', 'muka aku', 'muka saya',
+  'tangan', 'tanganku', 'tangan aku', 'jari', 'jariku',
   'ini apa', 'apa ini', 'apa nih', 'ini apaan', 'benda ini', 'barang ini', 'ini namanya',
   'coba lihat ini', 'coba liat ini', 'lihat ini', 'liat ini',
   'kamu lihat ini', 'kamu liat ini', 'tunjukkan ini', 'tunjukin', 'tunjukin ini',
   'aku tunjukkan', 'aku tunjukkin', 'aku pegang', 'aku bawa', 'aku pakai',
-  'warna apa', 'ini warna', 'wajahku', 'bajuku', 'kamarku', 'muka aku',
+  'warna apa', 'ini warna', 'bajuku', 'kamarku',
 ];
 
 export const GENERAL_VISION_HINTS = [
@@ -74,13 +77,16 @@ export const GENERAL_VISION_HINTS = [
 
 /**
  * Detect whether the user wants to inspect "screen" or "webcam".
- * Default to "webcam" if ambiguous.
+ * Uses keyword matching first; if ambiguous (only general hints like "lihat"),
+ * falls back based on which sources are currently active.
  * @param {string} text
+ * @param {{ hasWebcam?: boolean, hasScreen?: boolean }} availability
  * @returns {'screen'|'webcam'}
  */
-export function detectVisionSource(text) {
+export function detectVisionSource(text, availability = {}) {
   if (!text) return 'webcam';
   const t = text.toLowerCase();
+  const { hasWebcam = true, hasScreen = false } = availability;
 
   // 1. Cek kecocokan eksplisit ke screen/layar
   if (SCREEN_HINTS.some((k) => t.includes(k))) {
@@ -92,7 +98,11 @@ export function detectVisionSource(text) {
     return 'webcam';
   }
 
-  // 3. Default ke webcam untuk intent umum ("coba lihat", dsb)
+  // 3. Ambigu (hanya general hints seperti "lihat", "perhatikan") →
+  //    pilih berdasarkan sumber yang sedang aktif.
+  //    Dua-duanya aktif → default ke webcam (kamera lebih natural).
+  //    Hanya layar aktif → pakai layar.
+  if (!hasWebcam && hasScreen) return 'screen';
   return 'webcam';
 }
 
@@ -116,12 +126,24 @@ if (process.argv[1] && process.argv[1].endsWith('visionCapture.js')) {
   const assert = (c, m) => {
     if (!c) throw new Error('FAIL: ' + m);
   };
+  // Intent detection
   assert(detectVisionIntent('coba lihat layar aku') === true, 'intent screen');
+  assert(detectVisionIntent('coba lihat yang di kamera ada apa') === true, 'intent kamera');
+  assert(detectVisionIntent('halo apa kabar') === false, 'negatif intent');
+
+  // Source detection — explicit keywords
   assert(detectVisionSource('coba lihat layar aku') === 'screen', 'source screen 1');
   assert(detectVisionSource('game aku lagi ngapain nih?') === 'screen', 'source screen 2');
   assert(detectVisionSource('ini apa sih?') === 'webcam', 'source webcam 1');
   assert(detectVisionSource('coba lihat ini') === 'webcam', 'source webcam 2');
-  assert(detectVisionSource('coba lihat dong') === 'webcam', 'source default webcam');
-  assert(detectVisionIntent('halo apa kabar') === false, 'negatif intent');
+  assert(detectVisionSource('coba lihat yang di kamera ada apa') === 'webcam', 'source kamera→webcam');
+  assert(detectVisionSource('lihat wajahku dong') === 'webcam', 'source wajah→webcam');
+
+  // Source detection — ambiguous with availability
+  assert(detectVisionSource('coba lihat dong', { hasWebcam: true, hasScreen: true }) === 'webcam', 'ambigu both→webcam');
+  assert(detectVisionSource('coba lihat dong', { hasWebcam: false, hasScreen: true }) === 'screen', 'ambigu only-screen→screen');
+  assert(detectVisionSource('coba lihat dong', { hasWebcam: true, hasScreen: false }) === 'webcam', 'ambigu only-webcam→webcam');
+  assert(detectVisionSource('coba lihat dong') === 'webcam', 'ambigu default→webcam');
+
   console.log('visionCapture self-check OK: all source & intent tests passed!');
 }
