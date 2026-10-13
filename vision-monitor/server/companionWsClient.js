@@ -5,9 +5,21 @@
 // ---------------------------------------------------------------------------
 import WebSocket from 'ws';
 
+function withMonitorRole(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    if (!u.searchParams.has('role')) u.searchParams.set('role', 'monitor');
+    return u.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 export class CompanionWsClient {
   constructor(url = process.env.MAIN_COMPANION_WS_URL || 'ws://localhost:8787/ws') {
-    this.url = url;
+    // role=monitor: backend utama memperlakukan bridge ini sebagai observer
+    // (bukan sesi percakapan), jadi tak mengganggu turn-taking/history.
+    this.url = withMonitorRole(url);
     this.ws = null;
     this.status = 'disconnected'; // 'connected' | 'disconnected' | 'reconnecting'
     this.onStatusChange = null;

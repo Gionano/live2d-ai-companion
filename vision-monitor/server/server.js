@@ -58,22 +58,45 @@ companionClient.onStatusChange = (status) => {
     status,
     url: MAIN_COMPANION_WS_URL,
   });
+  if (status !== 'connected' && lastKnownState.active) {
+    // Backend tak terjangkau -> stream tidak bisa dianggap aktif lagi.
+    lastKnownState.active = false;
+    broadcastToUI({ type: 'screen_share_status', active: false, settings: lastKnownState.settings, stats: lastKnownState.stats });
+  }
 };
+
+function snapshotState() {
+  const state = { ...lastKnownState };
+  if (state.sync) {
+    const aged = Math.round((Date.now() - state.sync.receivedAt) / 1000);
+    state.sync = { ...state.sync, filterElapsedSec: (state.sync.filterElapsedSec ?? 0) + aged };
+  }
+  return state;
+}
 
 // Relay incoming messages from Companion Utama to Vision Monitor UI
 companionClient.onMessage = (msg) => {
   if (!msg) return;
 
+  if (msg.sync) {
+    lastKnownState.bufferCount = msg.sync.bufferCount ?? lastKnownState.bufferCount;
+    lastKnownState.sync = { ...msg.sync, receivedAt: Date.now() };
+  }
+
   if (msg.type === 'init_vision_state' || msg.type === 'screen_share_status') {
     if (typeof msg.active === 'boolean') lastKnownState.active = msg.active;
     if (msg.settings) lastKnownState.settings = { ...lastKnownState.settings, ...msg.settings };
     if (msg.stats) lastKnownState.stats = { ...lastKnownState.stats, ...msg.stats };
+    if (typeof msg.bufferCount === 'number') lastKnownState.bufferCount = msg.bufferCount;
   } else if (msg.type === 'config_updated') {
     if (msg.settings) lastKnownState.settings = { ...lastKnownState.settings, ...msg.settings };
   } else if (msg.type === 'stats_update') {
     if (msg.stats) lastKnownState.stats = { ...lastKnownState.stats, ...msg.stats };
   } else if (msg.type === 'vision_entry') {
     if (typeof msg.bufferCount === 'number') lastKnownState.bufferCount = msg.bufferCount;
+    if (msg.stats) lastKnownState.stats = { ...lastKnownState.stats, ...msg.stats };
+  } else if (msg.type === 'filter_result') {
+    lastKnownState.bufferCount = 0;
     if (msg.stats) lastKnownState.stats = { ...lastKnownState.stats, ...msg.stats };
   }
 
@@ -103,7 +126,7 @@ wss.on('connection', (ws) => {
       type: 'init_state',
       companionStatus: companionClient.status,
       companionUrl: MAIN_COMPANION_WS_URL,
-      state: lastKnownState,
+      state: snapshotState(),
     })
   );
 

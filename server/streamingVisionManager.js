@@ -24,6 +24,11 @@ const VALID_EMOTIONS = new Set([
   'sedih', 'kagum', 'sayang', 'jahil', 'penasaran', 'netral',
 ]);
 
+const SYNC_TYPES = new Set([
+  'screen_share_status', 'config_updated', 'stats_update',
+  'filter_start', 'filter_result', 'vision_entry',
+]);
+
 const SCREEN_VISION_PROMPT =
   'Deskripsikan secara ringkas dan padat dalam 1 kalimat apa yang sedang terjadi atau terlihat di layar/game ini (fokus pada aksi penting, status UI, gameplay, atau objek utama).';
 
@@ -55,6 +60,9 @@ class StreamingVisionManager {
     this.isDescribingInProgress = false;
     this.isFilteringInProgress = false;
     this.lastFilterTimestamp = Date.now();
+    // Apakah ada Vision Monitor yang terhubung — continuous capture hanya
+    // berjalan jika flag ini true; jika false, frame diabaikan (hemat Groq).
+    this.monitorConnected = false;
 
     this.settings = {
       intervalSeconds: getServerTuning('vision', 'captureInterval', 1),
@@ -89,10 +97,51 @@ class StreamingVisionManager {
     this.historyRef = history;
   }
 
+  // Tandai apakah ada Vision Monitor yang terhubung.
+  // Jika tidak ada monitor → continuous capture tidak diproses (hemat Groq).
+  setMonitorConnected(connected) {
+    this.monitorConnected = Boolean(connected);
+    console.log(`[StreamingVision] Monitor terhubung: ${this.monitorConnected}`);
+  }
+
+  // Ambil deskripsi terbaru dari buffer untuk dipakai sebagai konteks vision
+  // on-demand (saat user bertanya "lihat layar" dan monitor sedang aktif).
+  // Mengembalikan string gabungan atau null jika buffer kosong.
+  getLatestDescriptions(count = 5) {
+    if (this.buffer.length === 0) return null;
+    const slice = this.buffer.slice(-count);
+    return slice.map(e => `[${e.timestamp}] ${e.description}`).join('\n');
+  }
+
+  // Info sinkronisasi untuk Vision Monitor (nilai relatif, tahan clock skew).
+  syncInfo() {
+    return {
+      bufferCount: this.buffer.length,
+      filterElapsedSec: Math.round((Date.now() - this.lastFilterTimestamp) / 1000),
+    };
+  }
+
   broadcast(obj) {
-    if (this.broadcastFn) {
-      this.broadcastFn(obj);
-    }
+    if (!this.broadcastFn) return;
+    if (SYNC_TYPES.has(obj.type)) obj = { ...obj, sync: this.syncInfo() };
+    this.broadcastFn(obj);
+  }
+
+  resetStats() {
+    this.stats = {
+      sessionStartTime: this.isScreenShareActive ? Date.now() : null,
+      totalFramesCaptured: 0,
+      totalVisionCalls: 0,
+      totalFilterCalls: 0,
+      totalVisionCostUsd: 0,
+      totalFilterCostUsd: 0,
+      totalCommentsSent: 0,
+      totalSkips: 0,
+    };
+    this.buffer = [];
+    this.lastFilterTimestamp = Date.now();
+    console.log('[StreamingVision] Stats di-reset dari Vision Monitor');
+    this.broadcast({ type: 'stats_update', stats: this.stats });
   }
 
   updateSettings(newSettings) {
@@ -115,7 +164,11 @@ class StreamingVisionManager {
   }
 
   setScreenShareStatus(active) {
-    this.isScreenShareActive = Boolean(active);
+    const next = Boolean(active);
+    if (next && !this.isScreenShareActive) {
+      this.lastFilterTimestamp = Date.now();
+    }
+    this.isScreenShareActive = next;
     if (this.isScreenShareActive && !this.stats.sessionStartTime) {
       this.stats.sessionStartTime = Date.now();
     }
@@ -131,6 +184,9 @@ class StreamingVisionManager {
   async handleContinuousFrame(imageDataUrl) {
     if (!imageDataUrl) return;
     this.stats.totalFramesCaptured++;
+
+    // Tidak ada Vision Monitor terhubung → frame di-skip, hemat Groq API.
+    if (!this.monitorConnected) return;
 
     // Push frame preview to vision-monitor immediately
     this.broadcast({

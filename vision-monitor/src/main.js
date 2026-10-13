@@ -148,6 +148,9 @@ function connectWebSocket() {
         break;
       }
     }
+
+    // Sinkronkan counter buffer & countdown filter dengan server.
+    if (msg.sync) applySync(msg.sync, msg.type === 'filter_start');
   };
 
   ws.onclose = () => {
@@ -200,6 +203,17 @@ function applyState(state) {
   }
   if (typeof state.bufferCount === 'number') {
     updateBufferCountUI(state.bufferCount);
+  }
+  if (state.sync) applySync(state.sync);
+}
+
+function applySync(sync, keepCountdownText = false) {
+  if (typeof sync.bufferCount === 'number') updateBufferCountUI(sync.bufferCount);
+  if (typeof sync.filterElapsedSec === 'number') {
+    nextFilterSeconds = Math.max(0, bufferDurationSec - sync.filterElapsedSec);
+    if (!keepCountdownText) {
+      filterCountdown.textContent = isScreenShareActive ? `${nextFilterSeconds}s` : '--';
+    }
   }
 }
 
@@ -333,6 +347,12 @@ function updateBufferCountUI(count) {
 // Stats & Cost Update
 // ---------------------------------------------------------------------------
 function updateStatsUI(stats) {
+  if (stats.sessionStartTime) {
+    sessionStartEpoch = stats.sessionStartTime;
+  } else if ('sessionStartTime' in stats) {
+    sessionStartEpoch = null;
+    sessionTimerEl.textContent = '00:00:00';
+  }
   statFrames.textContent = stats.totalFramesCaptured || 0;
   statVisionCalls.textContent = stats.totalVisionCalls || 0;
   statFilterCalls.textContent = stats.totalFilterCalls || 0;
@@ -442,23 +462,28 @@ function escapeHtml(str) {
 // ---------------------------------------------------------------------------
 // Remote Configuration Event Listeners
 // ---------------------------------------------------------------------------
+let pendingSettings = {};
+let pendingSettingsTimer = null;
+function sendConfigDebounced(partial) {
+  Object.assign(pendingSettings, partial);
+  if (pendingSettingsTimer) clearTimeout(pendingSettingsTimer);
+  pendingSettingsTimer = setTimeout(() => {
+    sendWs({ type: 'update_vision_config', settings: pendingSettings });
+    pendingSettings = {};
+    pendingSettingsTimer = null;
+  }, 200);
+}
+
 intervalSlider.addEventListener('input', (e) => {
   captureIntervalSec = parseInt(e.target.value, 10);
   intervalValDisplay.textContent = `${captureIntervalSec} detik`;
-  sendWs({
-    type: 'update_vision_config',
-    settings: { intervalSeconds: captureIntervalSec },
-  });
+  sendConfigDebounced({ intervalSeconds: captureIntervalSec });
 });
 
 bufferSlider.addEventListener('input', (e) => {
   bufferDurationSec = parseInt(e.target.value, 10);
   bufferValDisplay.textContent = `${bufferDurationSec} detik`;
-  resetFilterCountdown();
-  sendWs({
-    type: 'update_vision_config',
-    settings: { bufferDurationSec },
-  });
+  sendConfigDebounced({ bufferDurationSec });
 });
 
 maxTokensInput.addEventListener('change', (e) => {

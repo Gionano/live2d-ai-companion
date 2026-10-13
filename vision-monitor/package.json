@@ -1,7 +1,7 @@
 {
   "name": "vision-monitor",
   "version": "1.0.0",
-  "description": "Standalone real-time screen & webcam vision monitor with MiniMax M3 + DeepSeek V4 Flash periodic filter",
+  "description": "Vision Monitor UI + bridge untuk backend companion (my waipu) - observer via ws ?role=monitor",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,7 +14,6 @@
   "dependencies": {
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
-    "openai": "^4.67.3",
     "ws": "^8.18.0"
   },
   "devDependencies": {

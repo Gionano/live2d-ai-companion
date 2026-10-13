@@ -135,15 +135,17 @@ async function startScreenShare() {
 
     if (screenShareBtn) {
       screenShareBtn.classList.add('active');
-      screenShareBtn.textContent = `🖥️ Screen On (${captureIntervalSeconds}s)`;
+      screenShareBtn.textContent = '🖥️ Screen On';
     }
-    log(`🖥️ Share screen aktif (capture ${captureIntervalSeconds}s).`, 'muted');
+    log('🖥️ Share screen aktif.', 'muted');
 
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'screen_share_status', active: true }));
     }
 
-    startContinuousCapture();
+    // Continuous capture TIDAK dimulai di sini — dikendalikan oleh backend
+    // via pesan 'continuous_capture_control' (hanya aktif jika Vision Monitor
+    // terhubung).
 
     screenStream.getVideoTracks()[0].onended = () => {
       stopScreenShare();
@@ -383,6 +385,11 @@ let ws = null;
 function connectWS() {
   const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
+  ws.addEventListener('open', () => {
+    if (screenStream) {
+      ws.send(JSON.stringify({ type: 'screen_share_status', active: true }));
+    }
+  });
   ws.addEventListener('message', (e) => {
     let msg;
     try {
@@ -437,6 +444,23 @@ function connectWS() {
         }
         break;
       }
+      case 'continuous_capture_control': {
+        // Backend mengendalikan continuous capture berdasarkan status Vision Monitor.
+        if (msg.enabled && screenStream) {
+          console.log('[ScreenShare] Backend meminta mulai continuous capture');
+          startContinuousCapture();
+          if (screenShareBtn) {
+            screenShareBtn.textContent = `🖥️ Screen On (${captureIntervalSeconds}s)`;
+          }
+        } else {
+          console.log('[ScreenShare] Backend meminta stop continuous capture');
+          stopContinuousCapture();
+          if (screenShareBtn && screenStream) {
+            screenShareBtn.textContent = '🖥️ Screen On';
+          }
+        }
+        break;
+      }
       case 'config_updated':
       case 'init_vision_state': {
         if (msg.settings && typeof msg.settings.intervalSeconds === 'number') {
@@ -444,7 +468,8 @@ function connectWS() {
           if (newInterval !== captureIntervalSeconds) {
             captureIntervalSeconds = newInterval;
             console.log(`[ScreenShare] Interval capture diperbarui ke ${captureIntervalSeconds}s`);
-            if (screenStream) {
+            // Restart loop hanya jika continuous capture sedang jalan
+            if (continuousCaptureTimer && screenStream) {
               if (screenShareBtn) {
                 screenShareBtn.textContent = `🖥️ Screen On (${captureIntervalSeconds}s)`;
               }

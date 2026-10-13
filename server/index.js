@@ -13,7 +13,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import {
   describeFrame,
   detectVisionIntent,
-  detectVisionSource,
+  resolveVisionSource,
 } from './visionCapture.js';
 import { streamingVisionManager } from './streamingVisionManager.js';
 import {
@@ -211,7 +211,88 @@ function extFromMime(mime) {
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-wss.on('connection', (socket) => {
+// Pesan berat khusus Vision Monitor — jangan dikirim ke browser companion.
+const MONITOR_ONLY_TYPES = new Set(['monitor_frame']);
+// Socket companion yang sedang share screen (untuk deteksi putus koneksi).
+const sharingSockets = new Set();
+// Socket Vision Monitor yang terhubung (untuk conditional continuous capture).
+const monitorSockets = new Set();
+// Pesan audio/avatar khusus companion — tidak perlu sampai ke Vision Monitor.
+const COMPANION_ONLY_TYPES = new Set([
+  'audio_output', 'audio_end', 'emotion', 'amika_replied', 'vision',
+]);
+
+// Kirim pesan hanya ke companion (non-monitor) sockets.
+function broadcastToCompanions(obj) {
+  const json = JSON.stringify(obj);
+  for (const client of wss.clients) {
+    if (client.readyState !== WebSocket.OPEN) continue;
+    if (client.isMonitor) continue;
+    client.send(json);
+  }
+}
+
+function sendVisionInit(sock) {
+  if (sock.readyState !== WebSocket.OPEN) return;
+  sock.send(JSON.stringify({
+    type: 'init_vision_state',
+    active: streamingVisionManager.isScreenShareActive,
+    settings: streamingVisionManager.settings,
+    stats: streamingVisionManager.stats,
+    bufferCount: streamingVisionManager.buffer.length,
+    sync: streamingVisionManager.syncInfo(),
+  }));
+}
+
+wss.on('connection', (socket, req) => {
+  // Vision-monitor bridge konek dengan ws://host:8787/ws?role=monitor
+  let isMonitor = false;
+  try {
+    isMonitor = new URL(req.url, 'http://localhost').searchParams.get('role') === 'monitor';
+  } catch {
+    // URL tidak valid -> anggap companion biasa
+  }
+
+  if (isMonitor) {
+    // Observer saja: tanpa sesi percakapan, tanpa history, tanpa keepalive.
+    socket.isMonitor = true;
+    monitorSockets.add(socket);
+    streamingVisionManager.setMonitorConnected(true);
+    console.log(`[monitor] Vision Monitor bridge terhubung (total: ${monitorSockets.size})`);
+    sendVisionInit(socket);
+
+    // Monitor baru konek & share aktif → mulai continuous capture di companion
+    if (monitorSockets.size === 1 && sharingSockets.size > 0) {
+      broadcastToCompanions({ type: 'continuous_capture_control', enabled: true });
+    }
+
+    socket.on('message', (raw) => {
+      let msg;
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
+      if (msg.type === 'update_vision_config') {
+        streamingVisionManager.updateSettings(msg.settings || msg);
+      } else if (msg.type === 'reset_stats') {
+        streamingVisionManager.resetStats();
+      }
+    });
+    socket.once('close', () => {
+      monitorSockets.delete(socket);
+      const stillHasMonitor = monitorSockets.size > 0;
+      streamingVisionManager.setMonitorConnected(stillHasMonitor);
+      console.log(`[monitor] Vision Monitor bridge terputus (sisa: ${monitorSockets.size})`);
+
+      // Monitor terakhir pergi & share masih aktif → stop continuous capture
+      if (!stillHasMonitor && sharingSockets.size > 0) {
+        broadcastToCompanions({ type: 'continuous_capture_control', enabled: false });
+      }
+    });
+    return;
+  }
+
   companionSessionOpened();
 
   let conversationState = 'idle'; // 'idle' | 'processing' | 'speaking'
@@ -243,6 +324,10 @@ wss.on('connection', (socket) => {
   socket.once('close', () => {
     clearSafetyTimer();
     companionSessionClosed();
+    if (sharingSockets.delete(socket) && sharingSockets.size === 0) {
+      console.log('[vision] Companion yang share screen terputus -> share dianggap berhenti');
+      streamingVisionManager.setScreenShareStatus(false);
+    }
   });
 
   const history = []; // histori percakapan per-koneksi
@@ -253,9 +338,10 @@ wss.on('connection', (socket) => {
   const broadcastToAll = (obj) => {
     const json = JSON.stringify(obj);
     for (const client of wss.clients) {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(json);
-      }
+      if (client.readyState !== WebSocket.OPEN) continue;
+      if (client.isMonitor && COMPANION_ONLY_TYPES.has(obj.type)) continue;
+      if (!client.isMonitor && MONITOR_ONLY_TYPES.has(obj.type)) continue;
+      client.send(json);
     }
   };
 
@@ -269,13 +355,7 @@ wss.on('connection', (socket) => {
   });
 
   // Kirim status awal vision streaming ke client yang baru terhubung
-  send({
-    type: 'init_vision_state',
-    active: streamingVisionManager.isScreenShareActive,
-    settings: streamingVisionManager.settings,
-    stats: streamingVisionManager.stats,
-    bufferCount: streamingVisionManager.buffer.length,
-  });
+  sendVisionInit(socket);
 
   socket.on('message', async (raw) => {
     let msg;
@@ -300,7 +380,12 @@ wss.on('connection', (socket) => {
 
     // 2. Status screen share aktif / nonaktif dari companion utama
     if (msg.type === 'screen_share_status') {
-      streamingVisionManager.setScreenShareStatus(msg.active);
+      if (msg.active) sharingSockets.add(socket);
+      else sharingSockets.delete(socket);
+      streamingVisionManager.setScreenShareStatus(sharingSockets.size > 0);
+      // Continuous capture hanya jalan jika ada monitor terhubung
+      const enableCapture = msg.active && monitorSockets.size > 0;
+      send({ type: 'continuous_capture_control', enabled: enableCapture });
       return;
     }
 
@@ -404,42 +489,59 @@ wss.on('connection', (socket) => {
       // 2) Vision — periksa intent & pisahkan source (screen vs webcam)
       let vision = null;
       if (detectVisionIntent(text)) {
-        const hasWebcam = Boolean(image);
-        const hasScreen = Boolean(screenImage);
-        const source = detectVisionSource(text, { hasWebcam, hasScreen });
-        console.log(`[vision] intent terdeteksi: source=${source}, hasWebcam=${hasWebcam}, hasScreen=${hasScreen}`);
+        const route = resolveVisionSource(text, {
+          hasCamera: Boolean(image),
+          hasScreen: Boolean(screenImage),
+        });
+        const { source, requested, available } = route;
+        console.log(
+          `[vision] intent: diminta=${requested ?? 'ambigu'}, dipakai=${source ?? 'none'},` +
+            ` kamera aktif=${Boolean(image)}, layar aktif=${Boolean(screenImage)}`,
+        );
 
-        if (source === 'screen') {
-          if (screenImage) {
-            try {
-              const tVisStart = performance.now();
-              vision = await describeFrame(screenImage, 'screen');
-              console.log(`[timing] vision (screen): ${ms(tVisStart)}ms (t+${ms(tPipe)})`);
-              send({ type: 'vision', text: `[Layar] ${vision}` });
-            } catch (err) {
-              console.error('[vision:screen] error:', err);
-              send({ type: 'error', message: `Vision layar gagal: ${err.message}` });
-            }
+        if (source === null) {
+          // Ambigu & tidak ada sumber aktif. JANGAN sebut Share Screen saja.
+          vision = 'KAMERA_DAN_LAYAR_MATI: user minta kamu melihat sesuatu, tetapi kamera dan share screen sama-sama belum aktif. Minta user menyalakan kamera atau share screen.';
+          send({ type: 'vision', text: '⚠️ Kamera dan layar belum aktif.' });
+        } else if (!available) {
+          if (source === 'screen') {
+            // Hanya muncul kalau user EKSPLISIT minta layar & layar mati.
+            vision = 'LAYAR_MATI: user meminta kamu melihat layar/game/aplikasinya, tetapi Share Screen belum diaktifkan. Minta user klik tombol Share Screen.';
+            send({ type: 'vision', text: '⚠️ Layar belum di-share. Aktifkan tombol "Share Screen" terlebih dahulu.' });
           } else {
-            // Screen share TIDAK aktif — pesan ini HANYA muncul kalau ucapan
-            // secara eksplisit meminta lihat layar/screen/game.
-            vision = 'screen belum di-share. User meminta kamu melihat layar/game/aplikasinya, tetapi user belum mengaktifkan Share Screen.';
-            send({ type: 'vision', text: `⚠️ Layar belum di-share. Aktifkan tombol "Share Screen" terlebih dahulu.` });
+            vision = 'KAMERA_MATI: user meminta kamu melihat lewat kamera, tetapi kamera belum aktif/diizinkan. Minta user menyalakan kamera. Jangan menyebut Share Screen.';
+            send({ type: 'vision', text: '⚠️ Kamera belum aktif.' });
           }
         } else {
-          // source === 'webcam'
-          if (image) {
-            try {
-              const tVisStart = performance.now();
-              vision = await describeFrame(image, 'webcam');
-              console.log(`[timing] vision (webcam): ${ms(tVisStart)}ms (t+${ms(tPipe)})`);
-              send({ type: 'vision', text: `[Kamera] ${vision}` });
-            } catch (err) {
-              console.error('[vision:webcam] error:', err);
-              send({ type: 'error', message: `Vision kamera gagal: ${err.message}` });
+          const frame = source === 'screen' ? screenImage : image;
+          const label = source === 'screen' ? 'Layar' : 'Kamera';
+          try {
+            const tVisStart = performance.now();
+            let desc;
+
+            // Smart routing: kalau sumber = layar DAN monitor terhubung,
+            // ambil deskripsi dari buffer continuous capture (jauh lebih cepat,
+            // tanpa API call tambahan). Kalau buffer kosong → fallback one-shot.
+            if (source === 'screen' && monitorSockets.size > 0) {
+              const bufferDesc = streamingVisionManager.getLatestDescriptions();
+              if (bufferDesc) {
+                desc = bufferDesc;
+                console.log(`[vision] Menggunakan buffer monitor (${streamingVisionManager.buffer.length} entri)`);
+              }
             }
-          } else {
-            vision = 'kamera belum aktif.';
+
+            // Fallback one-shot: buffer kosong atau sumber = kamera
+            if (!desc) {
+              desc = await describeFrame(frame, source);
+            }
+
+            console.log(`[timing] vision (${source}): ${ms(tVisStart)}ms (t+${ms(tPipe)})`);
+            send({ type: 'vision', text: `[${label}] ${desc}` });
+            // Konteks eksplisit: vision BERHASIL, jawab berdasarkan ini.
+            vision = `(${label} aktif & berhasil dilihat) ${desc}`;
+          } catch (err) {
+            console.error(`[vision:${source}] error:`, err);
+            send({ type: 'error', message: `Vision ${label.toLowerCase()} gagal: ${err.message}` });
           }
         }
       }
