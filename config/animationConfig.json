@@ -613,10 +613,10 @@
     },
     "voiceId": {
       "type": "select",
-      "value": "3095f8e1d1fa4b82acaa8aca720a7f83",
-      "default": "3095f8e1d1fa4b82acaa8aca720a7f83",
+      "value": "be67ba79424149ec8a4564cebd3e7938",
+      "default": "be67ba79424149ec8a4564cebd3e7938",
       "options": [
-        "3095f8e1d1fa4b82acaa8aca720a7f83",
+        "be67ba79424149ec8a4564cebd3e7938",
         "default"
       ],
       "label": "Voice Reference ID (Fish Audio)",

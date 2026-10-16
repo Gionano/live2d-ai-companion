@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
 // llmChat.js  (server-side)
-// Percakapan utama waifu lewat model "gpt-oss-120b" via Groq (streaming).
+// Percakapan utama waifu lewat model lokal di LM Studio (streaming).
 // generateReply() adalah async generator: yield potongan teks (delta) begitu
 // datang, supaya route /api/chat bisa mem-forward token demi token ke browser
 // (dan nanti gampang dipecah per-kalimat untuk TTS).
 // ---------------------------------------------------------------------------
-import { groq } from './groqClient.js';
+import { lmStudio, LMSTUDIO_BASE_URL } from './lmStudioClient.js';
 import { CHAT_MODEL } from './modelConfig.js';
 import { WAIFU_SYSTEM_PROMPT } from './personality.js';
 export const HISTORY_MESSAGE_LIMIT = 8;
@@ -81,6 +81,17 @@ export class StructuredReplyParser {
   push(chunk) {
     this.raw += chunk;
     const events = [];
+
+    // Fallback: model lokal (LM Studio) kadang membalas teks biasa, bukan JSON.
+    // Kalau output tidak diawali '{' atau '```', anggap seluruhnya teks balasan.
+    if (this.plain === undefined) {
+      const head = this.raw.trimStart();
+      if (head.length > 0) this.plain = !(head[0] === '{' || head[0] === '`');
+    }
+    if (this.plain) {
+      events.push({ type: 'delta', text: chunk });
+      return events;
+    }
 
     if (!this.emotion) {
       const hit = this.raw.match(/"emotion"\s*:\s*"([^"]+)"/);
@@ -175,30 +186,38 @@ export async function* generateReply(
 
   let stream;
   try {
-    stream = await groq.chat.completions.create({
+    // LM Studio: tidak semua model mendukung response_format json_object
+    // (LM Studio hanya menerima json_schema/text). Format JSON dipaksa lewat
+    // system prompt; StructuredReplyParser toleran terhadap ```json fence.
+    stream = await lmStudio.chat.completions.create({
       model: CHAT_MODEL,
       messages,
       stream: true,
-      response_format: { type: 'json_object' },
-      reasoning_effort: 'low',
-      reasoning_format: 'hidden',
     });
   } catch (error) {
-    if (error?.status === 429 || error?.statusCode === 429) {
-      console.error(
-        '[llm-chat] ⚠️  Groq 429 RATE LIMIT — STT + Vision + LLM Chat semua' +
-          ' lewat Groq, kemungkinan akumulasi RPM melebihi batas.',
-        error?.message ?? '',
-      );
+    if (error?.status === 401) {
+      console.error('[llm-chat] LM Studio 401 — cek LMSTUDIO_API_KEY di .env.');
+    } else if (error?.code === 'ECONNREFUSED' || /ECONNREFUSED|connect/i.test(error?.message ?? '')) {
+      console.error(`[llm-chat] LM Studio tidak terjangkau di ${LMSTUDIO_BASE_URL} — pastikan server LM Studio menyala.`);
     }
     throw error;
   }
   const parser = new StructuredReplyParser();
+  let gotText = false;
 
   for await (const chunk of stream) {
     const delta = chunk.choices[0]?.delta?.content;
     if (!delta) continue;
-    for (const event of parser.push(delta)) yield event;
+    for (const event of parser.push(delta)) {
+      if (event.type === 'delta') gotText = true;
+      yield event;
+    }
+  }
+  if (!gotText) {
+    console.warn(
+      '[llm-chat] LLM tidak menghasilkan teks balasan. Raw output:',
+      JSON.stringify(parser.raw.slice(0, 300)),
+    );
   }
   for (const event of parser.finish()) yield event;
 }

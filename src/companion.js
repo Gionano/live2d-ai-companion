@@ -235,6 +235,16 @@ let audioPlayChain = Promise.resolve();
 const activeAudioSources = new Set();
 
 function updateUiForState(state, isPttRecording = false) {
+  const chatInputEl = document.getElementById('chat-input');
+  const chatSendEl = document.getElementById('chat-send');
+  if (chatInputEl && chatSendEl) {
+    const busy = state !== 'idle';
+    const wasDisabled = chatInputEl.disabled;
+    chatInputEl.disabled = busy;
+    chatSendEl.disabled = busy;
+    chatInputEl.placeholder = busy ? 'Amika sedang merespons…' : 'Ketik pesan…';
+    if (wasDisabled && !busy && !isMobile()) chatInputEl.focus();
+  }
   const mobile = isMobile();
 
   if (mobile) {
@@ -822,6 +832,36 @@ async function startListening() {
     setMicStatus(false, 'Mic gagal');
     log(`Mic gagal: ${err.message}`, 'error');
   }
+}
+
+// ---------------------------------------------------------------------------
+// Input teks (khusus desktop): ketik di box output -> kirim 'text_input'.
+// Server memakai pipeline yang sama dengan suara (tanpa STT).
+// ---------------------------------------------------------------------------
+const chatForm = document.getElementById('chat-form');
+const chatInput = document.getElementById('chat-input');
+if (chatForm && chatInput) {
+  chatForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (isMobile()) return;
+    const text = chatInput.value.trim();
+    if (!text) return;
+    if (currentConversationState !== 'idle') return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      log('Belum terhubung ke server.', 'error');
+      return;
+    }
+    ensureAudio(); // gesture user -> unlock audio untuk playback TTS
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    ws.send(JSON.stringify({
+      type: 'text_input',
+      text,
+      image: captureWebcamFrame(),
+      screenImage: captureScreenFrame(),
+    }));
+    chatInput.value = '';
+    updateUiForState('processing');
+  });
 }
 
 // Tampilan awal sesuai layout

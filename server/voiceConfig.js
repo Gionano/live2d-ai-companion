@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 import { getServerTuning } from './serverConfig.js';
 
-export const DEFAULT_VOICE_ID = '3095f8e1d1fa4b82acaa8aca720a7f83';
+export const DEFAULT_VOICE_ID = 'be67ba79424149ec8a4564cebd3e7938';
 
 export function getVoiceId() {
   return getServerTuning('models', 'voiceId', DEFAULT_VOICE_ID);

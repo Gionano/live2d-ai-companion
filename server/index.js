@@ -317,7 +317,7 @@ wss.on('connection', (socket, req) => {
       safetyTimer = setTimeout(() => {
         console.warn(`[turn] Safety timeout (30s) reached while in state "${conversationState}". Forcing reset to idle.`);
         setConversationState('idle');
-      }, 30000);
+      }, 100000);
     }
   }
 
@@ -442,43 +442,59 @@ wss.on('connection', (socket, req) => {
       return;
     }
 
-    if (msg.type !== 'audio_input') return;
+    if (msg.type !== 'audio_input' && msg.type !== 'text_input') return;
+    const isTyped = msg.type === 'text_input';
 
-    // Turn-taking: jika bukan IDLE (sedang PROCESSING atau SPEAKING), abaikan audio baru
+    // Turn-taking: jika bukan IDLE (sedang PROCESSING atau SPEAKING), abaikan input baru
     if (conversationState !== 'idle') {
-      console.log(`[turn] Ignored audio_input: current state is "${conversationState}"`);
+      console.log(`[turn] Ignored ${msg.type}: current state is "${conversationState}"`);
       return;
     }
 
     const { data, mime, image, screenImage, durationMs } = msg;
+    const typedText = isTyped ? String(msg.text ?? '').trim().slice(0, 1000) : '';
 
     // Guard: audio kosong / terlalu pendek -> skip diam-diam. VAD kadang kirim
     // blip pendek; jangan spam error di log hands-free.
-    if (!data || (typeof durationMs === 'number' && durationMs < 400)) return;
+    if (isTyped) {
+      if (!typedText) return;
+    } else if (!data || (typeof durationMs === 'number' && durationMs < 400)) {
+      return;
+    }
 
     try {
-      const buf = Buffer.from(data, 'base64');
-      if (buf.length < 512) return;
+      let buf = null;
+      if (!isTyped) {
+        buf = Buffer.from(data, 'base64');
+        if (buf.length < 512) return;
+      }
 
-      // Audio valid mulai diproses -> masuk state PROCESSING
+      // Input valid mulai diproses -> masuk state PROCESSING
       setConversationState('processing');
 
       // --- timing diagnostics (ponytail: hapus blok [timing] kalau tak perlu) --
-      // Semua durasi relatif ke saat audio_input valid diterima (tPipe).
+      // Semua durasi relatif ke saat input valid diterima (tPipe).
       const tPipe = performance.now();
       const ms = (a, b) => Math.round((b ?? performance.now()) - a);
 
-      // 1) STT (Groq Whisper)
-      const tSttStart = performance.now();
-      const text = await transcribeAudio(buf, `audio.${extFromMime(mime)}`);
-      const tSttEnd = performance.now();
-      console.log(`[timing] STT: ${ms(tSttStart, tSttEnd)}ms (t+${ms(tPipe, tSttEnd)})`);
+      // 1) STT (Groq Whisper) — dilewati untuk teks ketikan
+      let text;
+      let tSttEnd = performance.now();
+      if (isTyped) {
+        text = typedText;
+        console.log(`[typed] input teks: ${JSON.stringify(text)}`);
+      } else {
+        const tSttStart = performance.now();
+        text = await transcribeAudio(buf, `audio.${extFromMime(mime)}`);
+        tSttEnd = performance.now();
+        console.log(`[timing] STT: ${ms(tSttStart, tSttEnd)}ms (t+${ms(tPipe, tSttEnd)})`);
+      }
 
       // Filter noise: transkripsi kosong / terlalu pendek -> skip seluruh
       // pipeline (jangan buang API call untuk napas/dengkuran/suara latar).
       // ponytail: kalau Whisper masih halusinasi ("terima kasih") pas hening,
       // ganti sttTranscribe ke verbose_json & saring no_speech_prob.
-      if (text.length < 3) {
+      if (!isTyped && text.length < 3) {
         console.log('[stt] skip, noise/pendek:', JSON.stringify(text));
         setConversationState('idle');
         return;

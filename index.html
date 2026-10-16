@@ -106,6 +106,34 @@
       .log-line.vision { color: #c8f0d0; }
       .log-line.muted { color: #8a8aa0; font-style: italic; }
       .log-line.error { color: #ff9b9b; }
+      #chat-form {
+        display: flex;
+        gap: 6px;
+      }
+      #chat-input {
+        flex: 1;
+        min-width: 0;
+        padding: 7px 9px;
+        font-size: 13px;
+        color: #e8e8f0;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 6px;
+        outline: none;
+      }
+      #chat-input:focus { border-color: #3b82f6; }
+      #chat-input:disabled { opacity: 0.5; }
+      #chat-send {
+        padding: 0 12px;
+        font-size: 12px;
+        color: #c4c4dc;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      #chat-send:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
+      #chat-send:disabled { opacity: 0.5; cursor: default; }
       .panel-head {
         display: flex;
         align-items: center;
@@ -189,6 +217,9 @@
           user-select: none;
           -webkit-user-select: none;
         }
+        #chat-form {
+          display: none; /* ketik hanya untuk desktop */
+        }
         #camera-switch-btn {
           display: flex; /* Munculkan di mobile */
         }
@@ -227,6 +258,10 @@
         </div>
       </div>
       <div id="chat-log"></div>
+      <form id="chat-form" autocomplete="off">
+        <input id="chat-input" type="text" maxlength="1000" placeholder="Ketik pesan…" />
+        <button id="chat-send" type="submit">Kirim</button>
+      </form>
     </div>
 
     <video id="webcam" playsinline muted></video>
