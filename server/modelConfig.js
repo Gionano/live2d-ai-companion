@@ -1,8 +1,10 @@
 // Model IDs are kept in one place so real requests and maintenance pings
 // always target the same instances.
-//
-// LLM Chat: gpt-oss-120b via Groq (was DeepSeek V4 Flash via 9inference)
-export const CHAT_MODEL = 'openai/gpt-oss-120b';
+import 'dotenv/config';
+
+// LLM Chat: Qwen3.8 Flash Next Uncensored via Experiential Labs
+export const CHAT_MODEL =
+  process.env.EXPLABS_MODEL || 'qwen3.8-flash-next-uncensored';
 
 // Legacy filter model: DeepSeek V4 Flash via 9inference
 // Still used by streamingVisionManager.js for periodic filtering.

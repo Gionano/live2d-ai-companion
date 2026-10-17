@@ -1,11 +1,12 @@
 // ---------------------------------------------------------------------------
 // llmChat.js  (server-side)
-// Percakapan utama waifu lewat model "gpt-oss-120b" via Groq (streaming).
+// Percakapan utama waifu lewat model "qwen3.8-flash-next-uncensored" via
+// Experiential Labs (streaming).
 // generateReply() adalah async generator: yield potongan teks (delta) begitu
 // datang, supaya route /api/chat bisa mem-forward token demi token ke browser
 // (dan nanti gampang dipecah per-kalimat untuk TTS).
 // ---------------------------------------------------------------------------
-import { groq } from './groqClient.js';
+import { explabs, EXPLABS_BASE_URL } from './experientialClient.js';
 import { CHAT_MODEL } from './modelConfig.js';
 import { WAIFU_SYSTEM_PROMPT } from './personality.js';
 export const HISTORY_MESSAGE_LIMIT = 8;
@@ -82,6 +83,17 @@ export class StructuredReplyParser {
     this.raw += chunk;
     const events = [];
 
+    // Fallback: model lokal (LM Studio) kadang membalas teks biasa, bukan JSON.
+    // Kalau output tidak diawali '{' atau '```', anggap seluruhnya teks balasan.
+    if (this.plain === undefined) {
+      const head = this.raw.trimStart();
+      if (head.length > 0) this.plain = !(head[0] === '{' || head[0] === '`');
+    }
+    if (this.plain) {
+      events.push({ type: 'delta', text: chunk });
+      return events;
+    }
+
     if (!this.emotion) {
       const hit = this.raw.match(/"emotion"\s*:\s*"([^"]+)"/);
       if (hit) {
@@ -149,16 +161,12 @@ export async function* generateReply(
     ? conversationHistory
     : [];
   const trimmedHistory = trimConversationHistory(rawHistory);
-  const messages = [{ role: 'system', content: WAIFU_SYSTEM_PROMPT }];
+  const systemContent = visionDescription
+    ? `${WAIFU_SYSTEM_PROMPT}\n\n[User sedang menunjukkan: ${visionDescription}]`
+    : WAIFU_SYSTEM_PROMPT;
+  const messages = [{ role: 'system', content: systemContent }];
 
   for (const turn of trimmedHistory) messages.push(turn);
-
-  if (visionDescription) {
-    messages.push({
-      role: 'system',
-      content: `[User sedang menunjukkan: ${visionDescription}]`,
-    });
-  }
 
   messages.push({ role: 'user', content: userMessage });
 
@@ -175,30 +183,39 @@ export async function* generateReply(
 
   let stream;
   try {
-    stream = await groq.chat.completions.create({
+    stream = await explabs.chat.completions.create({
       model: CHAT_MODEL,
       messages,
       stream: true,
       response_format: { type: 'json_object' },
-      reasoning_effort: 'low',
-      reasoning_format: 'hidden',
+      reasoning_effort: 'none',
     });
   } catch (error) {
-    if (error?.status === 429 || error?.statusCode === 429) {
-      console.error(
-        '[llm-chat] ⚠️  Groq 429 RATE LIMIT — STT + Vision + LLM Chat semua' +
-          ' lewat Groq, kemungkinan akumulasi RPM melebihi batas.',
-        error?.message ?? '',
-      );
+    if (error?.status === 401) {
+      console.error('[llm-chat] Experiential Labs 401 — cek EXPLABS_API_KEY di .env.');
+    } else if (error?.status === 429) {
+      console.error('[llm-chat] ⚠️ Experiential Labs 429 RATE LIMIT:', error?.message ?? '');
+    } else {
+      console.error(`[llm-chat] Experiential Labs error (${EXPLABS_BASE_URL}):`, error?.message ?? error);
     }
     throw error;
   }
   const parser = new StructuredReplyParser();
+  let gotText = false;
 
   for await (const chunk of stream) {
     const delta = chunk.choices[0]?.delta?.content;
     if (!delta) continue;
-    for (const event of parser.push(delta)) yield event;
+    for (const event of parser.push(delta)) {
+      if (event.type === 'delta') gotText = true;
+      yield event;
+    }
+  }
+  if (!gotText) {
+    console.warn(
+      '[llm-chat] LLM tidak menghasilkan teks balasan. Raw output:',
+      JSON.stringify(parser.raw.slice(0, 300)),
+    );
   }
   for (const event of parser.finish()) yield event;
 }
