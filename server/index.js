@@ -8,6 +8,7 @@
 //   POST /api/chat    { history, message, visionDescription } -> SSE token stream
 // ---------------------------------------------------------------------------
 import http from 'http';
+import { randomUUID } from 'node:crypto';
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
@@ -37,6 +38,7 @@ import {
   setActiveModelPath,
   extractZipModel,
 } from './modelManager.js';
+import { memoryManager } from './memoryManager.js';
 
 const app = express();
 // Frame base64 bisa lumayan besar — naikkan limit body JSON.
@@ -164,6 +166,31 @@ app.post('/api/vision', async (req, res) => {
   }
 });
 
+// --- Long-Term Memory & Episodic Recall APIs ---
+app.get('/api/memory', (req, res) => {
+  res.json({
+    lastSeen: memoryManager.memory.lastSeen,
+    lastSeenText: memoryManager.formatTimeElapsed(memoryManager.memory.lastSeen),
+    profile: memoryManager.memory.profile,
+    episodes: memoryManager.memory.episodes,
+    promptPreview: memoryManager.getMemoryPrompt(),
+  });
+});
+
+app.post('/api/memory/clear', (req, res) => {
+  memoryManager.clearMemory();
+  res.json({ success: true, message: 'Memori jangka panjang berhasil di-reset.' });
+});
+
+app.post('/api/memory/fact', (req, res) => {
+  const { text, category } = req.body ?? {};
+  if (!text) {
+    return res.status(400).json({ error: 'Field "text" wajib diisi.' });
+  }
+  memoryManager.addFact(text, category || 'manual');
+  res.json({ success: true, facts: memoryManager.memory.profile.facts });
+});
+
 app.post('/api/chat', async (req, res) => {
   // Server-Sent Events: satu event per potongan token.
   res.setHeader('Content-Type', 'text/event-stream');
@@ -210,6 +237,12 @@ function extFromMime(mime) {
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
+
+// Desktop Companion (Electron): backend meminta frame layar lewat
+// { type:'request_screen_capture' } dan klien menjawab { type:'screen_frame' }.
+const SCREEN_CAPTURE_TIMEOUT_MS = Number(process.env.SCREEN_CAPTURE_TIMEOUT_MS) || 5000;
+const SCREEN_FRAME_MAX_BASE64_CHARS = 8 * 1024 * 1024; // batas keamanan ~6 MB biner
+const SCREEN_FAIL_SPOKEN = 'layarnya tidak bisa kulihat, coba mode borderless';
 
 // Pesan berat khusus Vision Monitor — jangan dikirim ke browser companion.
 const MONITOR_ONLY_TYPES = new Set(['monitor_frame']);
@@ -317,13 +350,18 @@ wss.on('connection', (socket, req) => {
       safetyTimer = setTimeout(() => {
         console.warn(`[turn] Safety timeout (30s) reached while in state "${conversationState}". Forcing reset to idle.`);
         setConversationState('idle');
-      }, 100000);
+      }, 30000);
     }
   }
 
   socket.once('close', () => {
     clearSafetyTimer();
     companionSessionClosed();
+    for (const pending of pendingCaptures.values()) {
+      clearTimeout(pending.timer);
+      pending.resolve({ ok: false, code: 'DISCONNECTED', spoken: SCREEN_FAIL_SPOKEN });
+    }
+    pendingCaptures.clear();
     if (sharingSockets.delete(socket) && sharingSockets.size === 0) {
       console.log('[vision] Companion yang share screen terputus -> share dianggap berhenti');
       streamingVisionManager.setScreenShareStatus(false);
@@ -334,6 +372,60 @@ wss.on('connection', (socket, req) => {
   const send = (obj) => {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(obj));
   };
+
+  // Minta satu frame layar ke klien desktop. Selalu resolve (tidak pernah reject):
+  //   { ok:true, dataUrl, width, height } | { ok:false, code, spoken }
+  const pendingCaptures = new Map();
+  function requestScreenCapture() {
+    return new Promise((resolve) => {
+      const requestId = randomUUID();
+      const t0 = performance.now();
+      const timer = setTimeout(() => {
+        pendingCaptures.delete(requestId);
+        console.warn(`[vision] request_screen_capture timeout (${SCREEN_CAPTURE_TIMEOUT_MS}ms)`);
+        resolve({
+          ok: false,
+          code: 'TIMEOUT',
+          spoken: 'aku nggak berhasil lihat layarmu barusan, coba bilang lagi ya',
+        });
+      }, SCREEN_CAPTURE_TIMEOUT_MS);
+      pendingCaptures.set(requestId, {
+        timer,
+        resolve: (r) => {
+          if (r.ok) console.log(`[vision] screen_frame diterima dalam ${Math.round(performance.now() - t0)}ms (${r.width}x${r.height})`);
+          resolve(r);
+        },
+      });
+      send({ type: 'request_screen_capture', requestId });
+    });
+  }
+
+  function handleScreenFrame(msg) {
+    const pending = pendingCaptures.get(msg.requestId);
+    if (!pending) return; // terlambat / tidak dikenal -> abaikan
+    pendingCaptures.delete(msg.requestId);
+    clearTimeout(pending.timer);
+    if (msg.error) {
+      console.warn(`[vision] screen_frame error: ${msg.error.code} - ${msg.error.message}`);
+      pending.resolve({
+        ok: false,
+        code: String(msg.error.code || 'CAPTURE_ERROR'),
+        spoken: String(msg.error.spokenMessage || SCREEN_FAIL_SPOKEN).slice(0, 200),
+      });
+      return;
+    }
+    const b64 = msg.base64;
+    if (typeof b64 !== 'string' || b64.length < 100 || b64.length > SCREEN_FRAME_MAX_BASE64_CHARS) {
+      pending.resolve({ ok: false, code: 'INVALID_FRAME', spoken: SCREEN_FAIL_SPOKEN });
+      return;
+    }
+    pending.resolve({
+      ok: true,
+      dataUrl: `data:image/jpeg;base64,${b64}`,
+      width: msg.width,
+      height: msg.height,
+    });
+  }
 
   const broadcastToAll = (obj) => {
     const json = JSON.stringify(obj);
@@ -373,6 +465,11 @@ wss.on('connection', (socket, req) => {
     }
 
     // 1. Continuous frame capture dari screen share di companion utama
+    if (msg.type === 'screen_frame') {
+      handleScreenFrame(msg);
+      return;
+    }
+
     if (msg.type === 'continuous_frame') {
       streamingVisionManager.handleContinuousFrame(msg.image);
       return;
@@ -505,17 +602,31 @@ wss.on('connection', (socket, req) => {
       // 2) Vision — periksa intent & pisahkan source (screen vs webcam)
       let vision = null;
       if (detectVisionIntent(text)) {
+        // Klien Electron: layar "aktif" = Screen Vision di tray ON; frame diminta
+        // on-demand lewat request_screen_capture (bukan Share Screen browser).
+        const isDesktop = msg.desktop === true;
+        const desktopScreenOn = isDesktop && msg.screenVisionOn === true;
         const route = resolveVisionSource(text, {
           hasCamera: Boolean(image),
-          hasScreen: Boolean(screenImage),
+          hasScreen: Boolean(screenImage) || desktopScreenOn,
         });
         const { source, requested, available } = route;
         console.log(
           `[vision] intent: diminta=${requested ?? 'ambigu'}, dipakai=${source ?? 'none'},` +
-            ` kamera aktif=${Boolean(image)}, layar aktif=${Boolean(screenImage)}`,
+            ` kamera aktif=${Boolean(image)}, layar aktif=${Boolean(screenImage) || desktopScreenOn}` +
+            (isDesktop ? ' (desktop)' : ''),
         );
 
-        if (source === null) {
+        if (isDesktop && (source === null || (!available && source === 'screen'))) {
+          // Electron: JANGAN minta klik Share Screen — toggle ada di tray.
+          if (source === null) {
+            vision = 'KAMERA_DAN_LAYAR_MATI: user minta kamu melihat sesuatu, tetapi kamera belum aktif dan fitur lihat layar sedang dimatikan di pengaturan tray. Minta user menyalakan kamera atau mengaktifkan Screen Vision lewat ikon tray. Jangan menyebut Share Screen.';
+            send({ type: 'vision', text: 'Kamera belum aktif dan Screen Vision sedang off.' });
+          } else {
+            vision = 'LAYAR_DIMATIKAN: user meminta kamu melihat layar/game/aplikasinya, tetapi fitur lihat layar sedang dimatikan di pengaturan tray. Minta user mengaktifkan Screen Vision lewat ikon tray. Jangan menyebut Share Screen.';
+            send({ type: 'vision', text: 'Screen Vision sedang off. Aktifkan lewat menu tray.' });
+          }
+        } else if (source === null) {
           // Ambigu & tidak ada sumber aktif. JANGAN sebut Share Screen saja.
           vision = 'KAMERA_DAN_LAYAR_MATI: user minta kamu melihat sesuatu, tetapi kamera dan share screen sama-sama belum aktif. Minta user menyalakan kamera atau share screen.';
           send({ type: 'vision', text: '⚠️ Kamera dan layar belum aktif.' });
@@ -529,11 +640,12 @@ wss.on('connection', (socket, req) => {
             send({ type: 'vision', text: '⚠️ Kamera belum aktif.' });
           }
         } else {
-          const frame = source === 'screen' ? screenImage : image;
+          let frame = source === 'screen' ? screenImage : image;
           const label = source === 'screen' ? 'Layar' : 'Kamera';
           try {
             const tVisStart = performance.now();
             let desc;
+            let captureFailure = null;
 
             // Smart routing: kalau sumber = layar DAN monitor terhubung,
             // ambil deskripsi dari buffer continuous capture (jauh lebih cepat,
@@ -546,15 +658,28 @@ wss.on('connection', (socket, req) => {
               }
             }
 
-            // Fallback one-shot: buffer kosong atau sumber = kamera
-            if (!desc) {
-              desc = await describeFrame(frame, source);
+            // Electron: minta frame layar langsung ke klien (timeout 5 dtk)
+            if (!desc && source === 'screen' && !frame && desktopScreenOn) {
+              const cap = await requestScreenCapture();
+              if (cap.ok) frame = cap.dataUrl;
+              else captureFailure = cap;
             }
 
-            console.log(`[timing] vision (${source}): ${ms(tVisStart)}ms (t+${ms(tPipe)})`);
-            send({ type: 'vision', text: `[${label}] ${desc}` });
-            // Konteks eksplisit: vision BERHASIL, jawab berdasarkan ini.
-            vision = `(${label} aktif & berhasil dilihat) ${desc}`;
+            if (captureFailure) {
+              console.warn(`[vision] capture layar gagal (${captureFailure.code})`);
+              vision = `LAYAR_GAGAL: user meminta kamu melihat layarnya, tetapi layar tidak berhasil ditangkap (${captureFailure.code}). Sampaikan dengan natural, kurang lebih: "${captureFailure.spoken}". Jangan pura-pura melihat dan jangan menyebut Share Screen.`;
+              send({ type: 'vision', text: captureFailure.spoken });
+            } else {
+              // Fallback one-shot: buffer kosong atau sumber = kamera
+              if (!desc) {
+                desc = await describeFrame(frame, source);
+              }
+
+              console.log(`[timing] vision (${source}): ${ms(tVisStart)}ms (t+${ms(tPipe)})`);
+              send({ type: 'vision', text: `[${label}] ${desc}` });
+              // Konteks eksplisit: vision BERHASIL, jawab berdasarkan ini.
+              vision = `(${label} aktif & berhasil dilihat) ${desc}`;
+            }
           } catch (err) {
             console.error(`[vision:${source}] error:`, err);
             send({ type: 'error', message: `Vision ${label.toLowerCase()} gagal: ${err.message}` });
@@ -654,6 +779,9 @@ wss.on('connection', (socket, req) => {
       if (history.length > HISTORY_MESSAGE_LIMIT) {
         history.splice(0, history.length - HISTORY_MESSAGE_LIMIT);
       }
+
+      // Catat & ekstrak memori jangka panjang di latar belakang (non-blocking)
+      void memoryManager.recordTurnAndExtract(text, full);
     } catch (err) {
       console.error('[stt] error:', err);
       setConversationState('idle');

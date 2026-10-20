@@ -16,9 +16,36 @@ const video = document.getElementById('webcam');
 const canvas = document.getElementById('capture-canvas');
 const micStatusEl = document.getElementById('mic-status');
 const micLabelEl = document.getElementById('mic-label');
+const overlaySubtitleEl = document.getElementById('overlay-subtitle');
 import { tuning } from './tuningConfig.js';
 
+const isOverlay = new URLSearchParams(window.location.search).get('mode') === 'overlay';
+let overlaySubtitleHideDelayMs = 6500;
+let overlaySubtitleTimer = null;
+
+if (window.desktopBridge?.getAppInfo) {
+  window.desktopBridge
+    .getAppInfo()
+    .then((info) => {
+      if (info && typeof info.subtitleHideDelayMs === 'number' && info.subtitleHideDelayMs > 0) {
+        overlaySubtitleHideDelayMs = info.subtitleHideDelayMs;
+      }
+    })
+    .catch(() => {});
+}
+
+function showOverlaySubtitle(text) {
+  if (!isOverlay || !overlaySubtitleEl || !text) return;
+  overlaySubtitleEl.textContent = text;
+  overlaySubtitleEl.classList.add('visible');
+  if (overlaySubtitleTimer) clearTimeout(overlaySubtitleTimer);
+  overlaySubtitleTimer = setTimeout(() => {
+    overlaySubtitleEl.classList.remove('visible');
+  }, overlaySubtitleHideDelayMs);
+}
+
 function isMobile() {
+  if (isOverlay) return false;
   return window.innerWidth <= 768;
 }
 
@@ -93,6 +120,72 @@ screenVideo.muted = true;
 
 const screenShareBtn = document.getElementById('screen-share-btn');
 
+// ---------------------------------------------------------------------------
+// Desktop Companion (Electron): capture layar langsung lewat desktopBridge,
+// TANPA popup getDisplayMedia. Di browser biasa/mobile jalur lama tidak berubah.
+// "Aktif" di sini = toggle Screen Vision di tray.
+// ---------------------------------------------------------------------------
+const isDesktopCapture = typeof window.desktopBridge?.captureScreen === 'function';
+let desktopScreenVision = false; // disinkronkan dari main process (tray)
+let desktopCaptureInFlight = false;
+
+/** Apakah sumber layar sedang aktif (Share Screen di browser / Screen Vision di Electron). */
+function isScreenActive() {
+  return isDesktopCapture ? desktopScreenVision : Boolean(screenStream);
+}
+
+/** Metadata tambahan untuk audio_input/text_input agar backend tahu klien desktop. */
+function desktopInputMeta() {
+  return isDesktopCapture ? { desktop: true, screenVisionOn: desktopScreenVision } : {};
+}
+
+/** Ambil satu frame lewat desktopBridge; retry sekali jika kena rate limit main process. */
+async function captureDesktopFrame() {
+  const opts = { maxWidth: tuning.get('vision.screenMaxWidth') ?? 1280 };
+  try {
+    return await window.desktopBridge.captureScreen(opts);
+  } catch (err) {
+    if (err?.code === 'RATE_LIMITED') {
+      await new Promise((r) => setTimeout(r, (err.retryAfterMs || 500) + 30));
+      return window.desktopBridge.captureScreen(opts);
+    }
+    throw err;
+  }
+}
+
+/** Beritahu backend status sumber layar (dipakai untuk continuous capture). */
+function syncDesktopScreenStatus() {
+  if (!isDesktopCapture) return;
+  if (!desktopScreenVision) stopContinuousCapture(); // jangan capture saat toggle off
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'screen_share_status', active: desktopScreenVision }));
+  }
+}
+
+function applyDesktopScreenVision(enabled) {
+  const next = Boolean(enabled);
+  if (next === desktopScreenVision) return;
+  desktopScreenVision = next;
+  console.log(`[ScreenVision] Toggle tray: ${next ? 'ON' : 'OFF'}`);
+  syncDesktopScreenStatus();
+}
+
+if (isDesktopCapture) {
+  window.desktopBridge
+    .getOverlayState?.()
+    .then((state) => {
+      if (state && typeof state.screenVision === 'boolean') {
+        applyDesktopScreenVision(state.screenVision);
+      }
+    })
+    .catch(() => {});
+  window.desktopBridge.onOverlayStateChanged?.((state) => {
+    if (state && typeof state.screenVision === 'boolean') {
+      applyDesktopScreenVision(state.screenVision);
+    }
+  });
+}
+
 function startContinuousCapture() {
   stopContinuousCapture();
   console.log(`[ScreenShare] Memulai capture loop kontinu: 1 frame setiap ${captureIntervalSeconds} detik`);
@@ -112,7 +205,34 @@ function stopContinuousCapture() {
   }
 }
 
+async function sendDesktopContinuousFrame() {
+  if (!desktopScreenVision || desktopCaptureInFlight) return;
+  desktopCaptureInFlight = true;
+  try {
+    const shot = await captureDesktopFrame();
+    // Toggle bisa dimatikan selama capture berjalan -> buang frame
+    if (!desktopScreenVision) return;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'continuous_frame',
+        image: `data:image/jpeg;base64,${shot.base64}`,
+        timestamp: Date.now(),
+      }));
+    }
+  } catch (err) {
+    if (err?.code !== 'RATE_LIMITED' && err?.code !== 'SCREEN_VISION_DISABLED') {
+      console.warn('[ScreenVision] Capture kontinu gagal:', err?.code, err?.message);
+    }
+  } finally {
+    desktopCaptureInFlight = false;
+  }
+}
+
 function sendContinuousFrame() {
+  if (isDesktopCapture) {
+    void sendDesktopContinuousFrame();
+    return;
+  }
   if (!screenStream || !screenVideo.videoWidth) return;
   const frame = captureScreenFrame();
   if (frame && ws && ws.readyState === WebSocket.OPEN) {
@@ -177,6 +297,11 @@ function stopScreenShare() {
 
 if (screenShareBtn) {
   screenShareBtn.addEventListener('click', () => {
+    if (isDesktopCapture) {
+      // Electron: tombol hanya mengubah toggle Screen Vision (tanpa popup Share Screen)
+      window.desktopBridge.setScreenVision?.(!desktopScreenVision);
+      return;
+    }
     if (screenStream) {
       stopScreenShare();
     } else {
@@ -396,7 +521,7 @@ function connectWS() {
   const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
   ws.addEventListener('open', () => {
-    if (screenStream) {
+    if (isScreenActive()) {
       ws.send(JSON.stringify({ type: 'screen_share_status', active: true }));
     }
   });
@@ -426,6 +551,7 @@ function connectWS() {
         break;
       case 'amika_replied':
         log(`Amika: ${msg.text}`, 'assistant');
+        showOverlaySubtitle(msg.text);
         // Tunggu antrian decode audio selesai sebelum evaluasi playback
         audioPlayChain.then(() => {
           isGeneratingAudio = false;
@@ -454,9 +580,53 @@ function connectWS() {
         }
         break;
       }
+      case 'request_screen_capture': {
+        // Backend meminta satu frame layar (intent "lihat layar"). Hanya relevan di Electron.
+        const requestId = msg.requestId;
+        const reply = (payload) => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'screen_frame', requestId, ...payload }));
+          }
+        };
+        if (!isDesktopCapture) {
+          reply({ error: { code: 'NOT_SUPPORTED', message: 'Capture layar langsung tidak tersedia.' } });
+          break;
+        }
+        if (!desktopScreenVision) {
+          reply({
+            error: {
+              code: 'SCREEN_VISION_DISABLED',
+              message: 'Screen Vision sedang dimatikan di tray.',
+              spokenMessage: 'Fitur lihat layar sedang dimatikan di pengaturan tray.',
+            },
+          });
+          break;
+        }
+        captureDesktopFrame()
+          .then((shot) => {
+            reply({
+              base64: shot.base64,
+              mimeType: shot.mimeType || 'image/jpeg',
+              width: shot.width,
+              height: shot.height,
+              displayId: shot.displayId,
+            });
+          })
+          .catch((err) => {
+            console.warn('[ScreenVision] Capture on-demand gagal:', err?.code, err?.message);
+            reply({
+              error: {
+                code: err?.code || 'CAPTURE_ERROR',
+                message: err?.message || 'Gagal capture layar.',
+                spokenMessage: err?.spokenMessage || 'layarnya tidak bisa kulihat, coba mode borderless',
+              },
+            });
+          });
+        break;
+      }
       case 'continuous_capture_control': {
         // Backend mengendalikan continuous capture berdasarkan status Vision Monitor.
-        if (msg.enabled && screenStream) {
+        if (msg.enabled && isScreenActive()) {
           console.log('[ScreenShare] Backend meminta mulai continuous capture');
           startContinuousCapture();
           if (screenShareBtn) {
@@ -465,7 +635,7 @@ function connectWS() {
         } else {
           console.log('[ScreenShare] Backend meminta stop continuous capture');
           stopContinuousCapture();
-          if (screenShareBtn && screenStream) {
+          if (screenShareBtn && isScreenActive()) {
             screenShareBtn.textContent = '🖥️ Screen On';
           }
         }
@@ -479,7 +649,7 @@ function connectWS() {
             captureIntervalSeconds = newInterval;
             console.log(`[ScreenShare] Interval capture diperbarui ke ${captureIntervalSeconds}s`);
             // Restart loop hanya jika continuous capture sedang jalan
-            if (continuousCaptureTimer && screenStream) {
+            if (continuousCaptureTimer && isScreenActive()) {
               if (screenShareBtn) {
                 screenShareBtn.textContent = `🖥️ Screen On (${captureIntervalSeconds}s)`;
               }
@@ -576,6 +746,7 @@ async function startPttRecording() {
             mime: blob.type,
             image,
             screenImage,
+            ...desktopInputMeta(),
             durationMs: dur,
           }),
         );
@@ -679,6 +850,49 @@ let segStartAt = 0;
 let speaking = false; // user sedang bicara (segmen berjalan)
 let silenceStart = 0; // timestamp mulai hening
 let listening = false;
+let isMicMutedByDesktop = false;
+
+function applyDesktopMicMute(muted, notifySubtitle = false) {
+  const nextMuted = Boolean(muted);
+  const changed = isMicMutedByDesktop !== nextMuted;
+  isMicMutedByDesktop = nextMuted;
+
+  if (micStream) {
+    micStream.getAudioTracks().forEach((track) => {
+      track.enabled = !nextMuted;
+    });
+  }
+
+  if (nextMuted) {
+    if (segRecorder) abortSegment();
+    setMicStatus(false, '🔇 Mikrofon di-mute');
+    if (notifySubtitle && changed) {
+      showOverlaySubtitle('🔇 Mikrofon di-mute (Ctrl+Alt+M)');
+    }
+  } else {
+    if (listening && currentConversationState === 'idle') {
+      setMicStatus(true, 'Mendengarkan…');
+    }
+    if (notifySubtitle && changed) {
+      showOverlaySubtitle('🎙️ Mikrofon aktif kembali');
+    }
+  }
+}
+
+if (window.desktopBridge) {
+  window.desktopBridge
+    .getOverlayState?.()
+    .then((state) => {
+      if (state && typeof state.muteMic === 'boolean') {
+        applyDesktopMicMute(state.muteMic, false);
+      }
+    })
+    .catch(() => {});
+
+  window.desktopBridge.onMuteMicChanged?.((muted) => {
+    applyDesktopMicMute(muted, true);
+  });
+}
 
 function isamikaSpeaking() {
   const speakTail = tuning.get('vad.speakTail') ?? 0.15;
@@ -729,6 +943,7 @@ async function flushSegment() {
   const blob = new Blob(segChunks, { type });
   segRecorder = null;
   segChunks = [];
+  if (isMicMutedByDesktop) return;
   const minSeg = tuning.get('vad.minSegMs') ?? 400;
   if (dur < minSeg || blob.size < 1024) return; // noise pendek -> buang
 
@@ -750,6 +965,7 @@ async function flushSegment() {
         mime: blob.type,
         image,
         screenImage,
+        ...desktopInputMeta(),
         durationMs: dur,
       }),
     );
@@ -762,6 +978,13 @@ function vadLoop() {
 
   // Layout mobile tidak memakai VAD (menggunakan Push-to-Talk)
   if (isMobile()) return;
+
+  // Jika mikrofon di-mute lewat tray atau shortcut (Ctrl+Alt+M), hentikan VAD
+  if (isMicMutedByDesktop) {
+    if (segRecorder) abortSegment();
+    setMicStatus(false, '🔇 Mikrofon di-mute');
+    return;
+  }
 
   // Turn-taking: jika bukan IDLE (sedang PROCESSING atau SPEAKING), nonaktifkan deteksi
   if (currentConversationState !== 'idle') {
@@ -815,6 +1038,9 @@ async function startListening() {
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
     }
+    micStream.getAudioTracks().forEach((track) => {
+      track.enabled = !isMicMutedByDesktop;
+    });
 
     if (!isMobile()) {
       vadAnalyser = audioCtx.createAnalyser();
@@ -822,7 +1048,7 @@ async function startListening() {
       vadData = new Uint8Array(vadAnalyser.fftSize);
       // Sambung mic -> analyser SAJA (jangan ke destination, nanti feedback).
       audioCtx.createMediaStreamSource(micStream).connect(vadAnalyser);
-      setMicStatus(true, 'Mendengarkan…');
+      setMicStatus(!isMicMutedByDesktop, isMicMutedByDesktop ? '🔇 Mikrofon di-mute' : 'Mendengarkan…');
       requestAnimationFrame(vadLoop);
     } else {
       updateUiForState(currentConversationState);
@@ -858,6 +1084,7 @@ if (chatForm && chatInput) {
       text,
       image: captureWebcamFrame(),
       screenImage: captureScreenFrame(),
+      ...desktopInputMeta(),
     }));
     chatInput.value = '';
     updateUiForState('processing');
@@ -875,6 +1102,12 @@ if (isMobile()) {
 const kick = () => startListening();
 document.addEventListener('pointerdown', kick, { once: true });
 document.addEventListener('keydown', kick, { once: true });
+
+// Pada mode overlay / Electron companion (autoplay-policy sudah diizinkan),
+// langsung aktifkan listening hands-free tanpa menunggu klik di dalam jendela.
+if (isOverlay || window.desktopBridge?.isDesktopCompanion) {
+  startListening();
+}
 
 // Responsif saat resize browser
 window.addEventListener('resize', () => {

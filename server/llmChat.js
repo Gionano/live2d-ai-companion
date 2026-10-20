@@ -9,6 +9,7 @@
 import { explabs, EXPLABS_BASE_URL } from './experientialClient.js';
 import { CHAT_MODEL } from './modelConfig.js';
 import { WAIFU_SYSTEM_PROMPT } from './personality.js';
+import { memoryManager } from './memoryManager.js';
 export const HISTORY_MESSAGE_LIMIT = 8;
 export const HISTORY_TOKEN_LIMIT = 700;
 export const REPLY_EMOTIONS = new Set([
@@ -161,9 +162,12 @@ export async function* generateReply(
     ? conversationHistory
     : [];
   const trimmedHistory = trimConversationHistory(rawHistory);
-  const systemContent = visionDescription
-    ? `${WAIFU_SYSTEM_PROMPT}\n\n[User sedang menunjukkan: ${visionDescription}]`
-    : WAIFU_SYSTEM_PROMPT;
+  const memoryContext = memoryManager.getMemoryPrompt();
+  const systemParts = [WAIFU_SYSTEM_PROMPT, memoryContext];
+  if (visionDescription) {
+    systemParts.push(`[User sedang menunjukkan: ${visionDescription}]`);
+  }
+  const systemContent = systemParts.join('\n\n');
   const messages = [{ role: 'system', content: systemContent }];
 
   for (const turn of trimmedHistory) messages.push(turn);
