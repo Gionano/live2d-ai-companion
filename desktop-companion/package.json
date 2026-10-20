@@ -1,0 +1,63 @@
+{
+  "name": "amika-desktop-companion",
+  "productName": "Amika Desktop Companion",
+  "version": "0.1.0",
+  "description": "Native Electron desktop companion for Amika Live2D AI Waifu (system tray, transparent overlay, direct screen capture)",
+  "main": "src/main/index.js",
+  "type": "module",
+  "private": true,
+  "author": "Amika Project",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electron . --dev",
+    "start": "electron .",
+    "build:frontend": "npm --prefix .. run build",
+    "dist": "electron-builder --win nsis --x64",
+    "pack": "electron-builder --dir --x64"
+  },
+  "build": {
+    "appId": "com.amika.desktopcompanion",
+    "productName": "Amika Desktop Companion",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist",
+        "to": "frontend-dist",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Amika Desktop Companion",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  }
+}
