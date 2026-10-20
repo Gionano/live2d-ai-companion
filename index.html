@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Amika Live2D Companion</title>
+    <script>
+      if (new URLSearchParams(window.location.search).get('mode') === 'overlay') {
+        document.documentElement.classList.add('overlay-mode');
+      }
+    </script>
     <style>
       :root {
         --pip-width: 35vw;
@@ -12,6 +17,7 @@
       }
       * { margin: 0; padding: 0; box-sizing: border-box; }
       html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; }
+      html.overlay-mode, html.overlay-mode body { background: transparent !important; }
       #app { width: 100vw; height: 100vh; display: block; position: relative; z-index: 2; }
       #webcam { display: none; }
 
@@ -228,10 +234,151 @@
           gap: 6px;
         }
       }
+
+      /* Mode Overlay (?mode=overlay) - Transparan penuh, hanya tampilkan avatar & subtitle singkat */
+      html.overlay-mode #companion-panel,
+      html.overlay-mode #status,
+      html.overlay-mode #camera-switch-btn,
+      html.overlay-mode #webcam {
+        display: none !important;
+      }
+
+      html.overlay-mode #app {
+        position: relative !important;
+        top: 0 !important;
+        right: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        border: none !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        background: transparent !important;
+      }
+
+      #overlay-subtitle {
+        display: none;
+        position: fixed;
+        bottom: 14px;
+        left: 14px;
+        right: 14px;
+        padding: 10px 14px;
+        background: rgba(15, 15, 28, 0.82);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 12px;
+        color: #ffd9ec;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 13px;
+        line-height: 1.4;
+        text-align: center;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        pointer-events: none;
+        z-index: 20;
+        opacity: 0;
+        transform: translateY(6px);
+        transition: opacity 0.25s ease, transform 0.25s ease;
+      }
+
+      html.overlay-mode #overlay-subtitle {
+        display: block;
+      }
+
+      html.overlay-mode #overlay-subtitle.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      #overlay-edit-frame {
+        display: none;
+      }
+
+      html.overlay-mode.overlay-edit-mode #overlay-edit-frame {
+        display: block;
+        position: fixed;
+        inset: 0;
+        border: 2px dashed rgba(110, 215, 255, 0.9);
+        border-radius: 10px;
+        background: rgba(15, 30, 50, 0.14);
+        z-index: 30;
+        pointer-events: none;
+      }
+
+      /* Area drag kustom di bagian dalam (menyisakan 8px di tepi luar agar resize tepi/sudut Windows tetap responsif & bebas tembus border Windows) */
+      html.overlay-mode.overlay-edit-mode #overlay-drag-zone {
+        position: fixed;
+        inset: 8px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px;
+        pointer-events: auto;
+        cursor: grab;
+        user-select: none;
+        touch-action: none;
+      }
+
+      html.overlay-mode.overlay-edit-mode #overlay-drag-zone.dragging {
+        cursor: grabbing;
+      }
+
+      html.overlay-mode.overlay-edit-mode #overlay-drag-handle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 10px;
+        border-radius: 999px;
+        background: rgba(12, 20, 38, 0.92);
+        border: 1px solid rgba(110, 215, 255, 0.75);
+        color: #d6f4ff;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.2px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+        transition: transform 0.06s linear;
+      }
+
+      html.overlay-mode.overlay-edit-mode .overlay-edit-btn {
+        pointer-events: auto;
+        cursor: pointer;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(110, 215, 255, 0.55);
+        background: rgba(35, 75, 115, 0.85);
+        color: #ffffff;
+        font-size: 10.5px;
+        font-weight: 600;
+        transition: background 0.15s ease;
+      }
+
+      html.overlay-mode.overlay-edit-mode .overlay-edit-btn:hover {
+        background: rgba(65, 135, 195, 0.95);
+      }
+
+      html.overlay-mode.overlay-edit-mode #overlay-edit-footer {
+        padding: 3px 10px;
+        border-radius: 999px;
+        background: rgba(12, 20, 38, 0.85);
+        border: 1px solid rgba(110, 215, 255, 0.45);
+        color: #b8e8ff;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 10.5px;
+      }
     </style>
   </head>
   <body>
     <canvas id="app"></canvas>
+    <div id="overlay-subtitle" aria-live="polite"></div>
+    <div id="overlay-edit-frame">
+      <div id="overlay-drag-zone">
+        <div id="overlay-drag-handle">
+          <span>✥ Mode Edit — Geser / Tarik Tepi</span>
+          <button id="overlay-reset-btn" class="overlay-edit-btn" type="button" title="Reset ukuran & posisi">↺ Reset</button>
+          <button id="overlay-done-btn" class="overlay-edit-btn" type="button" title="Selesai edit & aktifkan Click-Through (Ctrl+Alt+E)">✓ Selesai</button>
+        </div>
+        <div id="overlay-edit-footer">Tarik tepi/sudut untuk ubah ukuran • Ctrl+Alt+E selesai</div>
+      </div>
+    </div>
 
     <!-- Tombol Switch Kamera Khusus Mobile -->
     <button id="camera-switch-btn" title="Ganti Kamera">

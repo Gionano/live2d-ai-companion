@@ -22,7 +22,15 @@ export const HALF_BODY_FRAMING = {
   mobile: { scale: 1.45, x: 0.0, y: -0.40 },
 };
 
+// Batas FPS saat berjalan di mode overlay (?mode=overlay) — mudah diubah
+export const OVERLAY_FPS_LIMIT = 30;
+
+export function isOverlayMode() {
+  return new URLSearchParams(window.location.search).get('mode') === 'overlay';
+}
+
 export function getHalfBodyConfig() {
+  if (isOverlayMode()) return HALF_BODY_FRAMING.desktop;
   return window.innerWidth <= 768 ? HALF_BODY_FRAMING.mobile : HALF_BODY_FRAMING.desktop;
 }
 
@@ -151,6 +159,20 @@ class CompanionCubismModel extends CubismUserModel {
 
     // --- Synthetic face tracking (always-on) ---
     this.syntheticTracker = new SyntheticTracker();
+
+    // --- Overlay Fit-to-Bounds & Preset state (?mode=overlay only) ---
+    this.isOverlay = isOverlayMode();
+    this.wingParamIndex = -1;
+    this.wingExpressionName = '翅膀';
+    this.hiddenHalfBodyPartIds = [];
+    this.hiddenHalfBodyPartIndices = [];
+    this.overlayPresetId = 'with-wings';
+    this.overlayShowWings = true;
+    this.overlayPresetConfig = null;
+    this.measuredPresetBounds = new Map();
+    this.lastOverlayFitSummary = null;
+    this._pendingDiagReason = 'initial-load';
+    this._pendingDiagFrames = 0;
   }
 
   scanParameters() {
@@ -233,10 +255,25 @@ class CompanionCubismModel extends CubismUserModel {
       console.warn('[Live2D] Model ini tidak punya ParamAngleY, fitur head sway dinonaktifkan.');
     }
 
+    // Resolve wing parameter (Param41 / 翅膀.exp3.json) & half-body hidden leg parts for overlay mode
+    this.wingParamIndex = this._model.getParameterIndex(idMgr.getId('Param41'));
+    this.hiddenHalfBodyPartIndices = [];
+    for (const partIdStr of this.hiddenHalfBodyPartIds) {
+      const pIdx = this._model.getPartIndex(idMgr.getId(partIdStr));
+      if (pIdx >= 0) {
+        this.hiddenHalfBodyPartIndices.push(pIdx);
+      }
+    }
+
     // Resolve synthetic tracking parameter indices (with one-time warnings)
     this.syntheticTracker.resolveIndices(this._model, idMgr, this.availableParams);
 
     this._model.saveParameters();
+
+    if (this.isOverlay) {
+      this.measureRestPoseOverlayBounds();
+    }
+
     this.createRenderer(this.canvas.width, this.canvas.height);
     this.getRenderer().startUp(this.gl);
     this.getRenderer().setIsPremultipliedAlpha(true);
@@ -649,6 +686,18 @@ class CompanionCubismModel extends CubismUserModel {
 
     if (this.eyeBlink) this.eyeBlink.updateParameters(this._model, delta);
     this._expressionManager.updateMotion(this._model, delta);
+
+    // Di mode overlay, pastikan arah ekspresi sayap (翅膀.exp3.json / Param41)
+    // tetap konsisten meskipun emosi netral memanggil stopAllMotions():
+    // Param41 = 0.0 -> MENAMPILKAN sayap (preset "Dengan sayap")
+    // Param41 = 1.0 -> MENYEMBUNYIKAN sayap (preset "Tanpa sayap")
+    if (this.isOverlay && this.wingParamIndex >= 0) {
+      this._model.setParameterValueByIndex(
+        this.wingParamIndex,
+        this.overlayShowWings ? 0.0 : 1.0,
+      );
+    }
+
     if (this.breath) this.breath.updateParameters(this._model, delta);
 
     // Lip sync smoothing.
@@ -696,7 +745,264 @@ class CompanionCubismModel extends CubismUserModel {
         );
       }
     }
+
+    // Di mode overlay half-body, sembunyikan part kaki bawah rok (Part29, Part30, Part74)
+    // supaya batas bawah model adalah ujung rok (ArtMesh79) tanpa potongan paha.
+    if (this.isOverlay && this.hiddenHalfBodyPartIndices.length > 0) {
+      for (const partIdx of this.hiddenHalfBodyPartIndices) {
+        this._model.setPartOpacityByIndex(partIdx, 0.0);
+      }
+    }
+
     this._model.update();
+  }
+
+  /**
+   * Mengukur bounding box mesh visible pada pose diam (rest pose) untuk kedua preset overlay:
+   * - 'with-wings' (Param41 = 0.0, sayap tampil)
+   * - 'without-wings' (Param41 = 1.0, sayap disembunyikan via arah 翅膀.exp3.json)
+   */
+  measureRestPoseOverlayBounds() {
+    const coreModel = this._model?._model;
+    if (!coreModel) return;
+
+    this.measuredPresetBounds.clear();
+
+    for (const partIdx of this.hiddenHalfBodyPartIndices) {
+      this._model.setPartOpacityByIndex(partIdx, 0.0);
+    }
+
+    const measureCurrentVisibleMesh = () => {
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      let minXMesh = '';
+      let maxXMesh = '';
+      let minYMesh = '';
+      let maxYMesh = '';
+
+      const dCount = coreModel.drawables?.count || 0;
+      for (let i = 0; i < dCount; i++) {
+        const op = coreModel.drawables.opacities[i];
+        const vis = Live2DCubismCore.Utils.hasIsVisibleBit(coreModel.drawables.dynamicFlags[i]);
+        if (op <= 0.01 || !vis) continue;
+        const pos = coreModel.drawables.vertexPositions[i];
+        const meshId = coreModel.drawables.ids[i];
+        for (let j = 0; j < pos.length; j += 2) {
+          const vx = pos[j];
+          const vy = pos[j + 1];
+          if (vx < minX) {
+            minX = vx;
+            minXMesh = meshId;
+          }
+          if (vx > maxX) {
+            maxX = vx;
+            maxXMesh = meshId;
+          }
+          if (vy < minY) {
+            minY = vy;
+            minYMesh = meshId;
+          }
+          if (vy > maxY) {
+            maxY = vy;
+            maxYMesh = meshId;
+          }
+        }
+      }
+
+      if (!Number.isFinite(minX)) {
+        return {
+          minX: -0.5,
+          maxX: 0.5,
+          minY: -0.2,
+          maxY: 0.65,
+          width: 1.0,
+          height: 0.85,
+          aspectRatio: 1.1765,
+          extremes: {},
+        };
+      }
+
+      const width = maxX - minX;
+      const height = maxY - minY;
+      return {
+        minX: +minX.toFixed(4),
+        maxX: +maxX.toFixed(4),
+        minY: +minY.toFixed(4),
+        maxY: +maxY.toFixed(4),
+        width: +width.toFixed(4),
+        height: +height.toFixed(4),
+        aspectRatio: +(width / height).toFixed(4),
+        extremes: { minXMesh, maxXMesh, minYMesh, maxYMesh },
+      };
+    };
+
+    // 1. Ukur preset 'with-wings' (Param41 = 0.0 -> sayap tampil)
+    if (this.wingParamIndex >= 0) {
+      this._model.setParameterValueByIndex(this.wingParamIndex, 0.0);
+    }
+    this._model.update();
+    this.measuredPresetBounds.set('with-wings', measureCurrentVisibleMesh());
+
+    // 2. Ukur preset 'without-wings' (Param41 = 1.0 -> sayap disembunyikan)
+    if (this.wingParamIndex >= 0) {
+      this._model.setParameterValueByIndex(this.wingParamIndex, 1.0);
+    }
+    this._model.update();
+    this.measuredPresetBounds.set('without-wings', measureCurrentVisibleMesh());
+
+    // Kembalikan parameter ke kondisi awal
+    this._model.loadParameters();
+    for (const partIdx of this.hiddenHalfBodyPartIndices) {
+      this._model.setPartOpacityByIndex(partIdx, 0.0);
+    }
+    if (this.wingParamIndex >= 0) {
+      this._model.setParameterValueByIndex(
+        this.wingParamIndex,
+        this.overlayShowWings ? 0.0 : 1.0,
+      );
+    }
+    this._model.update();
+  }
+
+  /**
+   * Menerapkan konfigurasi preset overlay ('with-wings' | 'without-wings') dan toggle sayap.
+   */
+  applyOverlayState(overlayState) {
+    if (!overlayState) return;
+    if (overlayState.wingExpressionName) {
+      this.wingExpressionName = overlayState.wingExpressionName;
+    }
+    if (Array.isArray(overlayState.hiddenHalfBodyPartIds) && this._model) {
+      const idMgr = CubismFramework.getIdManager();
+      this.hiddenHalfBodyPartIds = overlayState.hiddenHalfBodyPartIds;
+      this.hiddenHalfBodyPartIndices = [];
+      for (const partIdStr of this.hiddenHalfBodyPartIds) {
+        const pIdx = this._model.getPartIndex(idMgr.getId(partIdStr));
+        if (pIdx >= 0) this.hiddenHalfBodyPartIndices.push(pIdx);
+      }
+    }
+
+    const presetId = overlayState.activePreset || 'with-wings';
+    const presetConfig = overlayState.presetConfig || null;
+    const showWings = presetConfig ? Boolean(presetConfig.showWings) : presetId !== 'without-wings';
+
+    this.overlayPresetId = presetId;
+    this.overlayPresetConfig = presetConfig;
+    this.overlayShowWings = showWings;
+
+    // Terapkan ekspresi 翅膀.exp3.json ketika sayap dimatikan (Param41 = 1.0 menyembunyikan sayap)
+    if (this.ready && this._model) {
+      if (!showWings) {
+        if (this.currentEmotion === 'netral' && this.expressions.has(this.wingExpressionName)) {
+          this.setExpression(this.wingExpressionName);
+        }
+      } else if (this.currentEmotion === 'netral') {
+        this._expressionManager?.stopAllMotions();
+      }
+
+      if (this.wingParamIndex >= 0) {
+        this._model.setParameterValueByIndex(this.wingParamIndex, showWings ? 0.0 : 1.0);
+      }
+    }
+
+    this.invalidateOverlayFit(overlayState.reason || `preset:${presetId}`);
+  }
+
+  invalidateOverlayFit(reason = 'recalculate') {
+    this._pendingDiagReason = reason;
+    this._pendingDiagFrames = 0;
+  }
+
+  /**
+   * Menghitung matriks MVP Fit-to-Bounds untuk mode overlay (?mode=overlay):
+   * - Menggunakan rasio aspek canvas sebenarnya (width / height)
+   * - Memastikan seluruh bagian model (sayap, mahkota, ujung rok) muat penuh
+   *   di dalam canvas dengan padding ~4% di setiap sisi tanpa distorsi rasio.
+   */
+  computeOverlayFitProjection(width, height) {
+    const projection = new CubismMatrix44();
+    const safeWidth = Math.max(1, width);
+    const safeHeight = Math.max(1, height);
+    const canvasAspect = safeWidth / safeHeight;
+
+    const restBounds =
+      this.measuredPresetBounds.get(this.overlayPresetId) ||
+      this.measuredPresetBounds.get('with-wings') || {
+        minX: -0.5025,
+        maxX: 0.5014,
+        minY: -0.1851,
+        maxY: 0.6358,
+      };
+
+    const framingCfg = this.overlayPresetConfig?.framing || {};
+    const padding = typeof framingCfg.padding === 'number' ? framingCfg.padding : 0.04;
+    const scaleMultiplier =
+      typeof framingCfg.scaleMultiplier === 'number' ? framingCfg.scaleMultiplier : 1.0;
+    const offsetX = typeof framingCfg.offsetX === 'number' ? framingCfg.offsetX : 0.0;
+    const offsetY = typeof framingCfg.offsetY === 'number' ? framingCfg.offsetY : 0.0;
+    const margin = framingCfg.motionMargin || {
+      left: 0.016,
+      right: 0.016,
+      top: 0.022,
+      bottom: 0.010,
+    };
+
+    const fitMinX = restBounds.minX - (margin.left || 0);
+    const fitMaxX = restBounds.maxX + (margin.right || 0);
+    const fitMinY = restBounds.minY - (margin.bottom || 0);
+    const fitMaxY = restBounds.maxY + (margin.top || 0);
+
+    const boundsWidth = Math.max(0.01, fitMaxX - fitMinX);
+    const boundsHeight = Math.max(0.01, fitMaxY - fitMinY);
+    const centerX = (fitMinX + fitMaxX) * 0.5;
+    const centerY = (fitMinY + fitMaxY) * 0.5;
+
+    // Rentang NDC [-1, +1] punya panjang 2.0. Dengan padding 4% di tiap tepi, usableNdc = 2 * (1 - 2*0.04) = 1.84 ([-0.92, +0.92])
+    const usableNdc = 2.0 * Math.max(0.1, 1.0 - 2.0 * padding);
+
+    // Jaga rasio aspek proporsional 1:1 di layar: scaleX * width = scaleY * height => scaleX = scaleY / canvasAspect
+    const maxScaleYByHeight = usableNdc / boundsHeight;
+    const maxScaleYByWidth = (usableNdc / boundsWidth) * canvasAspect;
+    const uniformScaleY = Math.min(maxScaleYByHeight, maxScaleYByWidth) * scaleMultiplier;
+
+    const scaleY = uniformScaleY;
+    const scaleX = uniformScaleY / canvasAspect;
+    const translateX = -scaleX * centerX + offsetX;
+    const translateY = -scaleY * centerY + offsetY;
+
+    projection.loadIdentity();
+    projection.scale(scaleX, scaleY);
+    projection.translate(translateX, translateY);
+
+    this.lastOverlayFitSummary = {
+      presetId: this.overlayPresetId,
+      showWings: this.overlayShowWings,
+      wingExpressionName: this.wingExpressionName,
+      wingParamValue: this.overlayShowWings ? 0.0 : 1.0,
+      padding,
+      usableNdcSpan: +usableNdc.toFixed(4),
+      canvasAspect: +canvasAspect.toFixed(4),
+      restBounds,
+      fitBoundsWithMotionMargin: {
+        minX: +fitMinX.toFixed(4),
+        maxX: +fitMaxX.toFixed(4),
+        minY: +fitMinY.toFixed(4),
+        maxY: +fitMaxY.toFixed(4),
+        width: +boundsWidth.toFixed(4),
+        height: +boundsHeight.toFixed(4),
+        aspectRatio: +(boundsWidth / boundsHeight).toFixed(4),
+        centerX: +centerX.toFixed(4),
+        centerY: +centerY.toFixed(4),
+      },
+      scaleX: +scaleX.toFixed(4),
+      scaleY: +scaleY.toFixed(4),
+      translateX: +translateX.toFixed(4),
+      translateY: +translateY.toFixed(4),
+    };
+
+    return projection;
   }
 
   setFraming(scale = 1.0, x = 0.0, y = 0.0, immediate = false) {
@@ -708,39 +1014,169 @@ class CompanionCubismModel extends CubismUserModel {
 
   draw() {
     if (!this.ready) return;
-    const projection = new CubismMatrix44();
     const { width, height } = this.canvas;
-    if (this._model.getCanvasWidth() > 1 && width < height) {
-      this.getModelMatrix().setWidth(2);
-      projection.scale(1, width / height);
+    let projection;
+
+    if (this.isOverlay) {
+      // Mode Overlay (?mode=overlay): gunakan Fit-to-Bounds berbasis rasio aspek canvas sebenarnya
+      projection = this.computeOverlayFitProjection(width, height);
     } else {
-      projection.scale(height / width, 1);
-    }
-
-    // Camera / Viewport framing transform (scale & offset Y)
-    if (this.targetFraming) {
-      if (!this.currentFraming) {
-        this.currentFraming = { ...this.targetFraming };
+      // Mode Non-Overlay: JANGAN diubah perilakunya
+      projection = new CubismMatrix44();
+      if (this._model.getCanvasWidth() > 1 && width < height) {
+        this.getModelMatrix().setWidth(2);
+        projection.scale(1, width / height);
       } else {
-        const factor = 0.15; // Smooth camera interpolation
-        this.currentFraming.scale += (this.targetFraming.scale - this.currentFraming.scale) * factor;
-        this.currentFraming.x += (this.targetFraming.x - this.currentFraming.x) * factor;
-        this.currentFraming.y += (this.targetFraming.y - this.currentFraming.y) * factor;
+        projection.scale(height / width, 1);
       }
-      const { scale, x, y } = this.currentFraming;
-      if (scale !== 1.0) {
-        projection.scaleRelative(scale, scale);
+
+      // Camera / Viewport framing transform (scale & offset Y)
+      if (this.targetFraming) {
+        if (!this.currentFraming) {
+          this.currentFraming = { ...this.targetFraming };
+        } else {
+          const factor = 0.15; // Smooth camera interpolation
+          this.currentFraming.scale += (this.targetFraming.scale - this.currentFraming.scale) * factor;
+          this.currentFraming.x += (this.targetFraming.x - this.currentFraming.x) * factor;
+          this.currentFraming.y += (this.targetFraming.y - this.currentFraming.y) * factor;
+        }
+        const { scale, x, y } = this.currentFraming;
+        if (scale !== 1.0) {
+          projection.scaleRelative(scale, scale);
+        }
+        if (x !== 0.0 || y !== 0.0) {
+          projection.translateRelative(x, y);
+        }
       }
-      if (x !== 0.0 || y !== 0.0) {
-        projection.translateRelative(x, y);
-      }
+
+      projection.multiplyByMatrix(this.getModelMatrix());
     }
 
-    projection.multiplyByMatrix(this.getModelMatrix());
     const renderer = this.getRenderer();
     renderer.setMvpMatrix(projection);
     renderer.setRenderState(null, [0, 0, width, height]);
     renderer.drawModel(SHADER_PATH);
+
+    if (this.isOverlay && this._pendingDiagReason) {
+      this._pendingDiagFrames = (this._pendingDiagFrames || 0) + 1;
+      if (this._pendingDiagFrames >= 12) {
+        const reason = this._pendingDiagReason;
+        this._pendingDiagReason = null;
+        this._pendingDiagFrames = 0;
+        this.emitOverlayDiagnostics(projection, width, height, reason);
+      }
+    }
+  }
+
+  emitOverlayDiagnostics(projection, width, height, reason) {
+    const coreModel = this._model?._model;
+    const canvasInfo = coreModel?.canvasinfo || {};
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    let minXMesh = '';
+    let maxXMesh = '';
+    let minYMesh = '';
+    let maxYMesh = '';
+
+    const dCount = coreModel?.drawables?.count || 0;
+    for (let i = 0; i < dCount; i++) {
+      const op = coreModel.drawables.opacities[i];
+      const vis = Live2DCubismCore.Utils.hasIsVisibleBit(coreModel.drawables.dynamicFlags[i]);
+      if (op <= 0.01 || !vis) continue;
+      const pos = coreModel.drawables.vertexPositions[i];
+      const meshId = coreModel.drawables.ids[i];
+      for (let j = 0; j < pos.length; j += 2) {
+        const vx = pos[j];
+        const vy = pos[j + 1];
+        if (vx < minX) {
+          minX = vx;
+          minXMesh = meshId;
+        }
+        if (vx > maxX) {
+          maxX = vx;
+          maxXMesh = meshId;
+        }
+        if (vy < minY) {
+          minY = vy;
+          minYMesh = meshId;
+        }
+        if (vy > maxY) {
+          maxY = vy;
+          maxYMesh = meshId;
+        }
+      }
+    }
+
+    const leftNdc = +projection.transformX(minX).toFixed(4);
+    const rightNdc = +projection.transformX(maxX).toFixed(4);
+    const bottomNdc = +projection.transformY(minY).toFixed(4);
+    const topNdc = +projection.transformY(maxY).toFixed(4);
+
+    const diagPayload = {
+      phase: 'AFTER_FIX_FIT_TO_BOUNDS',
+      reason,
+      presetId: this.overlayPresetId,
+      showWings: this.overlayShowWings,
+      wingExpression: {
+        file: `${this.wingExpressionName}.exp3.json`,
+        parameterId: 'Param41',
+        directionExplanation:
+          'File 翅膀.exp3.json mengatur Param41 = 1.0 (MENYEMBUNYIKAN sayap); Param41 = 0.0 MENAMPILKAN sayap.',
+        appliedParam41Value:
+          this.wingParamIndex >= 0
+            ? +this._model.getParameterValueByIndex(this.wingParamIndex).toFixed(4)
+            : null,
+      },
+      windowInner: {
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio,
+      },
+      canvas: {
+        cssWidth: this.canvas.clientWidth,
+        cssHeight: this.canvas.clientHeight,
+        internalWidth: width,
+        internalHeight: height,
+        aspectRatio: +(width / height).toFixed(4),
+      },
+      cubismCanvas: {
+        canvasWidthPx: canvasInfo.CanvasWidth,
+        canvasHeightPx: canvasInfo.CanvasHeight,
+        pixelsPerUnit: canvasInfo.PixelsPerUnit,
+        canvasWidthUnits: +this._model.getCanvasWidth().toFixed(4),
+        canvasHeightUnits: +this._model.getCanvasHeight().toFixed(4),
+      },
+      liveVisibleMeshBoundsUnits: {
+        minX: +minX.toFixed(4),
+        maxX: +maxX.toFixed(4),
+        minY: +minY.toFixed(4),
+        maxY: +maxY.toFixed(4),
+        width: +(maxX - minX).toFixed(4),
+        height: +(maxY - minY).toFixed(4),
+        aspectRatio: +((maxX - minX) / (maxY - minY)).toFixed(4),
+        extremes: { minXMesh, maxXMesh, minYMesh, maxYMesh },
+      },
+      fitToBoundsConfig: this.lastOverlayFitSummary,
+      finalMvp: {
+        scaleX: +projection.getScaleX().toFixed(4),
+        scaleY: +projection.getScaleY().toFixed(4),
+        translateX: +projection.getTranslateX().toFixed(4),
+        translateY: +projection.getTranslateY().toFixed(4),
+      },
+      projectedNdcBounds: {
+        left: leftNdc,
+        right: rightNdc,
+        bottom: bottomNdc,
+        top: topNdc,
+        clipped:
+          leftNdc < -1.0 || rightNdc > 1.0 || bottomNdc < -1.0 || topNdc > 1.0,
+      },
+    };
+
+    console.log('[OverlayDiag]', diagPayload);
+    window.desktopBridge?.reportOverlayDiagnostics?.(diagPayload);
   }
 }
 
@@ -755,7 +1191,13 @@ export class Live2DCompanion {
     this.gl = null;
     this.lastFrame = performance.now();
     this.emotionEndsAt = 0;
+    this.isOverlay = isOverlayMode();
+    this.overlayFpsLimit = OVERLAY_FPS_LIMIT;
     this.currentFramingConfig = getHalfBodyConfig();
+    this.overlayState = null;
+    this._lastDpr = 0;
+    this._resizeObserver = null;
+    this._unsubscribeOverlayState = null;
   }
 
   async initialize() {
@@ -763,6 +1205,43 @@ export class Live2DCompanion {
     this.gl = this.canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true });
     if (!this.gl) throw new Error('Browser tidak mendukung WebGL2 yang dibutuhkan Cubism SDK ini.');
     this.resize();
+
+    // Pantau perubahan ukuran jendela dan perubahan monitor/DPI secara reaktif (Requirement 3)
+    window.addEventListener('resize', () => this.resize());
+    if (typeof ResizeObserver !== 'undefined') {
+      this._resizeObserver = new ResizeObserver(() => this.resize());
+      this._resizeObserver.observe(this.canvas);
+    }
+
+    if (this.isOverlay && window.desktopBridge) {
+      this.setupOverlayEditControls();
+
+      if (window.desktopBridge.getAppInfo) {
+        window.desktopBridge
+          .getAppInfo()
+          .then((info) => {
+            if (info && typeof info.overlayFpsLimit === 'number' && info.overlayFpsLimit > 0) {
+              this.overlayFpsLimit = info.overlayFpsLimit;
+            }
+          })
+          .catch(() => {});
+      }
+
+      if (window.desktopBridge.getOverlayState) {
+        try {
+          const initialState = await window.desktopBridge.getOverlayState();
+          this.applyOverlayState(initialState);
+        } catch (err) {
+          console.warn('[Live2D] Gagal membaca initial overlay state:', err);
+        }
+      }
+
+      if (window.desktopBridge.onOverlayStateChanged) {
+        this._unsubscribeOverlayState = window.desktopBridge.onOverlayStateChanged((state) => {
+          this.applyOverlayState(state);
+        });
+      }
+    }
 
     window.__live2dCompanion = this;
 
@@ -788,6 +1267,145 @@ export class Live2DCompanion {
     }
 
     await this.switchModel(targetModelPath);
+  }
+
+  setupOverlayEditControls() {
+    const dragZone = document.getElementById('overlay-drag-zone');
+    const doneBtn = document.getElementById('overlay-done-btn');
+    const resetBtn = document.getElementById('overlay-reset-btn');
+
+    if (doneBtn) {
+      doneBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        window.desktopBridge?.setEditMode?.(false);
+      });
+    }
+
+    if (resetBtn) {
+      resetBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        window.desktopBridge?.resetOverlayBounds?.();
+      });
+    }
+
+    if (dragZone) {
+      let dragState = null;
+
+      dragZone.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 || !this.overlayState?.editMode) return;
+        if (e.target && typeof e.target.closest === 'function' && e.target.closest('.overlay-edit-btn')) {
+          return;
+        }
+        e.preventDefault();
+        dragState = {
+          pointerId: e.pointerId,
+          startScreenX: e.screenX,
+          startScreenY: e.screenY,
+          startWinX: window.screenX,
+          startWinY: window.screenY,
+        };
+        dragZone.classList.add('dragging');
+        try {
+          dragZone.setPointerCapture(e.pointerId);
+        } catch {}
+      });
+
+      dragZone.addEventListener('pointermove', (e) => {
+        if (!dragState || e.pointerId !== dragState.pointerId) return;
+        const nextX = Math.round(dragState.startWinX + (e.screenX - dragState.startScreenX));
+        const nextY = Math.round(dragState.startWinY + (e.screenY - dragState.startScreenY));
+        window.desktopBridge?.moveOverlayWindow?.(nextX, nextY);
+        this.updateOverlayEditFooter(nextX, nextY);
+      });
+
+      const endDrag = (e) => {
+        if (!dragState || (e && e.pointerId !== dragState.pointerId)) return;
+        try {
+          if (dragZone.hasPointerCapture(dragState.pointerId)) {
+            dragZone.releasePointerCapture(dragState.pointerId);
+          }
+        } catch {}
+        dragZone.classList.remove('dragging');
+        dragState = null;
+        this.updateOverlayEditFooter();
+      };
+
+      dragZone.addEventListener('pointerup', endDrag);
+      dragZone.addEventListener('pointercancel', endDrag);
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.overlayState?.editMode) {
+        e.preventDefault();
+        window.desktopBridge?.setEditMode?.(false);
+      }
+    });
+  }
+
+  updateOverlayEditFooter(overrideWinX = null, overrideWinY = null) {
+    if (!this.isOverlay) return;
+    const footerEl = document.getElementById('overlay-edit-footer');
+    const handleEl = document.getElementById('overlay-drag-handle');
+    const w = Math.round(window.innerWidth || this.canvas.clientWidth || 0);
+    const h = Math.round(window.innerHeight || this.canvas.clientHeight || 0);
+
+    if (footerEl) {
+      const presetLabel =
+        this.overlayState?.presetConfig?.label ||
+        (this.overlayState?.activePreset === 'without-wings' ? 'Tanpa sayap' : 'Dengan sayap');
+      footerEl.textContent = `${presetLabel} • ${w}×${h} px • Bebas tembus tepi layar • Esc / Ctrl+Alt+E selesai`;
+    }
+
+    // Jaga agar badge kontrol atas & footer bawah tetap terlihat di dalam layar meskipun
+    // garis tepi atas/bawah/kiri/kanan overlay digeser menembus keluar border Windows
+    const winX =
+      typeof overrideWinX === 'number'
+        ? overrideWinX
+        : this.overlayState?.windowBounds?.x ?? window.screenX ?? 0;
+    const winY =
+      typeof overrideWinY === 'number'
+        ? overrideWinY
+        : this.overlayState?.windowBounds?.y ?? window.screenY ?? 0;
+    const scrLeft = window.screen?.availLeft ?? 0;
+    const scrTop = window.screen?.availTop ?? 0;
+    const scrW = window.screen?.width || 1920;
+    const scrH = window.screen?.height || 1080;
+
+    let shiftX = 0;
+    const centerX = winX + w * 0.5;
+    if (centerX < scrLeft + 170) {
+      shiftX = Math.min(w * 0.38, scrLeft + 170 - centerX);
+    } else if (centerX > scrLeft + scrW - 170) {
+      shiftX = -Math.min(w * 0.38, centerX - (scrLeft + scrW - 170));
+    }
+
+    if (handleEl) {
+      const shiftTopY = winY < scrTop ? Math.min(Math.max(0, h - 80), scrTop - winY + 8) : 0;
+      handleEl.style.transform = `translate(${Math.round(shiftX)}px, ${Math.round(shiftTopY)}px)`;
+    }
+
+    if (footerEl) {
+      const shiftBottomY =
+        winY + h > scrTop + scrH
+          ? -Math.min(Math.max(0, h - 80), winY + h - (scrTop + scrH) + 8)
+          : 0;
+      footerEl.style.transform = `translate(${Math.round(shiftX)}px, ${Math.round(shiftBottomY)}px)`;
+    }
+  }
+
+  applyOverlayState(state) {
+    if (!state) return;
+    this.overlayState = state;
+    if (this.isOverlay) {
+      document.documentElement.classList.toggle('overlay-edit-mode', Boolean(state.editMode));
+      this.updateOverlayEditFooter();
+    }
+    this.resize();
+    if (this.model) {
+      this.model.applyOverlayState(state);
+    }
   }
 
   async switchModel(modelPath) {
@@ -822,6 +1440,10 @@ export class Live2DCompanion {
       true
     );
 
+    if (this.isOverlay && this.overlayState) {
+      this.model.applyOverlayState(this.overlayState);
+    }
+
     this.currentModelPath = modelPath;
     const modelInfo = this.model.getModelInfo();
 
@@ -854,17 +1476,38 @@ export class Live2DCompanion {
   }
 
   resize() {
-    const dpr = Math.min(devicePixelRatio || 1, 2);
+    // Di mode overlay, gunakan devicePixelRatio sebenarnya supaya presisi di skala DPI 100%, 125%, 150%+
+    const dpr = this.isOverlay
+      ? window.devicePixelRatio || 1
+      : Math.min(window.devicePixelRatio || 1, 2);
     const width = Math.max(1, Math.round(this.canvas.clientWidth * dpr));
     const height = Math.max(1, Math.round(this.canvas.clientHeight * dpr));
-    if (this.canvas.width !== width || this.canvas.height !== height) {
+    if (
+      this.canvas.width !== width ||
+      this.canvas.height !== height ||
+      this._lastDpr !== dpr
+    ) {
       this.canvas.width = width;
       this.canvas.height = height;
+      this._lastDpr = dpr;
+      this.gl?.viewport(0, 0, width, height);
       this.model?.setRenderTargetSize(width, height);
+      if (this.isOverlay) {
+        this.updateOverlayEditFooter();
+        this.model?.invalidateOverlayFit('resize-or-dpi-changed');
+      }
     }
   }
 
   frame(time) {
+    if (this.isOverlay && this.overlayFpsLimit > 0) {
+      const minIntervalMs = 1000 / this.overlayFpsLimit;
+      if (time - this.lastFrame < minIntervalMs - 0.5) {
+        requestAnimationFrame((next) => this.frame(next));
+        return;
+      }
+    }
+
     const delta = Math.min(0.05, Math.max(0, (time - this.lastFrame) / 1000));
     this.lastFrame = time;
     this.resize();
