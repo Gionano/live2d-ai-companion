@@ -22,6 +22,7 @@ rollout-*.jsonl
 .tmp-*
 .vendor-cubism-*/
 live2d-test.png
+data/
 
 # Legacy VRM assets, unused prototypes, and raw extraction
 live2d_models/
