@@ -50,25 +50,38 @@ Aplikasi AI companion interaktif berbasis browser yang menghadirkan karakter **A
 8. **Vision Monitor (Standalone Observer Panel)**:
    - Aplikasi dashboard terpisah bergaya StreamingVLM untuk memantau feed layar, membaca log deskripsi visual secara live, melihat kartu evaluasi filter, memantau running cost, serta mengatur interval capture secara remote.
 
+9. **Personalisasi Long-Term Memory & Episodic Conversation Recall**:
+   - Sistem memori jangka panjang persisten (`data/memory.json`) yang mencatat fakta, kebiasaan, panggilan, dan topik obrolan sebelumnya secara otomatis di latar belakang tanpa menghambat latensi respons.
+
+10. **Native Desktop Companion (Electron Floating Overlay)**:
+    - Aplikasi desktop Windows pendamping dengan avatar Live2D transparan melayang tanpa border/kotak hitam.
+    - Dilengkapi *System Tray*, dua preset tampilan (*Dengan Sayap* vs *Tanpa Sayap*), *Click-Through & Mode Edit* (`Ctrl+Alt+E`), *Mute Mic* (`Ctrl+Alt+M`), dan *Direct Screen Capture* tanpa popup izin browser dengan proteksi DWM `WDA_EXCLUDEFROMCAPTURE` (avatar tidak ikut terfoto).
+
 ---
 
 ## 🏛️ Arsitektur Sistem
 
+<p align="center">
+  <img src="docs/architecture-pipeline.svg" alt="Amika AI Companion Multimodal Pipeline" width="100%">
+</p>
+
 ```
 ┌────────────────────────────────────────────────────────────┐
-│                 Browser (Companion Client)                 │
+│         Browser / Desktop Companion (Electron)             │
 │  - Live2D Canvas (IceGirl) & Web Audio Analyser            │
 │  - Hands-Free VAD / Mobile PTT + Desktop Text Chat Input   │
-│  - Camera & Conditional Screen Capture                     │
+│  - Camera & Direct Desktop Capture (WDA_EXCLUDEFROMCAPTURE)│
 └─────────────────────────────▲──────────────────────────────┘
                               │ WebSocket (/ws)
 ┌─────────────────────────────▼──────────────────────────────┐
 │                Node.js Server Orchestrator                 │
-│  - Brain LLM: Qwen3.8 Flash Next Uncensored (xplabs.ai)    │
-│  - STT Proxy: Whisper Large v3 Turbo (Groq)                │
+│  - Brain LLM: Qwen3.8 / DeepSeek Uncensored (xplabs.ai)    │
+│  - STT Proxy: Whisper Large v3 (Groq)                      │
 │  - Vision Perception: Qwen 3.8 27B (Groq)                  │
 │  - Spontaneous Filter: DeepSeek V4 Flash (9inference)      │
-│  - TTS Streamer: Fish Audio                                │
+│  - TTS Streamer: Fish Audio S2.1 Pro                       │
+│  - Long-Term Memory & Episodic Recall (data/memory.json)   │
+│  - [WIP] ComfyUI Workflow Integration (PAP / Photo Gen)    │
 └─────────────────────────────▲──────────────────────────────┘
                               │ WebSocket (/ws?role=monitor)
 ┌─────────────────────────────▼──────────────────────────────┐
@@ -122,6 +135,12 @@ my waipu/
 │   └── companion.js             # VAD/PTT audio, desktop text chat, screen share, & WS client
 ├── public/                      # Static Assets
 │   └── models/live2d/           # Asset model Live2D IceGirl (.moc3, textures, .exp3, .motion3)
+├── desktop-companion/           # [Native App] Windows Companion (Electron + Tray + Direct Capture)
+│   ├── package.json             # Electron & electron-builder packaging config
+│   ├── src/main/                # Main process (Tray, Window, Capture Service, Security)
+│   └── src/preload/             # Context isolation preload bridge
+├── docs/                        # Dokumentasi & Diagram Arsitektur SVG
+│   └── architecture-pipeline.svg# Diagram alur visual multimodal & ecosystem
 └── vision-monitor/              # [Standalone App] Observer & Remote Config Panel
     ├── index.html               # UI dashboard StreamingVLM
     ├── package.json             # Dependencies terpisah
@@ -155,9 +174,7 @@ my waipu/
    ```
    Pastikan konfigurasi `.env` Anda berisi:
    ```env
-   EXPLABS_BASE_URL=https://api.experientiallabs.ai/v1
    EXPLABS_API_KEY=xpl_your_api_key_here
-   EXPLABS_MODEL=qwen3.8-flash-next-uncensored
 
    GROQ_API_KEY=your_groq_key_here
    FISH_API_KEY=your_fish_key_here
@@ -210,11 +227,12 @@ Buka Vision Monitor di: **`http://localhost:5174`**
 - [x] Multi-layer talking animations (procedural sway + sentence break clips).
 - [x] 12 Indonesian emotion classification system.
 - [x] Ultra low-latency STT (Groq Whisper) dengan anti-hallucination filtering.
-- [x] **Unrestricted / Uncensored LLM Chat** via **xplabs.ai** (`Qwen3.8 Flash Next Uncensored`).
+- [x] **Unrestricted / Uncensored LLM Chat** via **xplabs.ai** (`Qwen3.8 Flash Next Uncensored` / `DeepSeek V4.1 Flash Uncensored`).
 - [x] Desktop text chat input box terintegrasi dengan pipeline suara & vision.
 - [x] Streaming TTS audio playback & synchronized lip-sync (Fish Audio).
 - [x] Smart vision routing (Webcam vs Screen Share + Vision Monitor buffer integration).
 - [x] Conditional 1 FPS screen monitoring & periodic spontaneous commentary.
 - [x] Standalone Vision Monitor observation panel with live remote configuration.
-- [ ] *In Progress*: Personalisasi long-term memory & episodic conversation recall.
-- [ ] *Planned*: Direct desktop capture integration via native tray companion.
+- [x] **Personalisasi long-term memory & episodic conversation recall** (`data/memory.json`, background auto-extract worker, time-aware greetings).
+- [x] **Direct desktop capture integration via native tray companion** (Electron transparent floating overlay, click-through & mode edit, system tray controls, global shortcuts, DWM content protection `WDA_EXCLUDEFROMCAPTURE`, tanpa browser share screen prompt).
+- [ ] *In Progress*: **Fitur PAP (Post A Picture / Request Foto)** — User dapat meminta AI waifu untuk membuat dan mengirim foto/gambar karakter dirinya secara on-demand via ComfyUI (Local/API workflow).

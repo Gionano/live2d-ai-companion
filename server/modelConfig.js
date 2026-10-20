@@ -4,11 +4,11 @@ import 'dotenv/config';
 
 // LLM Chat: Qwen3.8 Flash Next Uncensored via Experiential Labs
 export const CHAT_MODEL =
-  process.env.EXPLABS_MODEL || 'qwen3.8-flash-next-uncensored';
+  process.env.EXPLABS_MODEL || 'deepseek-v4.1-flash-uncensored';
 
 // Legacy filter model: DeepSeek V4 Flash via 9inference
 // Still used by streamingVisionManager.js for periodic filtering.
-export const FILTER_MODEL = 'deepseek-v4-flash-0731';
+export const FILTER_MODEL = 'deepseek-v4.1-flash';
 
 // Vision: Qwen 3.8 27B via Groq (defined locally in visionCapture.js and
 // streamingVisionManager.js since it uses a separate provider/client)

@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1340 380" width="100%" height="100%" style="background:#0f1117;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <defs>
+    <!-- Arrowhead markers -->
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#38bdf8"/>
+    </marker>
+    <marker id="arrow-dotted" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrow-pink" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#f472b6"/>
+    </marker>
+    
+    <!-- Gradients -->
+    <linearGradient id="card-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e2230" />
+      <stop offset="100%" stop-color="#131620" />
+    </linearGradient>
+    <linearGradient id="card-grad-active" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#242b3d" />
+      <stop offset="100%" stop-color="#151a27" />
+    </linearGradient>
+    <linearGradient id="card-grad-wip" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2d1b2d" />
+      <stop offset="100%" stop-color="#19121f" />
+    </linearGradient>
+  </defs>
+
+  <!-- Title & Subtitle -->
+  <text x="30" y="32" fill="#f8fafc" font-size="16" font-weight="700" letter-spacing="0.5">AMIKA AI COMPANION — MULTIMODAL PIPELINE &amp; ECOSYSTEM ARCHITECTURE</text>
+  <text x="30" y="50" fill="#64748b" font-size="12">STT Whisper • Groq Vision • 9inference Filter • Uncensored Brain &amp; Memory • Fish Audio TTS • ComfyUI PAP</text>
+
+  <!-- ==================== NODES ==================== -->
+
+  <!-- 1. Input: Suara User (x=240, y=90, w=110, h=44) -->
+  <rect x="240" y="90" width="110" height="44" rx="6" fill="url(#card-grad)" stroke="#334155" stroke-width="1.2"/>
+  <text x="295" y="117" fill="#f1f5f9" font-size="13" font-weight="600" text-anchor="middle">🎙️ Suara User</text>
+
+  <!-- 2. STT: Groq Whisper Large v3 (x=380, y=80, w=160, h=64) -->
+  <rect x="380" y="80" width="160" height="64" rx="8" fill="url(#card-grad-active)" stroke="#38bdf8" stroke-width="1.4"/>
+  <text x="460" y="106" fill="#38bdf8" font-size="12" font-weight="700" text-anchor="middle">Groq: Whisper Large v3</text>
+  <text x="460" y="126" fill="#94a3b8" font-size="11" text-anchor="middle">Speech-to-Text (STT)</text>
+
+  <!-- 3. Input: Layar / Kamera (x=30, y=210, w=130, h=50) -->
+  <rect x="30" y="210" width="130" height="50" rx="6" fill="url(#card-grad)" stroke="#334155" stroke-width="1.2"/>
+  <text x="95" y="240" fill="#f1f5f9" font-size="13" font-weight="600" text-anchor="middle">🖥️ Layar / Kamera</text>
+
+  <!-- 4. Vision: Groq Qwen 3.8 27B (x=190, y=200, w=160, h=70) -->
+  <rect x="190" y="200" width="160" height="70" rx="8" fill="url(#card-grad-active)" stroke="#38bdf8" stroke-width="1.4"/>
+  <text x="270" y="228" fill="#38bdf8" font-size="12" font-weight="700" text-anchor="middle">Groq: Qwen 3.8 27B</text>
+  <text x="270" y="246" fill="#cbd5e1" font-size="11" text-anchor="middle">Vision Perception</text>
+  <text x="270" y="260" fill="#64748b" font-size="9" text-anchor="middle">(Webcam / Direct Capture)</text>
+
+  <!-- 5. Filter: 9inference DeepSeek V4 Flash (x=380, y=190, w=160, h=70) -->
+  <rect x="380" y="190" width="160" height="70" rx="8" fill="url(#card-grad)" stroke="#475569" stroke-dasharray="4,3" stroke-width="1.2"/>
+  <text x="460" y="218" fill="#cbd5e1" font-size="11" font-weight="600" text-anchor="middle">9inference: DeepSeek V4</text>
+  <text x="460" y="236" fill="#94a3b8" font-size="11" text-anchor="middle">Filter Momen Spontan</text>
+  <text x="460" y="250" fill="#64748b" font-size="9" text-anchor="middle">(Continuous Capture Buffer)</text>
+
+  <!-- 6. Brain & Memory: Experiential Labs (x=580, y=140, w=200, h=96) -->
+  <rect x="580" y="140" width="200" height="96" rx="10" fill="url(#card-grad-active)" stroke="#38bdf8" stroke-width="2"/>
+  <text x="680" y="168" fill="#38bdf8" font-size="13" font-weight="700" text-anchor="middle">Experiential Labs</text>
+  <text x="680" y="188" fill="#f8fafc" font-size="11" font-weight="600" text-anchor="middle">DeepSeek / Qwen Uncensored</text>
+  <text x="680" y="206" fill="#cbd5e1" font-size="11" text-anchor="middle">Otak Utama &amp; Persona</text>
+  <text x="680" y="222" fill="#a78bfa" font-size="10" font-weight="600" text-anchor="middle">🧠 Long-Term Memory (JSON)</text>
+
+  <!-- 7. TTS: Fish Audio S2.1 Pro (x=820, y=155, w=170, h=66) -->
+  <rect x="820" y="155" width="170" height="66" rx="8" fill="url(#card-grad-active)" stroke="#38bdf8" stroke-width="1.4"/>
+  <text x="905" y="183" fill="#38bdf8" font-size="12" font-weight="700" text-anchor="middle">Fish Audio: S2.1 Pro</text>
+  <text x="905" y="203" fill="#cbd5e1" font-size="11" text-anchor="middle">Text-to-Speech Emosional</text>
+
+  <!-- 8. Output Avatar: Live2D (x=1030, y=155, w=180, h=66) -->
+  <rect x="1030" y="155" width="180" height="66" rx="8" fill="url(#card-grad)" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="1120" y="184" fill="#4ade80" font-size="13" font-weight="700" text-anchor="middle">👧 Suara &amp; Bibir Live2D</text>
+  <text x="1120" y="204" fill="#94a3b8" font-size="11" text-anchor="middle">Lip-Sync &amp; 12 Emosi Wajah</text>
+
+  <!-- 9. WIP Feature: ComfyUI PAP Image Generation (x=820, y=260, w=230, h=80) -->
+  <rect x="820" y="260" width="230" height="80" rx="8" fill="url(#card-grad-wip)" stroke="#f472b6" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <rect x="830" y="270" width="94" height="18" rx="4" fill="#be185d"/>
+  <text x="877" y="283" fill="#fdf2f8" font-size="9" font-weight="700" text-anchor="middle">TAHAP PENGERJAAN</text>
+  <text x="935" y="306" fill="#f472b6" font-size="12" font-weight="700" text-anchor="middle">🎨 ComfyUI PAP Generator</text>
+  <text x="935" y="324" fill="#cbd5e1" font-size="10" text-anchor="middle">Kirim Foto / PAP Waifu on Demand</text>
+
+  <!-- ==================== CONNECTORS / ARROWS ==================== -->
+
+  <!-- Suara User -> Groq Whisper -->
+  <path d="M 350 112 L 380 112" fill="none" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- Groq Whisper -> Experiential Labs -->
+  <path d="M 540 112 L 560 112 L 560 170 L 580 170" fill="none" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- Layar / Kamera -> Groq Vision -->
+  <path d="M 160 235 L 190 235" fill="none" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- Groq Vision -> Direct to Brain (Solid) -->
+  <path d="M 350 250 L 560 250 L 560 205 L 580 205" fill="none" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- Groq Vision -> 9inference Filter (Dotted) -->
+  <path d="M 350 225 L 380 225" fill="none" stroke="#94a3b8" stroke-dasharray="4,3" stroke-width="1.5" marker-end="url(#arrow-dotted)"/>
+
+  <!-- 9inference Filter -> Experiential Labs (Dotted) -->
+  <path d="M 540 225 L 580 188" fill="none" stroke="#94a3b8" stroke-dasharray="4,3" stroke-width="1.5" marker-end="url(#arrow-dotted)"/>
+
+  <!-- Experiential Labs -> Fish Audio TTS -->
+  <path d="M 780 188 L 820 188" fill="none" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- Fish Audio TTS -> Live2D Avatar -->
+  <path d="M 990 188 L 1030 188" fill="none" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- Experiential Labs -> ComfyUI PAP Branch (Pink arrow) -->
+  <path d="M 730 236 L 730 300 L 820 300" fill="none" stroke="#f472b6" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-pink)"/>
+
+  <!-- Legend / Note bottom left -->
+  <circle cx="40" cy="350" r="4" fill="#38bdf8"/>
+  <text x="52" y="354" fill="#94a3b8" font-size="10">Alur Utama (Real-Time Audio / Vision / Chat / TTS)</text>
+  <line x1="330" y1="350" x2="360" y2="350" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="370" y="354" fill="#94a3b8" font-size="10">Filter Momen Spontan (Continuous Vision)</text>
+  <line x1="610" y1="350" x2="640" y2="350" stroke="#f472b6" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="650" y="354" fill="#f472b6" font-size="10">Permintaan Foto / PAP via ComfyUI (Dalam Pengembangan)</text>
+</svg>
