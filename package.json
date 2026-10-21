@@ -9,9 +9,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "server": "node server/index.js",
-    "test": "node --test server/selfie/tests/planner.test.js",
+    "test": "node --test server/selfie/tests/*.test.js",
     "selfie:test": "node server/selfie/selfieTest.js",
     "selfie:test-b": "node --test server/selfie/tests/planner.test.js",
+    "selfie:test-c": "node --test server/selfie/tests/jobManager.test.js",
     "selfie:plan": "node server/selfie/selfiePlanTest.js",
     "dev:all": "concurrently -k -n server,vite -c yellow,cyan \"npm run server\" \"npm run dev\""
   },

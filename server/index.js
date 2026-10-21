@@ -39,6 +39,9 @@ import {
   extractZipModel,
 } from './modelManager.js';
 import { memoryManager } from './memoryManager.js';
+import { detectSelfieIntent } from './selfie/intent.js';
+import { planSelfie } from './selfie/planner.js';
+import { jobManager } from './selfie/jobManager.js';
 
 const app = express();
 // Frame base64 bisa lumayan besar — naikkan limit body JSON.
@@ -218,6 +221,43 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
+// Endpoint HTTP lokal untuk menyajikan foto selfie (Point 15).
+// Terikat hanya ke localhost, token acak tidak tertebak, validasi path traversal outputDir.
+app.get(['/selfies/:token', '/api/selfies/:token'], (req, res) => {
+  const remoteIp = req.socket.remoteAddress || req.ip || '';
+  const isLocal =
+    remoteIp === '127.0.0.1' ||
+    remoteIp === '::1' ||
+    remoteIp === '::ffff:127.0.0.1' ||
+    remoteIp === 'localhost';
+  if (!isLocal) {
+    return res.status(403).json({ error: 'Akses hanya diizinkan dari localhost' });
+  }
+
+  const { token } = req.params;
+  const item = jobManager.getFileByToken(token);
+  if (!item || !item.filePath) {
+    return res.status(404).json({ error: 'Foto selfie tidak ditemukan atau token tidak valid' });
+  }
+
+  const outputDir = path.resolve(jobManager.config.outputDir);
+  const targetPath = path.resolve(item.filePath);
+
+  if (!targetPath.startsWith(outputDir)) {
+    return res.status(403).json({ error: 'Akses path tidak diizinkan' });
+  }
+
+  if (!fs.existsSync(targetPath)) {
+    return res.status(404).json({ error: 'File tidak ada di disk' });
+  }
+
+  const ext = path.extname(targetPath).toLowerCase();
+  const mimeType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'image/png';
+  res.setHeader('Content-Type', mimeType);
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.sendFile(targetPath);
+});
+
 // --- WebSocket: STT hands-free (VAD dari browser) -> (vision) -> chat -------
 // Protokol pesan:
 //   client -> server: { type:'audio_input', data:<base64>, mime, image?, durationMs }
@@ -250,9 +290,10 @@ const MONITOR_ONLY_TYPES = new Set(['monitor_frame']);
 const sharingSockets = new Set();
 // Socket Vision Monitor yang terhubung (untuk conditional continuous capture).
 const monitorSockets = new Set();
-// Pesan audio/avatar khusus companion — tidak perlu sampai ke Vision Monitor.
+// Pesan audio/avatar/selfie khusus companion — tidak perlu sampai ke Vision Monitor.
 const COMPANION_ONLY_TYPES = new Set([
   'audio_output', 'audio_end', 'emotion', 'amika_replied', 'vision',
+  'selfie_started', 'selfie_progress', 'selfie_ready', 'selfie_failed', 'selfie_cancelled',
 ]);
 
 // Kirim pesan hanya ke companion (non-monitor) sockets.
@@ -264,6 +305,84 @@ function broadcastToCompanions(obj) {
     client.send(json);
   }
 }
+
+// Hubungkan broadcaster JobManager ke semua socket companion
+jobManager.setBroadcaster(broadcastToCompanions);
+
+// --- Antrean Ucapan Avatar (TTS Turn-Taking Respect) ---
+const pendingSpeechQueue = [];
+let isAvatarSpeaking = false;
+
+function isAnyCompanionBusy() {
+  if (isAvatarSpeaking) return true;
+  for (const client of wss.clients) {
+    if (client.readyState === WebSocket.OPEN && !client.isMonitor) {
+      if (client.conversationState && client.conversationState !== 'idle') {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+async function playSpokenMessage(text, emotion = 'sayang') {
+  if (!text) return;
+  isAvatarSpeaking = true;
+  broadcastToCompanions({ type: 'conversation_state', state: 'speaking' });
+  broadcastToCompanions({ type: 'emotion', emotion });
+  broadcastToCompanions({ type: 'amika_replied', text, emotion });
+
+  if (isVoiceConfigured()) {
+    try {
+      let sentFirstChunk = false;
+      for await (const chunk of generateSpeech(text, emotion)) {
+        sentFirstChunk = true;
+        broadcastToCompanions({
+          type: 'audio_output',
+          data: chunk.toString('base64'),
+          format: 'mp3',
+        });
+      }
+      broadcastToCompanions({ type: 'audio_end' });
+      if (!sentFirstChunk) {
+        isAvatarSpeaking = false;
+        broadcastToCompanions({ type: 'conversation_state', state: 'idle' });
+        processNextPendingSpeech();
+      }
+    } catch (err) {
+      console.error('[tts:speech] Gagal TTS ucapan:', err.message);
+      isAvatarSpeaking = false;
+      broadcastToCompanions({ type: 'conversation_state', state: 'idle' });
+      processNextPendingSpeech();
+    }
+  } else {
+    isAvatarSpeaking = false;
+    broadcastToCompanions({ type: 'conversation_state', state: 'idle' });
+    processNextPendingSpeech();
+  }
+}
+
+function enqueueSpeech(text, emotion = 'sayang') {
+  if (!isAnyCompanionBusy()) {
+    void playSpokenMessage(text, emotion);
+  } else {
+    console.log(`[turn] Speech diantrekan (companion sedang sibuk): "${text}"`);
+    pendingSpeechQueue.push({ text, emotion });
+  }
+}
+
+function processNextPendingSpeech() {
+  if (!isAnyCompanionBusy() && pendingSpeechQueue.length > 0) {
+    const next = pendingSpeechQueue.shift();
+    console.log(`[turn] Menjalankan antrean speech: "${next.text}"`);
+    void playSpokenMessage(next.text, next.emotion);
+  }
+}
+
+// Hubungkan speech handler JobManager ke speech queue turn-taking
+jobManager.setSpeechHandler(({ text, emotion }) => {
+  enqueueSpeech(text, emotion);
+});
 
 function sendVisionInit(sock) {
   if (sock.readyState !== WebSocket.OPEN) return;
@@ -329,6 +448,7 @@ wss.on('connection', (socket, req) => {
   companionSessionOpened();
 
   let conversationState = 'idle'; // 'idle' | 'processing' | 'speaking'
+  socket.conversationState = 'idle';
   let safetyTimer = null;
 
   function clearSafetyTimer() {
@@ -343,6 +463,7 @@ wss.on('connection', (socket, req) => {
     clearSafetyTimer();
     const oldState = conversationState;
     conversationState = newState;
+    socket.conversationState = newState;
     console.log(`[turn] State transition: ${oldState} -> ${newState}`);
     send({ type: 'conversation_state', state: conversationState });
 
@@ -351,6 +472,8 @@ wss.on('connection', (socket, req) => {
         console.warn(`[turn] Safety timeout (30s) reached while in state "${conversationState}". Forcing reset to idle.`);
         setConversationState('idle');
       }, 30000);
+    } else {
+      processNextPendingSpeech();
     }
   }
 
@@ -460,7 +583,15 @@ wss.on('connection', (socket, req) => {
     // 0. Sinyal selesai playback dari client untuk turn-taking
     if (msg.type === 'playback_finished') {
       console.log(`[turn] Client playback_finished received (current state: ${conversationState})`);
+      isAvatarSpeaking = false;
       setConversationState('idle');
+      return;
+    }
+
+    // Sinyal pembatalan selfie dari client (Point 13 & 16)
+    if (msg.type === 'selfie_cancel') {
+      console.log(`[selfie] Client meminta pembatalan selfie [jobId: ${msg.jobId}]`);
+      void jobManager.cancelJob(msg.jobId);
       return;
     }
 
@@ -598,6 +729,47 @@ wss.on('connection', (socket, req) => {
       }
       send({ type: 'user_said', text });
       markConversationActivity();
+
+      // --- 2a) Modul Selfie (PAP): deteksi intent SEBELUM jalur percakapan biasa ---
+      const selfieIntent = detectSelfieIntent(text);
+      if (selfieIntent.isSelfie) {
+        console.log(`[selfie] Intent selfie terdeteksi: "${text}" (keyword: ${selfieIntent.matchedKeyword})`);
+
+        // 1. Cek kelayakan job (cooldown, batas harian, provider aktif)
+        const check = await jobManager.canAcceptJob();
+        if (!check.allowed) {
+          console.log(`[selfie] Permintaan ditolak: ${check.reason}`);
+          await playSpokenMessage(check.text, check.emotion);
+          history.push({ role: 'user', content: text });
+          history.push({ role: 'assistant', content: check.text });
+          return;
+        }
+
+        // 2. Rencanakan adegan via Cloud LLM Planner
+        const planRes = await planSelfie({ userText: text, history });
+        if (!planRes.ok) {
+          if (planRes.blocked) {
+            console.log(`[selfie] Ditolak oleh pembatas konten: ${planRes.reason}`);
+            await playSpokenMessage(planRes.refusalText, planRes.emotion);
+            history.push({ role: 'user', content: text });
+            history.push({ role: 'assistant', content: planRes.refusalText });
+            return;
+          }
+          const failMsg = jobManager.pickPhrase('failed') || 'Maaf sayang, fotonya belum bisa diproses sekarang.';
+          await playSpokenMessage(failMsg, 'malu');
+          return;
+        }
+
+        // 3. Daftarkan job ke JobManager (asinkron, non-blocking turn-taking)
+        history.push({ role: 'user', content: text });
+        history.push({ role: 'assistant', content: planRes.plan.caption });
+        await jobManager.submitJob({ plan: planRes.plan, skipInitialSpeech: true });
+
+        // Ucapkan ucapan awal segera lewat pipeline TTS ("tunggu ya, aku pose dulu")
+        const initialText = jobManager.pickPhrase('initial') || 'Tunggu ya sayang, aku pose dulu sebentar...';
+        await playSpokenMessage(initialText, 'sayang');
+        return;
+      }
 
       // 2) Vision — periksa intent & pisahkan source (screen vs webcam)
       let vision = null;

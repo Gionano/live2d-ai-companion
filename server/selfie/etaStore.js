@@ -45,3 +45,42 @@ export class EtaStore {
     return ms === null ? null : Math.round(ms / 1000);
   }
 }
+
+let defaultStoreInstance = null;
+export async function getEtaStore(cfg) {
+  if (!defaultStoreInstance || cfg) {
+    const { loadSelfieConfig } = await import('./config.js');
+    defaultStoreInstance = new EtaStore(cfg || loadSelfieConfig());
+  }
+  return defaultStoreInstance;
+}
+
+export const etaStore = {
+  getEta(preset, filePath = null) {
+    try {
+      const target = filePath || path.resolve(process.cwd(), 'data/selfie-durations.json');
+      if (!fs.existsSync(target)) return null;
+      const data = JSON.parse(fs.readFileSync(target, 'utf-8'));
+      const list = data[preset];
+      if (!Array.isArray(list) || list.length === 0) return null;
+      const avgMs = list.reduce((a, b) => a + b, 0) / list.length;
+      return Math.round(avgMs / 1000);
+    } catch {
+      return null;
+    }
+  },
+  recordDuration(preset, durationSec, filePath = null) {
+    try {
+      const target = filePath || path.resolve(process.cwd(), 'data/selfie-durations.json');
+      let data = {};
+      try {
+        data = JSON.parse(fs.readFileSync(target, 'utf-8'));
+      } catch (_) {}
+      const list = Array.isArray(data[preset]) ? data[preset] : [];
+      list.push(Math.round(durationSec * 1000));
+      data[preset] = list.slice(-5);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (_) {}
+  },
+};

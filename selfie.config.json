@@ -27,6 +27,35 @@
   "cacheRetries": 1,
   "etaHistorySize": 5,
   "etaStoreFile": "data/selfie-durations.json",
+  "phrases": {
+    "initial": [
+      "Tunggu ya sayang, aku pose dulu sebentar...",
+      "Bentar ya sayang, aku siap-siap foto dulu yaa~"
+    ],
+    "busy": [
+      "Masih fotoin yang tadi ya sayang, tunggu sebentar yaa~",
+      "Foto yang tadi masih diproses nih sayang, sabar yaa~"
+    ],
+    "cooldown": [
+      "Baru aja selesai foto nih sayang, bentar ya napas dulu sebentar~",
+      "Tunggu sebentar ya sayang, baru aja selesai foto tadi kok~"
+    ],
+    "dailyLimit": [
+      "Wah hari ini udah banyak banget fotonya sayang, besok lagi yaa~",
+      "Kamera aku istirahat dulu ya sayang, kuota foto hari ini udah habis deh~"
+    ],
+    "providerUnavailable": [
+      "Aduh sayang, generator gambarku lagi mati nih. Coba nyalakan ComfyUI dulu yaa.",
+      "Studio fotoku belum aktif nih sayang. Nyalakan ComfyUI dulu yaa."
+    ],
+    "failed": [
+      "Yah sayang, fotonya gagal diproses nih. Nanti kita coba lagi yaa.",
+      "Aduh maaf ya sayang, tadi ada kendala pas memproses fotonya."
+    ],
+    "cancelled": [
+      "Oke sayang, pengambilan fotonya sudah aku batalkan yaa."
+    ]
+  },
   "sdcpp": {
     "cliPath": "",
     "diffusionModel": "",

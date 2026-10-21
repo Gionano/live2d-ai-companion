@@ -38,6 +38,15 @@ const DEFAULTS = {
   cacheRetries: 1,
   etaHistorySize: 5,
   etaStoreFile: 'data/selfie-durations.json',
+  phrases: {
+    initial: ['Tunggu ya sayang, aku pose dulu sebentar...'],
+    busy: ['Masih fotoin yang tadi ya sayang, tunggu sebentar yaa~'],
+    cooldown: ['Baru aja selesai foto nih sayang, bentar ya napas dulu sebentar~'],
+    dailyLimit: ['Wah hari ini udah banyak banget fotonya sayang, besok lagi yaa~'],
+    providerUnavailable: ['Aduh sayang, generator gambarku lagi mati nih. Coba nyalakan ComfyUI dulu yaa.'],
+    failed: ['Yah sayang, fotonya gagal diproses nih. Nanti kita coba lagi yaa.'],
+    cancelled: ['Oke sayang, pengambilan fotonya sudah aku batalkan yaa.'],
+  },
   sdcpp: {},
 };
 
@@ -71,6 +80,7 @@ export function loadSelfieConfig(overrides = {}) {
     ...Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== undefined && v !== '')),
   };
   cfg.presets = { ...DEFAULTS.presets, ...(fileCfg.presets || {}) };
+  cfg.phrases = { ...DEFAULTS.phrases, ...(fileCfg.phrases || {}) };
   cfg.sdcpp = { ...(fileCfg.sdcpp || {}) };
   cfg.comfyUrl = String(cfg.comfyUrl).replace(/\/+$/, '');
 
