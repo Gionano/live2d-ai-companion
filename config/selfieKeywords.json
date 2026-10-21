@@ -1,5 +1,5 @@
 {
-  "_comment": "Daftar kata kunci dan pola untuk mendeteksi intent meminta selfie / foto avatar (fitur pap). Mudah diubah tanpa menyentuh kode.",
+  "_comment": "Daftar kata kunci dan pola untuk mendeteksi intent meminta selfie / foto avatar (fitur pap). Mudah diubah tanpa menyentuh kode. SEMUA frasa dicocokkan dengan word boundary (\\b), BUKAN substring.",
   "phrases": [
     "pap",
     "selfie",
@@ -11,23 +11,17 @@
     "fotoin dong",
     "fotoin dirimu",
     "fotoin kamu",
-    "kirim foto",
     "kirim fotomu",
-    "kirim gambar",
     "kirim gambarmu",
-    "bagi foto",
     "bagi fotomu",
     "spill foto",
-    "lihat kamu dong",
-    "coba lihat fotomu",
     "coba pap",
     "pap dong",
     "pap muka",
     "pap sekarang",
     "mau lihat fotomu",
     "mau lihat wajahmu",
-    "potret dirimu",
-    "ambil foto"
+    "potret dirimu"
   ],
   "wordPatterns": [
     "\\bpap\\b",

@@ -1,8 +1,8 @@
 {
   "_comment": "Kartu karakter dan template prompt deterministik untuk modul selfie. Penampilan fisik & busana sudah dibawa gambar referensi, jadi prompt hanya berisi instruksi perubahan (pose, ekspresi, latar, sudut kamera, pencahayaan).",
   "name": "Amika",
-  "promptTemplate": "A portrait photo of the exact same character as in the reference image. Preserve the character identity, facial features, and style from the reference image. Scene modifications: {pose}, {expression}, {background}, {cameraAngle}, {lighting}. High quality, crisp focus, photographic aesthetic, natural texture.",
-  "negativePrompt": "nsfw, nude, naked, cleavage, sexual, suggestive, explicit, nipples, exposed breasts, lingerie, violence, gore, blood, weapons, bad anatomy, deformed, distorted, blurry, low quality, duplicate, extra limbs, bad hands, mutated fingers",
+  "promptTemplate": "Keep the character exactly as in the reference image (same face, hair, outfit, and art style). Change only the following: pose — {pose}; expression — {expression}; background — {background}; camera angle — {cameraAngle}; lighting — {lighting}. High quality, detailed, crisp focus.",
+  "negativePrompt": "nsfw, nude, naked, cleavage, sexual, suggestive, explicit, nipples, exposed breasts, lingerie, bikini, underwear, violence, gore, blood, weapons, bad anatomy, deformed, distorted, blurry, low quality, duplicate, extra limbs, bad hands, mutated fingers, watermark, text",
   "whitelist": {
     "pose": {
       "holding_camera": "holding smartphone in hand taking a front selfie photo",

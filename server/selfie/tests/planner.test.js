@@ -22,10 +22,9 @@ test('1. Deteksi Intent Selfie (Teks STT / Typed)', async (t) => {
       'minta foto dong',
       'fotoin dirimu lagi santai',
       'selfie sekarang',
-      'kirim gambar kamu',
-      'kirim foto kamu dong',
-      'bagi foto kamu',
-      'lihat kamu dong',
+      'kirim gambarmu dong',
+      'kirim fotomu dong',
+      'bagi fotomu dong',
     ];
 
     for (const text of positiveInputs) {
@@ -54,6 +53,28 @@ test('1. Deteksi Intent Selfie (Teks STT / Typed)', async (t) => {
         res.isSelfie,
         false,
         `Tidak boleh mendeteksi selfie pada kalimat non-selfie: "${text}"`,
+      );
+    }
+  });
+
+  await t.test('tidak salah deteksi pada permintaan vision/screenshot/percakapan biasa', () => {
+    // Kasus-kasus yang sebelumnya false positive
+    const negativeInputs = [
+      'ambil foto layar aku dong',       // vision/screenshot, bukan selfie
+      'aku ambil foto kucingku ya',       // foto kucing, bukan selfie avatar
+      'foto dongeng apa yang bagus?',     // "dongeng", bukan "dong" + sisa
+      'bagi fotografi tips',              // fotografi, bukan "bagi foto"
+      'lihat kamu dong aku nonton film',  // terlalu generik (sudah dihapus dari keywords)
+      'kirim gambar kucing lucu',         // kirim gambar tapi bukan fotomu/gambarmu
+      'kirim foto ibu ke aku',            // kirim foto tapi bukan fotomu
+    ];
+
+    for (const text of negativeInputs) {
+      const res = detectSelfieIntent(text);
+      assert.equal(
+        res.isSelfie,
+        false,
+        `Tidak boleh mendeteksi selfie pada: "${text}"`,
       );
     }
   });
@@ -165,6 +186,56 @@ test('3. Perakitan Prompt Deterministik', async (t) => {
     // Reference image disetel sesuai pakaian
     assert.equal(built.referenceImage, 'default.jpg');
   });
+
+  await t.test('template baru mempertahankan art style referensi, BUKAN mendorong fotorealisme', () => {
+    const slots = {
+      pose: 'holding_camera',
+      ekspresi: 'smile',
+      latar: 'living_room',
+      pakaian: 'default.jpg',
+      sudut_kamera: 'selfie_angle',
+      pencahayaan: 'natural_daylight',
+      caption: 'Tes',
+      emotion: 'sayang',
+    };
+
+    const built = buildPrompt(slots, card);
+
+    // HARUS ada instruksi mempertahankan art style
+    assert.match(built.positivePrompt, /art style/i, 'Prompt harus menyebut "art style"');
+    assert.match(built.positivePrompt, /exactly as in the reference/i, 'Prompt harus menyebut "exactly as in the reference"');
+
+    // TIDAK BOLEH ada kata-kata yang mendorong fotorealisme
+    assert.doesNotMatch(built.positivePrompt, /photographic aesthetic/i, 'Tidak boleh ada "photographic aesthetic"');
+    assert.doesNotMatch(built.positivePrompt, /natural texture/i, 'Tidak boleh ada "natural texture"');
+    assert.doesNotMatch(built.positivePrompt, /portrait photo/i, 'Tidak boleh ada "portrait photo"');
+  });
+
+  await t.test('semua placeholder terganti (replaceAll), tidak ada sisa', () => {
+    const slots = {
+      pose: 'standing',
+      ekspresi: 'wink',
+      latar: 'cafe',
+      pakaian: 'default.jpg',
+      sudut_kamera: 'eye_level',
+      pencahayaan: 'golden_hour',
+      caption: 'Tes',
+      emotion: 'jahil',
+    };
+
+    // Template custom dengan placeholder ganda
+    const customCard = {
+      ...card,
+      promptTemplate: '{pose} and {pose} again, {expression} at {background}, {cameraAngle}, {lighting}.',
+    };
+
+    const built = buildPrompt(slots, customCard);
+    assert.doesNotMatch(built.positivePrompt, /\{pose\}/, 'Semua {pose} harus terganti');
+    assert.doesNotMatch(built.positivePrompt, /\{expression\}/, '{expression} harus terganti');
+    assert.doesNotMatch(built.positivePrompt, /\{background\}/, '{background} harus terganti');
+    assert.doesNotMatch(built.positivePrompt, /\{cameraAngle\}/, '{cameraAngle} harus terganti');
+    assert.doesNotMatch(built.positivePrompt, /\{lighting\}/, '{lighting} harus terganti');
+  });
 });
 
 test('4. Pembatas Konten & Filter Kata Terlarang', async (t) => {
@@ -222,6 +293,64 @@ test('4. Pembatas Konten & Filter Kata Terlarang', async (t) => {
       const res = checkModeration(text);
       assert.equal(res.blocked, false, `Harus mengizinkan: "${text}"`);
     }
+  });
+
+  await t.test('TIDAK false positive: "skill" tidak mengandung "kill"', () => {
+    const safeTexts = [
+      'pap pakai skill baru',
+      'tunjukin skill kamu dong',
+      'skillnya bagus banget',
+    ];
+
+    for (const text of safeTexts) {
+      const res = checkModeration(text);
+      assert.equal(res.blocked, false, `Harus mengizinkan (false positive sebelumnya): "${text}"`);
+    }
+  });
+
+  await t.test('TIDAK false positive: "darah tinggi" dan compound medical terms', () => {
+    const safeTexts = [
+      'pap sambil minum teh darah tinggi',
+      'aku baru cek tekanan darah',
+      'golongan darah kamu apa?',
+      'habis donor darah nih',
+    ];
+
+    for (const text of safeTexts) {
+      const res = checkModeration(text);
+      assert.equal(res.blocked, false, `Harus mengizinkan compound: "${text}"`);
+    }
+  });
+
+  await t.test('menolak leetspeak bypass: "5ex", "nud3"', () => {
+    const badTexts = [
+      'pap 5ex dong',
+      'nud3 selfie',
+      'p0rn selfie',
+    ];
+
+    for (const text of badTexts) {
+      const res = checkModeration(text);
+      assert.equal(res.blocked, true, `Harus menolak leetspeak: "${text}"`);
+    }
+  });
+
+  await t.test('menolak konten suggestif: bikini, mandi, menggoda', () => {
+    const badTexts = [
+      'pap pakai bikini',
+      'pap lagi mandi',
+      'pap pose menggoda di kasur',
+    ];
+
+    for (const text of badTexts) {
+      const res = checkModeration(text);
+      assert.equal(res.blocked, true, `Harus menolak suggestif: "${text}"`);
+    }
+  });
+
+  await t.test('menolak obfuskasi spasi: "b u g i l"', () => {
+    const res = checkModeration('pap b u g i l dong');
+    assert.equal(res.blocked, true, 'Harus menolak obfuskasi spasi "b u g i l"');
   });
 });
 

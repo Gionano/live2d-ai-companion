@@ -27,21 +27,26 @@ export function loadModeration(moderationPath) {
     const raw = fs.readFileSync(moderationPath, 'utf-8');
     const parsed = JSON.parse(raw);
     const forbiddenWords = (parsed.forbiddenWords || []).map((w) => w.trim().toLowerCase()).filter(Boolean);
+    const compoundAllowlist = (parsed.compoundAllowlist || []).map((w) => w.trim().toLowerCase()).filter(Boolean);
     const refusalPhrases = parsed.refusalPhrases || [
       'Eits, jangan minta yang aneh-aneh ya sayang~ foto yang manis aja yaa.',
     ];
     const refusalEmotion = parsed.refusalEmotion || 'malu';
 
-    cachedModeration = { forbiddenWords, refusalPhrases, refusalEmotion };
+    cachedModeration = { forbiddenWords, compoundAllowlist, refusalPhrases, refusalEmotion };
     lastModerationPath = moderationPath;
     lastMtime = stats.mtimeMs;
     return cachedModeration;
   } catch (err) {
+    // Log peringatan saat fallback — jangan silent
+    console.warn('[selfie] [moderation] Gagal memuat selfieModeration.json, menggunakan fallback:', err.message);
     return {
       forbiddenWords: [
         'telanjang', 'bugil', 'nude', 'naked', 'nsfw', 'porn', 'vagina', 'penis', 'memek', 'kontol',
-        'darah', 'bunuh', 'mutilasi', 'gore', 'blood', 'suicide', 'corpse',
+        'darah', 'bunuh', 'mutilasi', 'gore', 'blood', 'suicide', 'corpse', 'hentai', 'topless',
+        'bikini', 'mandi', 'lingerie', 'underwear',
       ],
+      compoundAllowlist: ['darah tinggi', 'tekanan darah', 'golongan darah', 'donor darah'],
       refusalPhrases: [
         'Eits, jangan minta yang aneh-aneh ya sayang~ foto yang manis aja yaa.',
       ],
@@ -50,8 +55,33 @@ export function loadModeration(moderationPath) {
   }
 }
 
+/**
+ * Reset internal cache — untuk testing.
+ */
+export function _resetModerationCache() {
+  cachedModeration = null;
+  lastModerationPath = null;
+  lastMtime = 0;
+}
+
 function escapeRegExp(string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Deteksi leetspeak sederhana: 5ex → sex, b1k1ni → bikini, dsb.
+ * Ganti angka/simbol umum ke huruf yang sering dipalsukan.
+ */
+function normalizeLeetspeak(text) {
+  return text
+    .replace(/0/g, 'o')
+    .replace(/1/g, 'i')
+    .replace(/3/g, 'e')
+    .replace(/4/g, 'a')
+    .replace(/5/g, 's')
+    .replace(/7/g, 't')
+    .replace(/@/g, 'a')
+    .replace(/\$/g, 's');
 }
 
 /**
@@ -66,7 +96,7 @@ export function checkModeration(text, options = {}) {
   }
 
   const moderationPath = options.moderationPath || (options.config && options.config.moderationPath);
-  const { forbiddenWords, refusalPhrases, refusalEmotion } = loadModeration(moderationPath);
+  const { forbiddenWords, compoundAllowlist, refusalPhrases, refusalEmotion } = loadModeration(moderationPath);
 
   const normalized = text
     .toLowerCase()
@@ -74,29 +104,63 @@ export function checkModeration(text, options = {}) {
     .replace(/\s+/g, ' ')
     .trim();
 
-  // Versi squashed tanpa spasi untuk mendeteksi obfuskasi sederhana (mis. "b u g i l")
-  const squashed = normalized.replace(/\s+/g, '');
+  // Versi leetspeak-normalized untuk deteksi tambahan
+  const leetNormalized = normalizeLeetspeak(normalized);
+
+  // Cek apakah teks mengandung frasa compound allowlist (mis. "darah tinggi")
+  // Jika ya, jangan blokir berdasarkan sub-kata dari allowlist tsb.
+  const activeAllowlist = (compoundAllowlist || []).filter((phrase) => normalized.includes(phrase));
 
   for (const word of forbiddenWords) {
     if (!word) continue;
+
+    // Jika kata ini merupakan bagian dari compound yang di-allowlist, lewati
+    if (activeAllowlist.some((compound) => compound.includes(word))) {
+      continue;
+    }
 
     // Jika kata majemuk (ada spasi), cek substring di normalized text
     if (word.includes(' ')) {
       if (normalized.includes(word)) {
         return buildRefusal(word, refusalPhrases, refusalEmotion);
       }
+      // Cek juga pada leetspeak
+      if (leetNormalized !== normalized && leetNormalized.includes(word)) {
+        return buildRefusal(word, refusalPhrases, refusalEmotion);
+      }
       continue;
     }
 
-    // Jika kata tunggal, cek word boundary
+    // Jika kata tunggal, cek word boundary di teks asli
     const wordRegex = new RegExp(`\\b${escapeRegExp(word)}\\b`, 'i');
     if (wordRegex.test(normalized)) {
       return buildRefusal(word, refusalPhrases, refusalEmotion);
     }
 
-    // Cek squashed untuk kata minimal 4 huruf (hindari false positive kata pendek)
-    if (word.length >= 4 && squashed.includes(word)) {
+    // Cek word boundary pada versi leetspeak-normalized
+    if (leetNormalized !== normalized && wordRegex.test(leetNormalized)) {
       return buildRefusal(word, refusalPhrases, refusalEmotion);
+    }
+
+    // Cek obfuskasi spasi (mis. "b u g i l") — tapi HANYA dengan word-boundary
+    // pada versi squashed. Squash spasi HANYA dari kata-kata pendek berulang
+    // (menghindari false positive "skill" → "kill").
+    // Strategi: jangan gunakan squashed substring. Cukup word-boundary + leetspeak.
+    // Obfuskasi spasi ditangani oleh pengecekan kata yang sudah di-normalize
+    // karena "b u g i l" → normalized → "b u g i l" → masih mengandung spasi.
+    // Yang berbahaya adalah "b-u-g-i-l" → normalized → "b u g i l" (strip tanda hubung).
+    // Jadi kita cek apakah menghapus spasi di antara karakter tunggal menghasilkan kata terlarang.
+    if (word.length >= 4) {
+      // Deteksi pola "b u g i l" atau "b.u.g.i.l" (karakter tunggal dipisah spasi)
+      const spaced = normalized.match(/(?:^|\s)([a-z](?:\s[a-z]){3,})(?:\s|$)/g);
+      if (spaced) {
+        for (const segment of spaced) {
+          const collapsed = segment.replace(/\s+/g, '');
+          if (collapsed === word) {
+            return buildRefusal(word, refusalPhrases, refusalEmotion);
+          }
+        }
+      }
     }
   }
 

@@ -37,6 +37,36 @@ export function loadCharacterCard(cardPath) {
 }
 
 /**
+ * Reset internal cache — untuk testing.
+ */
+export function _resetCardCache() {
+  cachedCard = null;
+  lastCardPath = null;
+  lastMtime = 0;
+}
+
+/**
+ * Default template yang selaras dengan spec: pertahankan karakter referensi apa adanya
+ * (termasuk art style), HANYA ubah pose/ekspresi/latar/kamera/pencahayaan.
+ * JANGAN mendorong "photographic aesthetic" jika referensi adalah anime/ilustrasi.
+ */
+const DEFAULT_TEMPLATE =
+  'Keep the character exactly as in the reference image (same face, hair, outfit, and art style). ' +
+  'Change only the following: pose — {pose}; expression — {expression}; background — {background}; ' +
+  'camera angle — {cameraAngle}; lighting — {lighting}. ' +
+  'High quality, detailed, crisp focus.';
+
+const DEFAULT_NEGATIVE =
+  'nsfw, nude, naked, cleavage, sexual, suggestive, explicit, nipples, exposed breasts, ' +
+  'lingerie, bikini, underwear, violence, gore, blood, weapons, bad anatomy, deformed, distorted, blurry, ' +
+  'low quality, duplicate, extra limbs, bad hands, mutated fingers, watermark, text';
+
+/**
+ * Placeholder yang diharapkan ada di template.
+ */
+const PLACEHOLDERS = ['{pose}', '{expression}', '{background}', '{cameraAngle}', '{lighting}'];
+
+/**
  * Susun prompt positif dan negatif deterministik dari slot yang sudah dinormalisasi.
  * @param {object} slots - Objek slot ter-normalisasi { pose, ekspresi, latar, pakaian, sudut_kamera, pencahayaan, caption, emotion }
  * @param {object} [characterCard] - Kartu karakter (jika tidak disediakan, dimuat dari config)
@@ -53,25 +83,32 @@ export function buildPrompt(slots, characterCard = null, config = null) {
   const angleDesc = wl.sudut_kamera?.[slots.sudut_kamera] || slots.sudut_kamera || 'selfie angle from arm length';
   const lightDesc = wl.pencahayaan?.[slots.pencahayaan] || slots.pencahayaan || 'natural daylight';
 
-  const template = card.promptTemplate || (
-    'A portrait photo of the exact same character as in the reference image. ' +
-    'Preserve the character identity, facial features, and style from the reference image. ' +
-    'Scene modifications: {pose}, {expression}, {background}, {cameraAngle}, {lighting}. ' +
-    'High quality, crisp focus, photographic aesthetic, natural texture.'
-  );
+  const template = card.promptTemplate || DEFAULT_TEMPLATE;
 
-  const positivePrompt = template
-    .replace('{pose}', poseDesc)
-    .replace('{expression}', exprDesc)
-    .replace('{background}', bgDesc)
-    .replace('{cameraAngle}', angleDesc)
-    .replace('{lighting}', lightDesc);
+  // Gunakan replaceAll agar SEMUA kemunculan placeholder terganti (bukan hanya yang pertama)
+  const replacements = {
+    '{pose}': poseDesc,
+    '{expression}': exprDesc,
+    '{background}': bgDesc,
+    '{cameraAngle}': angleDesc,
+    '{lighting}': lightDesc,
+  };
 
-  const negativePrompt = config?.negativePrompt || card.negativePrompt || (
-    'nsfw, nude, naked, cleavage, sexual, suggestive, explicit, nipples, exposed breasts, ' +
-    'lingerie, violence, gore, blood, weapons, bad anatomy, deformed, distorted, blurry, ' +
-    'low quality, duplicate, extra limbs, bad hands, mutated fingers'
-  );
+  let positivePrompt = template;
+  for (const [placeholder, value] of Object.entries(replacements)) {
+    positivePrompt = positivePrompt.replaceAll(placeholder, value);
+  }
+
+  // Periksa apakah ada placeholder yang belum terganti (template salah isi)
+  const remaining = positivePrompt.match(/\{[a-zA-Z_]+\}/g);
+  if (remaining) {
+    console.warn(
+      `[selfie] [promptBuilder] Template masih memiliki placeholder yang tidak terganti: ${remaining.join(', ')}. ` +
+      `Placeholder yang didukung: ${PLACEHOLDERS.join(', ')}.`,
+    );
+  }
+
+  const negativePrompt = config?.negativePrompt || card.negativePrompt || DEFAULT_NEGATIVE;
 
   return {
     positivePrompt,
