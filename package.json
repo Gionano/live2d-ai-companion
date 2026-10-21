@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "amika-live2d-companion",
   "description": "Amika AI companion with official Live2D Cubism Web rendering, STT, LLM, and TTS",
   "private": true,
@@ -9,7 +9,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "server": "node server/index.js",
+    "test": "node --test server/selfie/tests/planner.test.js",
     "selfie:test": "node server/selfie/selfieTest.js",
+    "selfie:test-b": "node --test server/selfie/tests/planner.test.js",
+    "selfie:plan": "node server/selfie/selfiePlanTest.js",
     "dev:all": "concurrently -k -n server,vite -c yellow,cyan \"npm run server\" \"npm run dev\""
   },
   "dependencies": {

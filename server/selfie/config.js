@@ -29,6 +29,10 @@ const DEFAULTS = {
   defaultReference: '',
   workflowFile: 'workflows/selfie.api.json',
   mappingFile: 'selfie.mapping.json',
+  keywordsFile: 'config/selfieKeywords.json',
+  characterCardFile: 'config/characterCard.json',
+  moderationFile: 'config/selfieModeration.json',
+  plannerTimeoutMs: 20000,
   healthCheckTimeoutMs: 3000,
   pollIntervalMs: 1500,
   cacheRetries: 1,
@@ -84,5 +88,8 @@ export function loadSelfieConfig(overrides = {}) {
   cfg.workflowPath = resolveDir(cfg.workflowFile, path.join(ROOT_DIR, 'workflows', 'selfie.api.json'));
   cfg.mappingPath = resolveDir(cfg.mappingFile, path.join(ROOT_DIR, 'selfie.mapping.json'));
   cfg.etaStorePath = resolveDir(cfg.etaStoreFile, path.join(ROOT_DIR, 'data', 'selfie-durations.json'));
+  cfg.keywordsPath = resolveDir(cfg.keywordsFile, path.join(ROOT_DIR, 'config', 'selfieKeywords.json'));
+  cfg.characterCardPath = resolveDir(cfg.characterCardFile, path.join(ROOT_DIR, 'config', 'characterCard.json'));
+  cfg.moderationPath = resolveDir(cfg.moderationFile, path.join(ROOT_DIR, 'config', 'selfieModeration.json'));
   return cfg;
 }
