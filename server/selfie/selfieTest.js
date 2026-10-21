@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 import { loadSelfieConfig } from './config.js';
 import { createImageProvider } from './imageProvider.js';
-import { EtaStore } from './etaStore.js';
+import { etaStore } from './etaStore.js';
 
 // `npm run x --provider=a` diteruskan npm sebagai env npm_config_*; dukung juga argv (--provider=a).
 function arg(name) {
@@ -21,10 +21,8 @@ const DEFAULT_NEGATIVE = 'blurry, low quality, deformed hands, extra fingers, wa
 
 const cfg = loadSelfieConfig({ provider: arg('provider'), preset: arg('preset') });
 const preset = cfg.presets[cfg.preset];
-const eta = new EtaStore(cfg);
-
 console.log(`== selfie:test | provider=${cfg.provider} preset=${cfg.preset} (${JSON.stringify(preset)})`);
-const prevEta = eta.estimateSeconds(cfg.preset);
+const prevEta = etaStore.getEta(cfg.preset, cfg.etaStorePath);
 console.log(`ETA dari riwayat: ${prevEta === null ? '(belum ada)' : `${prevEta}s`}`);
 
 const provider = await createImageProvider(cfg);
@@ -66,7 +64,7 @@ try {
     },
     ctl.signal,
   );
-  eta.record(cfg.preset, result.timings.totalMs);
+  etaStore.recordDuration(cfg.preset, Math.round(result.timings.totalMs / 1000), cfg.etaStorePath);
   console.log('\n== HASIL');
   console.log(`file     : ${result.imagePath}`);
   console.log(`seed     : ${result.seed}`);
@@ -74,7 +72,7 @@ try {
   console.log(`generate : ${result.timings.generateMs} ms`);
   console.log(`unduh    : ${result.timings.downloadMs} ms`);
   console.log(`total    : ${result.timings.totalMs} ms`);
-  console.log(`ETA baru : ${eta.estimateSeconds(cfg.preset)}s (rata-rata ${cfg.etaHistorySize} terakhir)`);
+  console.log(`ETA baru : ${etaStore.getEta(cfg.preset, cfg.etaStorePath)}s (rata-rata ${cfg.etaHistorySize} terakhir)`);
 } catch (err) {
   console.error(`\nGAGAL [${err.code ?? 'ERR'}]: ${err.message}`);
   process.exitCode = 1;

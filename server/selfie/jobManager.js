@@ -15,6 +15,10 @@ import { createImageProvider } from './imageProvider.js';
 import { etaStore } from './etaStore.js';
 import { logSelfie } from './log.js';
 
+// Batas maksimal token yang disimpan dan TTL (24 jam).
+const TOKEN_MAX_ENTRIES = 100;
+const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
 export class JobManager {
   constructor(config = null) {
     this.config = config || loadSelfieConfig();
@@ -257,6 +261,7 @@ export class JobManager {
         jobId,
         timestamp: Date.now(),
       });
+      this._pruneTokens();
 
       this.lastCompletedTime = Date.now();
       this.incrementDailyCount();
@@ -333,10 +338,40 @@ export class JobManager {
 
   /**
    * Ambil data file berdasarkan token acak (Point 15).
+   * Mengembalikan null jika token tidak ada atau sudah kedaluwarsa (>24 jam).
    */
   getFileByToken(token) {
     if (!token || typeof token !== 'string') return null;
-    return this.tokenMap.get(token) || null;
+    const entry = this.tokenMap.get(token);
+    if (!entry) return null;
+    // Hapus token kedaluwarsa saat diakses
+    if (Date.now() - entry.timestamp > TOKEN_TTL_MS) {
+      this.tokenMap.delete(token);
+      return null;
+    }
+    return entry;
+  }
+
+  /**
+   * Bersihkan token lama: hapus yang sudah kedaluwarsa (>24 jam),
+   * dan jika masih melebihi TOKEN_MAX_ENTRIES, hapus yang paling tua.
+   */
+  _pruneTokens() {
+    const now = Date.now();
+    // 1. Hapus token kedaluwarsa
+    for (const [key, val] of this.tokenMap) {
+      if (now - val.timestamp > TOKEN_TTL_MS) {
+        this.tokenMap.delete(key);
+      }
+    }
+    // 2. Jika masih terlalu banyak, hapus yang paling tua
+    if (this.tokenMap.size > TOKEN_MAX_ENTRIES) {
+      const entries = [...this.tokenMap.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp);
+      const toRemove = entries.slice(0, this.tokenMap.size - TOKEN_MAX_ENTRIES);
+      for (const [key] of toRemove) {
+        this.tokenMap.delete(key);
+      }
+    }
   }
 }
 
