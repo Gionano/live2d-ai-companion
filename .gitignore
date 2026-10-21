@@ -30,3 +30,7 @@ public/models/*.vrm
 public/models/README.md
 src/legacy-vrm/
 src/visionMonitor.js
+
+# Selfie (pap): foto referensi pribadi tidak ikut repo
+assets/references/*
+!assets/references/README.md

@@ -1,0 +1,25 @@
+{
+  "_comment": "Pemetaan node workflows/selfie.api.json. 'title' = _meta.title persis dari JSON (boleh terpotong, dicocokkan awalan); 'classType' = cadangan bila judul tidak ketemu. 'fields' = nama field input pada node tsb.",
+  "nodes": {
+    "prompt": {
+      "title": "PROMPT + Referensi (Qwen Image 2.1)",
+      "classType": "TextEncodeQwenImage21",
+      "fields": { "positive": "prompt", "negative": "negative_prompt", "resolution": "resolution" }
+    },
+    "reference": {
+      "title": "GAMBAR REFERENSI (ganti dengan gambarmu)",
+      "classType": "LoadImage",
+      "fields": { "image": "image" }
+    },
+    "sampler": {
+      "title": "KSampler",
+      "classType": "KSampler",
+      "fields": { "seed": "seed", "steps": "steps" }
+    },
+    "save": {
+      "title": "Simpan Gambar",
+      "classType": "SaveImage",
+      "fields": { "filenamePrefix": "filename_prefix" }
+    }
+  }
+}

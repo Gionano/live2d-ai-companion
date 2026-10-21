@@ -1,0 +1,38 @@
+{
+  "_comment": "Semua konstanta tuning modul selfie (pap). Hanya dibaca backend.",
+  "provider": "comfyui",
+  "comfyUrl": "http://127.0.0.1:8188",
+  "outputDir": "",
+  "filenamePrefix": "waifu_selfie",
+  "jobTimeoutMs": 600000,
+  "freeVramAfter": true,
+  "maxQueue": 1,
+  "cooldownMs": 60000,
+  "dailyLimit": 20,
+  "preset": "cepat",
+  "presets": {
+    "cepat": { "resolution": 768, "steps": 12 },
+    "kualitas": { "resolution": 1024, "steps": 20 }
+  },
+  "referenceDir": "assets/references",
+  "defaultReference": "default.jpg",
+  "workflowFile": "workflows/selfie.api.json",
+  "mappingFile": "selfie.mapping.json",
+  "healthCheckTimeoutMs": 3000,
+  "pollIntervalMs": 1500,
+  "cacheRetries": 1,
+  "etaHistorySize": 5,
+  "etaStoreFile": "data/selfie-durations.json",
+  "sdcpp": {
+    "cliPath": "",
+    "diffusionModel": "",
+    "vae": "",
+    "llm": "",
+    "llmVision": "",
+    "cfgScale": 3,
+    "samplingMethod": "euler",
+    "flowShift": 3.1,
+    "offloadToCpu": true,
+    "extraArgs": []
+  }
+}
