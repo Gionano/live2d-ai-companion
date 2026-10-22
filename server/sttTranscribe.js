@@ -16,15 +16,18 @@ const STT_PROMPT = 'Umm, halo sayang? Ini adalah percakapan santai. Kamu lagi ng
 
 // audioBuffer: Buffer audio mentah. `filename` dipakai Groq untuk menebak
 // container — samakan ekstensinya dengan mime rekaman (default webm).
-export async function transcribeAudio(audioBuffer, filename = 'audio.webm') {
+export async function transcribeAudio(audioBuffer, filename = 'audio.webm', { signal } = {}) {
+  signal?.throwIfAborted();
   const file = await toFile(audioBuffer, filename);
+  signal?.throwIfAborted();
   const res = await groq.audio.transcriptions.create({
     file,
     model: STT_MODEL,
     language: 'id', // Bahasa Indonesia — akurasi lebih baik
     response_format: 'verbose_json',
     prompt: STT_PROMPT,
-  });
+  }, { signal });
+  signal?.throwIfAborted();
 
   // Filter halusinasi berdasarkan no_speech_prob (khas Whisper saat mendengar ketukan/noise)
   if (res.segments && res.segments.length > 0) {

@@ -157,7 +157,9 @@ export async function* generateReply(
   conversationHistory,
   userMessage,
   visionDescription,
+  { signal } = {},
 ) {
+  signal?.throwIfAborted();
   const rawHistory = Array.isArray(conversationHistory)
     ? conversationHistory
     : [];
@@ -193,7 +195,7 @@ export async function* generateReply(
       stream: true,
       response_format: { type: 'json_object' },
       reasoning_effort: 'none',
-    });
+    }, { signal });
   } catch (error) {
     if (error?.status === 401) {
       console.error('[llm-chat] Experiential Labs 401 — cek EXPLABS_API_KEY di .env.');
@@ -208,9 +210,11 @@ export async function* generateReply(
   let gotText = false;
 
   for await (const chunk of stream) {
+    signal?.throwIfAborted();
     const delta = chunk.choices[0]?.delta?.content;
     if (!delta) continue;
     for (const event of parser.push(delta)) {
+      signal?.throwIfAborted();
       if (event.type === 'delta') gotText = true;
       yield event;
     }
@@ -221,7 +225,11 @@ export async function* generateReply(
       JSON.stringify(parser.raw.slice(0, 300)),
     );
   }
-  for (const event of parser.finish()) yield event;
+  signal?.throwIfAborted();
+  for (const event of parser.finish()) {
+    signal?.throwIfAborted();
+    yield event;
+  }
 }
 
 // Ambil kalimat lengkap paling awal dari `buf`. Return { sentence, rest } atau
@@ -257,13 +265,16 @@ export async function* generateReplyStream(
   conversationHistory,
   userMessage,
   visionDescription,
+  { signal } = {},
 ) {
   let buf = '';
   for await (const event of generateReply(
     conversationHistory,
     userMessage,
     visionDescription,
+    { signal },
   )) {
+    signal?.throwIfAborted();
     if (event.type === 'emotion') {
       yield event;
       continue;
@@ -273,11 +284,13 @@ export async function* generateReplyStream(
     buf += delta;
     let hit;
     while ((hit = takeSentence(buf))) {
+      signal?.throwIfAborted();
       yield { type: 'sentence', text: hit.sentence };
       buf = hit.rest;
     }
   }
   const tail = buf.trim();
+  signal?.throwIfAborted();
   if (tail) yield { type: 'sentence', text: tail };
 }
 
