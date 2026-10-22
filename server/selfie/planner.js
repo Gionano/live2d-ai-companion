@@ -118,7 +118,9 @@ export async function planSelfie({
   history = [],
   config = null,
   llmClient = explabs,
+  signal,
 }) {
+  signal?.throwIfAborted();
   const cfg = config || loadSelfieConfig();
   const t0 = performance.now();
 
@@ -167,10 +169,12 @@ export async function planSelfie({
   let rawJson = null;
   let rawResponseText = '';
 
+  const controller = new AbortController();
+  const onAbort = () => controller.abort(signal.reason);
+  signal?.addEventListener('abort', onAbort, { once: true });
+  if (signal?.aborted) onAbort();
+  const timeoutHandle = setTimeout(() => controller.abort(), cfg.plannerTimeoutMs || 20000);
   try {
-    const timeoutMs = cfg.plannerTimeoutMs || 20000;
-    const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
     const completion = await llmClient.chat.completions.create(
       {
@@ -180,15 +184,19 @@ export async function planSelfie({
       },
       { signal: controller.signal },
     );
-    clearTimeout(timeoutHandle);
+    signal?.throwIfAborted();
 
     rawResponseText = completion?.choices?.[0]?.message?.content || '';
     rawJson = parsePlannerJson(rawResponseText);
     const durationMs = Math.round(performance.now() - t0);
     logSelfie(`[planner] Respons LLM diterima dalam ${durationMs}ms`);
   } catch (err) {
+    signal?.throwIfAborted();
     logSelfie(`[planner] Gagal memanggil LLM Cloud (${err.message}); menggunakan default slot`, 'warn');
     rawJson = null; // trigger fallback
+  } finally {
+    clearTimeout(timeoutHandle);
+    signal?.removeEventListener('abort', onAbort);
   }
 
   // 4. Normalisasi slot terhadap whitelist (otomatis fallback ke default jika JSON rusak atau nilai di luar whitelist)
