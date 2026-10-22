@@ -25,6 +25,7 @@ import {
 import { transcribeAudio } from './sttTranscribe.js';
 import { generateSpeech } from './ttsGenerate.js';
 import { isVoiceConfigured } from './voiceConfig.js';
+import { SpeechController } from './speechController.js';
 import {
   companionSessionClosed,
   companionSessionOpened,
@@ -293,7 +294,7 @@ const sharingSockets = new Set();
 const monitorSockets = new Set();
 // Pesan audio/avatar/selfie khusus companion — tidak perlu sampai ke Vision Monitor.
 const COMPANION_ONLY_TYPES = new Set([
-  'audio_output', 'audio_end', 'emotion', 'amika_replied', 'vision',
+  'audio_output', 'audio_end', 'speech_start', 'speech_end', 'stop_speech', 'emotion', 'amika_replied', 'vision',
   'selfie_started', 'selfie_progress', 'selfie_ready', 'selfie_failed', 'selfie_cancelled',
 ]);
 
@@ -310,81 +311,20 @@ function broadcastToCompanions(obj) {
 // Hubungkan broadcaster JobManager ke semua socket companion
 jobManager.setBroadcaster(broadcastToCompanions);
 
-// --- Antrean Ucapan Avatar (TTS Turn-Taking Respect) ---
-const pendingSpeechQueue = [];
-let isAvatarSpeaking = false;
+// One controller owns turn state and speech IDs for every spoken output.
+const speechController = new SpeechController({ generateSpeech, isVoiceConfigured });
 
-function isAnyCompanionBusy() {
-  if (isAvatarSpeaking) return true;
-  for (const client of wss.clients) {
-    if (client.readyState === WebSocket.OPEN && !client.isMonitor) {
-      if (client.conversationState && client.conversationState !== 'idle') {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-async function playSpokenMessage(text, emotion = 'sayang') {
-  if (!text) return;
-  isAvatarSpeaking = true;
-  broadcastToCompanions({ type: 'conversation_state', state: 'speaking' });
-  broadcastToCompanions({ type: 'emotion', emotion });
-  broadcastToCompanions({ type: 'amika_replied', text, emotion });
-
-  if (isVoiceConfigured()) {
-    try {
-      let sentFirstChunk = false;
-      for await (const chunk of generateSpeech(text, emotion)) {
-        sentFirstChunk = true;
-        broadcastToCompanions({
-          type: 'audio_output',
-          data: chunk.toString('base64'),
-          format: 'mp3',
-        });
-      }
-      broadcastToCompanions({ type: 'audio_end' });
-      if (!sentFirstChunk) {
-        isAvatarSpeaking = false;
-        broadcastToCompanions({ type: 'conversation_state', state: 'idle' });
-        processNextPendingSpeech();
-      }
-    } catch (err) {
-      console.error('[tts:speech] Gagal TTS ucapan:', err.message);
-      isAvatarSpeaking = false;
-      broadcastToCompanions({ type: 'conversation_state', state: 'idle' });
-      processNextPendingSpeech();
-    }
-  } else {
-    isAvatarSpeaking = false;
-    broadcastToCompanions({ type: 'conversation_state', state: 'idle' });
-    processNextPendingSpeech();
-  }
+function playSpokenMessage(text, emotion = 'sayang', socket, turnId) {
+  return speechController.play({ text, emotion, recipients: [socket], turnId });
 }
 
 function enqueueSpeech(text, emotion = 'sayang') {
-  if (!isAnyCompanionBusy()) {
-    void playSpokenMessage(text, emotion);
-  } else {
-    console.log(`[turn] Speech diantrekan (companion sedang sibuk): "${text}"`);
-    pendingSpeechQueue.push({ text, emotion });
-  }
+  return speechController.play({ text, emotion, deferred: true });
 }
 
-function processNextPendingSpeech() {
-  if (!isAnyCompanionBusy() && pendingSpeechQueue.length > 0) {
-    const next = pendingSpeechQueue.shift();
-    console.log(`[turn] Menjalankan antrean speech: "${next.text}"`);
-    void playSpokenMessage(next.text, next.emotion);
-  }
-}
-
-// Hubungkan speech handler JobManager ke speech queue turn-taking
 jobManager.setSpeechHandler(({ text, emotion }) => {
-  enqueueSpeech(text, emotion);
+  void enqueueSpeech(text, emotion);
 });
-
 streamingVisionManager.setSpeechHandler((text, emotion) => enqueueSpeech(text, emotion));
 
 function sendVisionInit(sock) {
@@ -450,38 +390,13 @@ wss.on('connection', (socket, req) => {
 
   companionSessionOpened();
 
-  let conversationState = 'idle'; // 'idle' | 'processing' | 'speaking'
-  socket.conversationState = 'idle';
-  let safetyTimer = null;
-
-  function clearSafetyTimer() {
-    if (safetyTimer) {
-      clearTimeout(safetyTimer);
-      safetyTimer = null;
-    }
-  }
-
-  function setConversationState(newState) {
-    if (conversationState === newState) return;
-    clearSafetyTimer();
-    const oldState = conversationState;
-    conversationState = newState;
-    socket.conversationState = newState;
-    console.log(`[turn] State transition: ${oldState} -> ${newState}`);
-    send({ type: 'conversation_state', state: conversationState });
-
-    if (conversationState !== 'idle') {
-      safetyTimer = setTimeout(() => {
-        console.warn(`[turn] Safety timeout (30s) reached while in state "${conversationState}". Forcing reset to idle.`);
-        setConversationState('idle');
-      }, 30000);
-    } else {
-      processNextPendingSpeech();
-    }
-  }
+  const send = (obj) => {
+    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(obj));
+  };
+  speechController.register(socket, send);
 
   socket.once('close', () => {
-    clearSafetyTimer();
+    speechController.unregister(socket);
     companionSessionClosed();
     for (const pending of pendingCaptures.values()) {
       clearTimeout(pending.timer);
@@ -494,10 +409,7 @@ wss.on('connection', (socket, req) => {
     }
   });
 
-  const history = []; // histori percakapan per-koneksi
-  const send = (obj) => {
-    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(obj));
-  };
+  const history = []; // Conversation history remains per connection.
 
   // Minta satu frame layar ke klien desktop. Selalu resolve (tidak pernah reject):
   //   { ok:true, dataUrl, width, height } | { ok:false, code, spoken }
@@ -569,7 +481,7 @@ wss.on('connection', (socket, req) => {
   // Kirim status awal percakapan ke client
   send({
     type: 'conversation_state',
-    state: conversationState,
+    state: socket.conversationState,
   });
 
   // Kirim status awal vision streaming ke client yang baru terhubung
@@ -585,9 +497,7 @@ wss.on('connection', (socket, req) => {
 
     // 0. Sinyal selesai playback dari client untuk turn-taking
     if (msg.type === 'playback_finished') {
-      console.log(`[turn] Client playback_finished received (current state: ${conversationState})`);
-      isAvatarSpeaking = false;
-      setConversationState('idle');
+      speechController.acknowledge(socket, msg.speechId);
       return;
     }
 
@@ -628,8 +538,8 @@ wss.on('connection', (socket, req) => {
 
     // 4. Handler untuk komentar spontan eksternal (jika ada)
     if (msg.type === 'spontaneous_vision_comment') {
-      if (conversationState !== 'idle') {
-        console.log(`[spontaneous] Diabaikan: percakapan sedang "${conversationState}"`);
+      if (speechController.isBusy(socket)) {
+        console.log(`[spontaneous] Diabaikan: percakapan sedang "${socket.conversationState}"`);
         return;
       }
       const { text, emotion = 'netral' } = msg;
@@ -643,42 +553,16 @@ wss.on('connection', (socket, req) => {
       }
 
       broadcastToAll({ type: 'vision', text: `[Spontan] ${text}` });
-      broadcastToAll({ type: 'emotion', emotion });
-
-      if (isVoiceConfigured()) {
-        try {
-          let sentFirstChunk = false;
-          for await (const chunk of generateSpeech(text, emotion)) {
-            if (!sentFirstChunk) {
-              sentFirstChunk = true;
-              setConversationState('speaking');
-            }
-            broadcastToAll({
-              type: 'audio_output',
-              data: chunk.toString('base64'),
-              format: 'mp3',
-            });
-          }
-          broadcastToAll({ type: 'audio_end' });
-          if (!sentFirstChunk) {
-            setConversationState('idle');
-          }
-        } catch (err) {
-          console.error('[tts:spontaneous] Gagal TTS komentar spontan:', err.message);
-          setConversationState('idle');
-        }
-      }
-
-      broadcastToAll({ type: 'amika_replied', text, emotion });
+      await enqueueSpeech(text, emotion);
       return;
     }
 
     if (msg.type !== 'audio_input' && msg.type !== 'text_input') return;
     const isTyped = msg.type === 'text_input';
 
-    // Turn-taking: jika bukan IDLE (sedang PROCESSING atau SPEAKING), abaikan input baru
-    if (conversationState !== 'idle') {
-      console.log(`[turn] Ignored ${msg.type}: current state is "${conversationState}"`);
+    // Reject input explicitly so the client can restore its optimistic UI.
+    if (speechController.isBusy(socket)) {
+      speechController.rejectInput(socket, 'BUSY');
       return;
     }
 
@@ -693,6 +577,7 @@ wss.on('connection', (socket, req) => {
       return;
     }
 
+    let turn = null;
     try {
       let buf = null;
       if (!isTyped) {
@@ -700,8 +585,10 @@ wss.on('connection', (socket, req) => {
         if (buf.length < 512) return;
       }
 
-      // Input valid mulai diproses -> masuk state PROCESSING
-      setConversationState('processing');
+      turn = speechController.beginTurn(socket);
+      if (!turn) return;
+      const isCurrent = () => speechController.isCurrentTurn(socket, turn.turnId);
+      const send = (event) => speechController.sendTurn(socket, turn.turnId, event);
 
       // --- timing diagnostics (ponytail: hapus blok [timing] kalau tak perlu) --
       // Semua durasi relatif ke saat input valid diterima (tPipe).
@@ -716,7 +603,8 @@ wss.on('connection', (socket, req) => {
         console.log(`[typed] input teks: ${JSON.stringify(text)}`);
       } else {
         const tSttStart = performance.now();
-        text = await transcribeAudio(buf, `audio.${extFromMime(mime)}`);
+        text = await transcribeAudio(buf, `audio.${extFromMime(mime)}`, { signal: turn.signal });
+        if (!isCurrent()) return;
         tSttEnd = performance.now();
         console.log(`[timing] STT: ${ms(tSttStart, tSttEnd)}ms (t+${ms(tPipe, tSttEnd)})`);
       }
@@ -727,7 +615,6 @@ wss.on('connection', (socket, req) => {
       // ganti sttTranscribe ke verbose_json & saring no_speech_prob.
       if (!isTyped && text.length < 3) {
         console.log('[stt] skip, noise/pendek:', JSON.stringify(text));
-        setConversationState('idle');
         return;
       }
       send({ type: 'user_said', text });
@@ -743,10 +630,13 @@ wss.on('connection', (socket, req) => {
           planner: planSelfie,
           userText: text,
           history,
+          signal: turn.signal,
         });
+        if (!isCurrent()) return;
         if (!result.ok) {
           console.log(`[selfie] Request rejected: ${result.reason}`);
-          await playSpokenMessage(result.text, result.emotion);
+          await playSpokenMessage(result.text, result.emotion, socket, turn.turnId);
+          if (!isCurrent()) return;
           history.push({ role: 'user', content: text });
           history.push({ role: 'assistant', content: result.text });
           return;
@@ -757,7 +647,7 @@ wss.on('connection', (socket, req) => {
 
         // Ucapkan ucapan awal segera lewat pipeline TTS ("tunggu ya, aku pose dulu")
         const initialText = result.initialText || jobManager.pickPhrase('initial') || 'Tunggu ya sayang, aku pose dulu sebentar...';
-        await playSpokenMessage(initialText, 'sayang');
+        await playSpokenMessage(initialText, 'sayang', socket, turn.turnId);
         return;
       }
 
@@ -823,6 +713,7 @@ wss.on('connection', (socket, req) => {
             // Electron: minta frame layar langsung ke klien (timeout 5 dtk)
             if (!desc && source === 'screen' && !frame && desktopScreenOn) {
               const cap = await requestScreenCapture();
+              if (!isCurrent()) return;
               if (cap.ok) frame = cap.dataUrl;
               else captureFailure = cap;
             }
@@ -835,6 +726,7 @@ wss.on('connection', (socket, req) => {
               // Fallback one-shot: buffer kosong atau sumber = kamera
               if (!desc) {
                 desc = await describeFrame(frame, source);
+                if (!isCurrent()) return;
               }
 
               console.log(`[timing] vision (${source}): ${ms(tVisStart)}ms (t+${ms(tPipe)})`);
@@ -843,6 +735,7 @@ wss.on('connection', (socket, req) => {
               vision = `(${label} aktif & berhasil dilihat) ${desc}`;
             }
           } catch (err) {
+            if (!isCurrent()) return;
             console.error(`[vision:${source}] error:`, err);
             send({ type: 'error', message: `Vision ${label.toLowerCase()} gagal: ${err.message}` });
           }
@@ -855,7 +748,6 @@ wss.on('connection', (socket, req) => {
       // Streaming SUDAH benar: TTS kalimat pertama jalan begitu {sentence}
       // pertama muncul, tak nunggu LLM selesai (lihat [timing] di bawah).
       let full = '';
-      const ttsOn = isVoiceConfigured();
       let ttsChain = Promise.resolve();
 
       // Milestone timing (di-set sekali; 0 = belum kejadian).
@@ -865,76 +757,62 @@ wss.on('connection', (socket, req) => {
       let tTtsFirstChunk = 0;
       let tFirstAudioOut = 0;
       let sentenceIdx = 0;
-      let sentFirstAudio = false;
 
       let replyEmotion = 'netral';
 
-      async function speak(sentence, idx) {
-        try {
-          const isFirst = idx === 0;
-          if (isFirst) tTtsStart = performance.now();
-          for await (const chunk of generateSpeech(sentence, replyEmotion)) {
-            if (!sentFirstAudio) {
-              sentFirstAudio = true;
-              setConversationState('speaking');
-            }
-            if (isFirst && !tTtsFirstChunk) tTtsFirstChunk = performance.now();
-            send({
-              type: 'audio_output',
-              data: chunk.toString('base64'),
-              format: 'mp3',
-            });
-            if (isFirst && !tFirstAudioOut) {
-              tFirstAudioOut = performance.now();
-              // Ringkasan satu baris: audio_input -> audio pertama terdengar.
-              console.log(
-                `[timing] STT selesai: ${ms(tPipe, tSttEnd)}ms` +
-                  ` | LLM first token: ${ms(tPipe, tLlmFirstToken)}ms` +
-                  ` | LLM first sentence: ${ms(tPipe, tLlmFirstSentence)}ms` +
-                  ` | TTS req->first chunk: ${ms(tTtsStart, tTtsFirstChunk)}ms` +
-                  ` | total to first audio: ${ms(tPipe, tFirstAudioOut)}ms`,
-              );
-            }
+      async function speak(sentence, idx, say, emotion) {
+        const isFirst = idx === 0;
+        if (isFirst) tTtsStart = performance.now();
+        await say(sentence, emotion, () => {
+          if (isFirst && !tTtsFirstChunk) tTtsFirstChunk = performance.now();
+          if (isFirst && !tFirstAudioOut) {
+            tFirstAudioOut = performance.now();
+            console.log(
+              `[timing] STT selesai: ${ms(tPipe, tSttEnd)}ms` +
+                ` | LLM first token: ${ms(tPipe, tLlmFirstToken)}ms` +
+                ` | LLM first sentence: ${ms(tPipe, tLlmFirstSentence)}ms` +
+                ` | TTS req->first chunk: ${ms(tTtsStart, tTtsFirstChunk)}ms` +
+                ` | total to first audio: ${ms(tPipe, tFirstAudioOut)}ms`,
+            );
           }
-          send({ type: 'audio_end' }); // penanda satu kalimat mp3 selesai
-        } catch (err) {
-          // TTS gagal -> log & skip, jangan macetkan percakapan.
-          console.error('[tts] gagal, skip kalimat:', err.message);
-        }
+        });
       }
 
-      const tLlmStart = performance.now(); // = saat request LLM dimulai
-      for await (const ev of generateReplyStream(history, text, vision)) {
-        if (ev.type === 'emotion') {
-          replyEmotion = ev.emotion;
-          send({ type: 'emotion', emotion: replyEmotion });
-          console.log(`[emotion] LLM selected: ${replyEmotion}`);
-        } else if (ev.type === 'delta') {
-          if (!tLlmFirstToken) {
-            tLlmFirstToken = performance.now();
-            console.log(`[timing] LLM first token: ${ms(tLlmStart, tLlmFirstToken)}ms (req->ttft, t+${ms(tPipe)})`);
+      await speechController.play({
+        recipients: [socket],
+        turnId: turn.turnId,
+        produce: async ({ say, signal }) => {
+          try {
+            const tLlmStart = performance.now(); // = saat request LLM dimulai
+            for await (const ev of generateReplyStream(history, text, vision, { signal })) {
+              if (signal.aborted || !isCurrent()) break;
+              if (ev.type === 'emotion') {
+                replyEmotion = ev.emotion;
+                send({ type: 'emotion', emotion: replyEmotion });
+                console.log(`[emotion] LLM selected: ${replyEmotion}`);
+              } else if (ev.type === 'delta') {
+                if (!tLlmFirstToken) {
+                  tLlmFirstToken = performance.now();
+                  console.log(`[timing] LLM first token: ${ms(tLlmStart, tLlmFirstToken)}ms (req->ttft, t+${ms(tPipe)})`);
+                }
+                full += ev.text;
+              } else if (ev.type === 'sentence') {
+                if (!tLlmFirstSentence) {
+                  tLlmFirstSentence = performance.now();
+                  console.log(`[timing] LLM first sentence: ${ms(tLlmStart, tLlmFirstSentence)}ms (req->sentence, t+${ms(tPipe)})`);
+                }
+                const idx = sentenceIdx++;
+                const emotion = replyEmotion;
+                ttsChain = ttsChain.then(() => speak(ev.text, idx, say, emotion));
+              }
+            }
+          } finally {
+            await ttsChain;
+            if (!signal.aborted && isCurrent()) send({ type: 'amika_replied', text: full, emotion: replyEmotion });
           }
-          full += ev.text;
-        } else if (ev.type === 'sentence') {
-          if (!tLlmFirstSentence) {
-            tLlmFirstSentence = performance.now();
-            console.log(`[timing] LLM first sentence: ${ms(tLlmStart, tLlmFirstSentence)}ms (req->sentence, t+${ms(tPipe)})`);
-          }
-          if (ttsOn) {
-            const idx = sentenceIdx++;
-            ttsChain = ttsChain.then(() => speak(ev.text, idx));
-          }
-        }
-      }
-      await ttsChain; // pastikan semua audio ke-flush sebelum turn ditutup
-      send({ type: 'amika_replied', text: full, emotion: replyEmotion });
-
-      // Jika tidak ada audio TTS yang terkirim (misal TTS nonaktif atau gagal),
-      // kembalikan state ke IDLE karena tidak akan ada event playback_finished dari client
-      if (!sentFirstAudio) {
-        console.log('[turn] Tidak ada audio TTS yang dikirim; mereset state ke idle');
-        setConversationState('idle');
-      }
+        },
+      });
+      if (!isCurrent()) return;
 
       history.push({ role: 'user', content: text });
       history.push({ role: 'assistant', content: full });
@@ -945,9 +823,11 @@ wss.on('connection', (socket, req) => {
       // Catat & ekstrak memori jangka panjang di latar belakang (non-blocking)
       void memoryManager.recordTurnAndExtract(text, full);
     } catch (err) {
+      if (!turn || !speechController.isCurrentTurn(socket, turn.turnId)) return;
       console.error('[stt] error:', err);
-      setConversationState('idle');
-      send({ type: 'error', message: err.message ?? 'STT gagal.' });
+      speechController.sendTurn(socket, turn.turnId, { type: 'error', message: err.message ?? 'STT gagal.' });
+    } finally {
+      if (turn) speechController.completeTurn(socket, turn.turnId);
     }
   });
 });

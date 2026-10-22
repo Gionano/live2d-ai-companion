@@ -18,6 +18,7 @@ const micStatusEl = document.getElementById('mic-status');
 const micLabelEl = document.getElementById('mic-label');
 const overlaySubtitleEl = document.getElementById('overlay-subtitle');
 import { tuning } from './tuningConfig.js';
+import { SpeechPlayback, TurnState } from './speechPlayback.js';
 
 const isOverlay = new URLSearchParams(window.location.search).get('mode') === 'overlay';
 let overlaySubtitleHideDelayMs = 6500;
@@ -350,20 +351,31 @@ let audioCtx = null;
 let analyser = null;
 let freqData = null;
 let playCursor = 0; // waktu AudioContext untuk kalimat berikutnya
-let pendingChunks = []; // chunk mp3 kalimat yang sedang diterima
 let pendingEmotion = 'netral';
 let scheduledEmotionEnd = 0;
 
 let currentConversationState = 'idle'; // 'idle' | 'processing' | 'speaking'
-let isGeneratingAudio = false;
-let audioPlayChain = Promise.resolve();
+const turnState = new TurnState();
 const activeAudioSources = new Set();
+const speechPlayback = new SpeechPlayback({
+  playAudio: (chunks, emotion, options) => playSentenceAudio(chunks.map(b64ToUint8), emotion, options),
+  onFinished: (speechId) => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'playback_finished', speechId }));
+    }
+  },
+  onChange: () => updateUiForState(playbackState()),
+});
+
+function playbackState() {
+  return turnState.playbackState(speechPlayback);
+}
 
 function updateUiForState(state, isPttRecording = false) {
   const chatInputEl = document.getElementById('chat-input');
   const chatSendEl = document.getElementById('chat-send');
   if (chatInputEl && chatSendEl) {
-    const busy = state !== 'idle';
+    const busy = state !== 'idle' || speechPlayback.busy;
     const wasDisabled = chatInputEl.disabled;
     chatInputEl.disabled = busy;
     chatSendEl.disabled = busy;
@@ -396,17 +408,6 @@ function updateUiForState(state, isPttRecording = false) {
       setMicStatus(false, 'Amika sedang berpikir…', 'processing');
     } else if (state === 'speaking') {
       setMicStatus(false, 'Amika sedang bicara…', 'speaking');
-    }
-  }
-}
-
-function checkPlaybackFinished() {
-  if (!isGeneratingAudio && activeAudioSources.size === 0) {
-    if (currentConversationState === 'speaking' || currentConversationState === 'processing') {
-      console.log('[turn] Playback selesai di client, kirim playback_finished');
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'playback_finished' }));
-      }
     }
   }
 }
@@ -467,9 +468,11 @@ function b64ToUint8(b64) {
   return arr;
 }
 
-async function playSentenceAudio(chunks) {
+async function playSentenceAudio(chunks, emotion = 'netral', { signal } = {}) {
+  if (signal?.aborted) return;
   ensureAudio();
   if (audioCtx.state === 'suspended') await audioCtx.resume();
+  if (signal?.aborted) return;
 
   // Gabung chunk kalimat ini jadi satu mp3 utuh (decodeAudioData butuh file
   // lengkap, bukan potongan).
@@ -487,29 +490,45 @@ async function playSentenceAudio(chunks) {
     buffer = await audioCtx.decodeAudioData(merged.buffer);
   } catch (err) {
     log(`Audio decode gagal: ${err.message}`, 'error');
-    checkPlaybackFinished();
     return;
   }
 
+  if (signal?.aborted) return;
   const src = audioCtx.createBufferSource();
   src.buffer = buffer;
   src.connect(analyser);
   const startAt = Math.max(audioCtx.currentTime, playCursor);
   const endAt = startAt + buffer.duration;
-  const emotion = pendingEmotion;
-
-  activeAudioSources.add(src);
-  src.onended = () => {
-    activeAudioSources.delete(src);
-    checkPlaybackFinished();
+  const onAbort = () => {
+    src.stop();
+    playCursor = audioCtx.currentTime;
+    scheduledEmotionEnd = audioCtx.currentTime;
   };
-
-  src.start(startAt);
+  const played = new Promise((resolve, reject) => {
+    activeAudioSources.add(src);
+    src.onended = () => {
+      activeAudioSources.delete(src);
+      resolve();
+    };
+    try {
+      src.start(startAt);
+    } catch (err) {
+      activeAudioSources.delete(src);
+      reject(err);
+    }
+  });
   playCursor = endAt; // dipakai VAD untuk tahu amika masih bicara
   scheduledEmotionEnd = Math.max(scheduledEmotionEnd, endAt);
   window.dispatchEvent(new CustomEvent('waifu-emotion-cue', {
     detail: { emotion, startAt, endAt },
   }));
+  signal?.addEventListener('abort', onAbort, { once: true });
+  if (signal?.aborted) onAbort();
+  try {
+    await played;
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -532,16 +551,14 @@ function connectWS() {
     } catch {
       return;
     }
+    const speechEvent = ['speech_start', 'speech_end', 'stop_speech', 'audio_output', 'audio_end'].includes(msg.type);
+    if (!speechEvent && !turnState.handle(msg)) return;
     switch (msg.type) {
       case 'conversation_state':
-        currentConversationState = msg.state;
-        if (msg.state === 'processing' || msg.state === 'speaking') {
-          isGeneratingAudio = true;
-        } else if (msg.state === 'idle') {
-          isGeneratingAudio = false;
-          activeAudioSources.clear();
-        }
-        updateUiForState(msg.state);
+      case 'turn_cancelled':
+      case 'input_rejected':
+        currentConversationState = turnState.state;
+        updateUiForState(playbackState());
         break;
       case 'user_said':
         log(`Kamu: ${msg.text}`, 'user');
@@ -552,34 +569,24 @@ function connectWS() {
       case 'amika_replied':
         log(`Amika: ${msg.text}`, 'assistant');
         showOverlaySubtitle(msg.text);
-        // Tunggu antrian decode audio selesai sebelum evaluasi playback
-        audioPlayChain.then(() => {
-          isGeneratingAudio = false;
-          checkPlaybackFinished();
-        });
         break;
       case 'emotion':
+        speechPlayback.handle(msg);
         pendingEmotion = msg.emotion || 'netral';
         window.dispatchEvent(new CustomEvent('waifu-emotion-cue', {
           detail: { emotion: pendingEmotion },
         }));
         break;
+      case 'speech_start':
+      case 'speech_end':
+      case 'stop_speech':
       case 'audio_output':
-        pendingChunks.push(b64ToUint8(msg.data));
-        break;
-      case 'audio_end': {
-        const cs = pendingChunks;
-        pendingChunks = [];
-        if (cs.length) {
-          audioPlayChain = audioPlayChain.then(() => playSentenceAudio(cs)).catch((err) => {
-            console.error('[playback] Audio playback gagal:', err);
-            checkPlaybackFinished();
-          });
-          // Notify Live2D Layer 2: a sentence just completed → trigger motion.
+      case 'audio_end':
+        speechPlayback.handle(msg);
+        if (msg.type === 'audio_end') {
           window.dispatchEvent(new CustomEvent('waifu-sentence-break'));
         }
         break;
-      }
       case 'request_screen_capture': {
         // Backend meminta satu frame layar (intent "lihat layar"). Hanya relevan di Electron.
         const requestId = msg.requestId;
@@ -666,8 +673,9 @@ function connectWS() {
   });
   ws.addEventListener('close', () => {
     currentConversationState = 'idle';
-    isGeneratingAudio = false;
-    activeAudioSources.clear();
+    turnState.handle({ type: 'conversation_state', state: 'idle' });
+    speechPlayback.reset();
+    for (const source of activeAudioSources) source.stop();
     updateUiForState('idle');
     setTimeout(connectWS, 1500);
   }); // sambung ulang
@@ -685,7 +693,7 @@ let pttStartAt = 0;
 let isPttRecording = false;
 
 async function startPttRecording() {
-  if (currentConversationState !== 'idle') {
+  if (playbackState() !== 'idle') {
     console.log('[ptt] Diabaikan: status percakapan saat ini adalah', currentConversationState);
     return;
   }
@@ -723,7 +731,7 @@ async function startPttRecording() {
 
       if (dur < 400 || blob.size < 512) {
         console.log('[ptt] Audio terlalu pendek / noise, dibatalkan:', dur);
-        updateUiForState(currentConversationState);
+        updateUiForState(playbackState());
         return;
       }
 
@@ -758,7 +766,7 @@ async function startPttRecording() {
     isPttRecording = false;
     pttRecorder = null;
     console.error('[ptt] Gagal start MediaRecorder:', err);
-    updateUiForState(currentConversationState);
+    updateUiForState(playbackState());
   }
 }
 
@@ -768,7 +776,7 @@ function stopPttRecording() {
   if (pttRecorder && pttRecorder.state === 'recording') {
     pttRecorder.stop();
   } else {
-    updateUiForState(currentConversationState);
+    updateUiForState(playbackState());
   }
 }
 
@@ -781,7 +789,7 @@ function abortPttRecording() {
   }
   pttRecorder = null;
   pttChunks = [];
-  updateUiForState(currentConversationState);
+  updateUiForState(playbackState());
 }
 
 const companionPanel = document.getElementById('companion-panel');
@@ -803,7 +811,7 @@ window.addEventListener('pointerdown', (e) => {
   const isAroundUi = Boolean(e.target.closest('#companion-panel')) || e.clientY >= window.innerHeight * 0.40;
   if (!isAroundUi) return;
 
-  if (currentConversationState !== 'idle') return;
+  if (playbackState() !== 'idle') return;
 
   pttTouchStartX = e.clientX;
   pttTouchStartY = e.clientY;
@@ -870,7 +878,7 @@ function applyDesktopMicMute(muted, notifySubtitle = false) {
       showOverlaySubtitle('🔇 Mikrofon di-mute (Ctrl+Alt+M)');
     }
   } else {
-    if (listening && currentConversationState === 'idle') {
+    if (listening && playbackState() === 'idle') {
       setMicStatus(true, 'Mendengarkan…');
     }
     if (notifySubtitle && changed) {
@@ -987,9 +995,9 @@ function vadLoop() {
   }
 
   // Turn-taking: jika bukan IDLE (sedang PROCESSING atau SPEAKING), nonaktifkan deteksi
-  if (currentConversationState !== 'idle') {
+  if (playbackState() !== 'idle') {
     if (segRecorder) abortSegment();
-    updateUiForState(currentConversationState);
+    updateUiForState(playbackState());
     return;
   }
 
@@ -1051,7 +1059,7 @@ async function startListening() {
       setMicStatus(!isMicMutedByDesktop, isMicMutedByDesktop ? '🔇 Mikrofon di-mute' : 'Mendengarkan…');
       requestAnimationFrame(vadLoop);
     } else {
-      updateUiForState(currentConversationState);
+      updateUiForState(playbackState());
     }
   } catch (err) {
     listening = false;
@@ -1072,7 +1080,7 @@ if (chatForm && chatInput) {
     if (isMobile()) return;
     const text = chatInput.value.trim();
     if (!text) return;
-    if (currentConversationState !== 'idle') return;
+    if (playbackState() !== 'idle') return;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       log('Belum terhubung ke server.', 'error');
       return;
@@ -1111,7 +1119,7 @@ if (isOverlay || window.desktopBridge?.isDesktopCompanion) {
 
 // Responsif saat resize browser
 window.addEventListener('resize', () => {
-  updateUiForState(currentConversationState);
+  updateUiForState(playbackState());
   if (!isMobile() && micStream && !vadAnalyser) {
     vadAnalyser = audioCtx.createAnalyser();
     vadAnalyser.fftSize = 512;
