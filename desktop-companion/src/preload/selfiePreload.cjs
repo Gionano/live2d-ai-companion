@@ -6,6 +6,9 @@ const { contextBridge, ipcRenderer } = require('electron');
  * Hanya mengekspos API sempit window.selfieApi tanpa akses Node.js atau remote content.
  */
 contextBridge.exposeInMainWorld('selfieApi', {
+  // Flush buffered events only after the popup has installed its listener.
+  ready: () => ipcRenderer.invoke('selfie:popup-ready'),
+
   // Berlangganan event perubahan status dari main process
   onSelfieEvent: (callback) => {
     if (typeof callback !== 'function') return () => {};
@@ -30,5 +33,5 @@ contextBridge.exposeInMainWorld('selfieApi', {
   closePopup: () => ipcRenderer.invoke('selfie:close-popup'),
 
   // Ubah ukuran jendela popup secara aman dari UI
-  resizeWindow: (width, height) => ipcRenderer.invoke('selfie:resize-popup', { width, height }),
+  resizeWindow: (width, height, zoomed = true) => ipcRenderer.invoke('selfie:resize-popup', { width, height, zoomed }),
 });

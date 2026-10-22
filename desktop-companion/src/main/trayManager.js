@@ -180,6 +180,18 @@ export class TrayManager {
 
       // --- Mulai bersama Windows ---
       {
+        label: 'Pap feature (Fitur Pap)',
+        type: 'checkbox',
+        checked: Boolean(state.selfieEnabled),
+        click: (menuItem) => this.handlers.onToggleSelfie?.(menuItem.checked),
+      },
+      {
+        label: 'Pap gallery (Galeri Pap)',
+        click: () => this.handlers.onOpenSelfieGallery?.(),
+      },
+      { type: 'separator' },
+
+      {
         label: 'Mulai Bersama Windows',
         type: 'checkbox',
         checked: launchAtLogin,

@@ -116,6 +116,24 @@ const desktopBridge = Object.freeze({
    */
   notifySelfieEvent: (event) => ipcRenderer.send('desktop:selfie-event', event),
 
+  notifySelfieSettings: (settings) => ipcRenderer.send('desktop:selfie-settings', {
+    outputDir: settings?.outputDir,
+  }),
+
+  // Return whether a narrow selfie command reached the connected backend socket.
+  onSelfieCommand: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = async (_event, payload) => {
+      let sent = false;
+      try {
+        if (payload?.message?.type === 'selfie_cancel') sent = await callback(payload.message) === true;
+      } catch {}
+      ipcRenderer.send('desktop:selfie-command-result', { requestId: payload?.requestId, sent });
+    };
+    ipcRenderer.on('desktop:selfie-command', handler);
+    return () => ipcRenderer.removeListener('desktop:selfie-command', handler);
+  },
+
   /**
    * Berlangganan permintaan pembatalan selfie dari popup window untuk diteruskan ke WebSocket backend.
    */

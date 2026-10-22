@@ -208,6 +208,7 @@ class WindowStateStore {
       editMode: false,
       muteMic: false,
       screenVision: true,
+      selfieEnabled: CONFIG.selfiePopup?.enabled ?? true,
       presets: {},
       byDisplay: {},
     };
@@ -233,6 +234,9 @@ class WindowStateStore {
           }
           if (typeof raw.screenVision === 'boolean') {
             this.state.screenVision = raw.screenVision;
+          }
+          if (typeof raw.selfieEnabled === 'boolean') {
+            this.state.selfieEnabled = raw.selfieEnabled;
           }
           if (raw.presets && typeof raw.presets === 'object') {
             this.state.presets = { ...raw.presets };
@@ -306,6 +310,7 @@ class WindowStateStore {
         clickThrough: this.state.clickThrough,
         muteMic: this.state.muteMic,
         screenVision: this.state.screenVision,
+        selfieEnabled: this.state.selfieEnabled,
         presets: this.state.presets,
         byDisplay: this.state.byDisplay,
         updatedAt: new Date().toISOString(),
@@ -432,6 +437,13 @@ class WindowStateStore {
     return this.state.screenVision;
   }
 
+  setSelfieEnabled(enabled) {
+    if (!this.loaded) this.load();
+    this.state.selfieEnabled = Boolean(enabled);
+    this.save();
+    return this.state.selfieEnabled;
+  }
+
   getSnapshot() {
     if (!this.loaded) this.load();
     const activePreset = this.state.activePreset;
@@ -446,6 +458,7 @@ class WindowStateStore {
       editMode: this.state.editMode,
       muteMic: this.state.muteMic,
       screenVision: this.state.screenVision,
+      selfieEnabled: this.state.selfieEnabled,
       fitPadding: CONFIG.overlay.fitPadding,
       wingExpressionName: CONFIG.overlay.wingExpressionName,
       wingParameterId: CONFIG.overlay.wingParameterId,

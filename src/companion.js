@@ -19,6 +19,7 @@ const micLabelEl = document.getElementById('mic-label');
 const overlaySubtitleEl = document.getElementById('overlay-subtitle');
 import { tuning } from './tuningConfig.js';
 import { SpeechPlayback, TurnState } from './speechPlayback.js';
+import { handleBrowserSelfieModal } from './browserSelfieModal.js';
 
 const isOverlay = new URLSearchParams(window.location.search).get('mode') === 'overlay';
 let overlaySubtitleHideDelayMs = 6500;
@@ -535,11 +536,44 @@ async function playSentenceAudio(chunks, emotion = 'netral', { signal } = {}) {
 // WebSocket: terima user_said / amika_replied (log) + audio_output (suara).
 // ---------------------------------------------------------------------------
 let ws = null;
+let desktopSelfieEnabled = true;
+
+function sendSelfieMessage(message) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  try {
+    ws.send(JSON.stringify(message));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+if (window.desktopBridge?.notifySelfieEvent) {
+  window.desktopBridge.onSelfieCommand?.(sendSelfieMessage);
+  let liveSelfieSettingsReceived = false;
+  const applySelfieSettings = (state) => {
+    if (typeof state?.selfieEnabled !== 'boolean') return;
+    if (desktopSelfieEnabled === state.selfieEnabled) return;
+    desktopSelfieEnabled = state.selfieEnabled;
+    sendSelfieMessage({ type: 'selfie_feature', enabled: desktopSelfieEnabled });
+  };
+  window.desktopBridge.onOverlayStateChanged?.((state) => {
+    if (typeof state?.selfieEnabled !== 'boolean') return;
+    liveSelfieSettingsReceived = true;
+    applySelfieSettings(state);
+  });
+  window.desktopBridge.getOverlayState?.().then((state) => {
+    if (!liveSelfieSettingsReceived) applySelfieSettings(state);
+  }).catch(() => {});
+}
 
 function connectWS() {
   const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
   ws.addEventListener('open', () => {
+    if (window.desktopBridge?.notifySelfieEvent) {
+      sendSelfieMessage({ type: 'selfie_feature', enabled: desktopSelfieEnabled });
+    }
     if (isScreenActive()) {
       ws.send(JSON.stringify({ type: 'screen_share_status', active: true }));
     }
@@ -549,6 +583,19 @@ function connectWS() {
     try {
       msg = JSON.parse(e.data);
     } catch {
+      return;
+    }
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'selfie_feature') {
+      window.desktopBridge?.notifySelfieSettings?.(msg);
+      return;
+    }
+    if (['selfie_started', 'selfie_progress', 'selfie_ready', 'selfie_failed', 'selfie_cancelled'].includes(msg.type)) {
+      if (window.desktopBridge?.notifySelfieEvent) {
+        window.desktopBridge.notifySelfieEvent(msg);
+      } else {
+        handleBrowserSelfieModal(msg, (jobId) => sendSelfieMessage({ type: 'selfie_cancel', jobId }));
+      }
       return;
     }
     const speechEvent = ['speech_start', 'speech_end', 'stop_speech', 'audio_output', 'audio_end'].includes(msg.type);

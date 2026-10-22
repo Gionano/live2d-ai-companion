@@ -2,6 +2,11 @@ import { CONFIG } from './config.js';
 import { logger } from './logger.js';
 
 let trustedOrigins = new Set();
+let trustedDesktopWindow = null;
+
+export function registerTrustedDesktopWindow(win) {
+  trustedDesktopWindow = win;
+}
 
 /**
  * Inisialisasi daftar origin lokal yang dipercaya (dev Vite maupun server statis lokal produksi).
@@ -51,7 +56,10 @@ export function assertTrustedSender(event, channelName = 'unknown') {
   const senderFrame = event?.senderFrame;
   const senderUrl = senderFrame?.url || event?.sender?.getURL?.() || '';
 
-  if (!isTrustedUrl(senderUrl)) {
+  if (!trustedDesktopWindow || trustedDesktopWindow.isDestroyed()
+    || event?.sender !== trustedDesktopWindow.webContents
+    || senderFrame !== trustedDesktopWindow.webContents.mainFrame
+    || !isTrustedUrl(senderUrl)) {
     logger.warn('Security', `Menolak IPC '${channelName}' dari pengirim tidak dikenal`, {
       senderUrl,
     });

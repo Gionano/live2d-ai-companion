@@ -10,11 +10,14 @@ import {
   configureSessionSecurity,
   hardenWindowNavigation,
   registerTrustedOrigin,
+  registerTrustedDesktopWindow,
 } from './security.js';
 import { startProductionStaticServer } from './staticServer.js';
 import { clampBoundsToWorkArea, windowStateStore } from './windowStateStore.js';
 import { TrayManager } from './trayManager.js';
 import { captureService } from './captureService.js';
+import { selfieWindowManager } from './selfieWindowManager.js';
+import { randomUUID } from 'node:crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -43,6 +46,26 @@ let backendProcess = null;
 let staticServerInstance = null;
 let trayManager = null;
 let isApplyingProgrammaticBounds = false;
+const selfieCommands = new Map();
+
+function sendSelfieCommand(message) {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const requestId = randomUUID();
+    const timer = setTimeout(() => {
+      selfieCommands.delete(requestId);
+      resolve(false);
+    }, 2000);
+    selfieCommands.set(requestId, { resolve, timer });
+    try {
+      overlayWindow.webContents.send('desktop:selfie-command', { requestId, message });
+    } catch {
+      clearTimeout(timer);
+      selfieCommands.delete(requestId);
+      resolve(false);
+    }
+  });
+}
 
 /**
  * Opsi opsional (default: off) untuk menjalankan backend sebagai child process.
@@ -377,6 +400,22 @@ function getMainWindowDiagnostics() {
  * Registrasi IPC Handlers dengan validasi pengirim ketat di setiap handler.
  */
 function registerIpcHandlers() {
+  ipcMain.on('desktop:selfie-command-result', (event, payload) => {
+    if (!overlayWindow || overlayWindow.isDestroyed() || event.sender !== overlayWindow.webContents
+      || event.senderFrame !== overlayWindow.webContents.mainFrame) return;
+    const pending = selfieCommands.get(payload?.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    selfieCommands.delete(payload.requestId);
+    pending.resolve(payload.sent === true);
+  });
+  ipcMain.on('desktop:selfie-settings', (event, settings) => {
+    if (!overlayWindow || overlayWindow.isDestroyed() || event.sender !== overlayWindow.webContents
+      || event.senderFrame !== overlayWindow.webContents.mainFrame) return;
+    if (typeof settings?.outputDir === 'string' && path.isAbsolute(settings.outputDir)) {
+      selfieWindowManager.outputDir = settings.outputDir;
+    }
+  });
   ipcMain.handle('desktop:get-app-info', (event) => {
     assertTrustedSender(event, 'desktop:get-app-info');
     return {
@@ -587,6 +626,14 @@ async function createOverlayWindow() {
     },
   });
 
+  registerTrustedDesktopWindow(overlayWindow);
+  selfieWindowManager.init({
+    overlayWindow,
+    webSocketSender: sendSelfieCommand,
+    onContentProtectionUpdated: () => captureService.markContentProtectionUpdated(),
+  });
+  selfieWindowManager.setSelfieEnabled(windowStateStore.state.selfieEnabled);
+
   // WAJIB (Fase 4 Poin 15): panggil setContentProtection(true) SEGERA saat jendela overlay dibuat
   // jauh sebelum capture pertama supaya avatar tidak ikut tertangkap.
   enforceOverlayWindowFlags();
@@ -644,6 +691,7 @@ async function createOverlayWindow() {
   }
 
   overlayWindow.on('closed', () => {
+    selfieWindowManager.destroy();
     overlayWindow = null;
   });
 
@@ -818,6 +866,7 @@ function setupSystemTray() {
       clickThrough: windowStateStore.state.clickThrough,
       muteMic: windowStateStore.state.muteMic,
       screenVision: windowStateStore.state.screenVision,
+      selfieEnabled: windowStateStore.state.selfieEnabled,
       isVisible: Boolean(overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible()),
     }),
     onToggleVisible: () => {
@@ -850,6 +899,16 @@ function setupSystemTray() {
     },
     onToggleScreenVision: (enabled) => {
       toggleScreenVision(enabled, 'tray-toggle-screen-vision');
+    },
+    onToggleSelfie: (enabled) => {
+      const active = windowStateStore.setSelfieEnabled(enabled);
+      selfieWindowManager.setSelfieEnabled(active);
+      broadcastOverlayState('tray-toggle-selfie');
+    },
+    onOpenSelfieGallery: () => {
+      void selfieWindowManager.openGalleryFolder().then((result) => {
+        if (!result.ok) trayManager?.notify('Galeri Pap', 'Folder foto belum bisa dibuka.');
+      });
     },
     onResetPresetBounds: () => {
       resetActivePresetBounds('tray-reset-bounds');
@@ -909,6 +968,12 @@ app.on('will-quit', () => {
 });
 
 app.on('before-quit', () => {
+  selfieWindowManager.destroy();
+  for (const { resolve, timer } of selfieCommands.values()) {
+    clearTimeout(timer);
+    resolve(false);
+  }
+  selfieCommands.clear();
   trayManager?.destroy();
   captureService.destroy();
   stopBackendProcess();

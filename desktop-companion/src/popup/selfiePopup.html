@@ -2,8 +2,22 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <!-- CSP ketat: hanya izinkan gambar dari localhost dan script lokal (Point 20) -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' http://localhost:* http://127.0.0.1:* data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';">
+  <script>
+    // The main process supplies the single local backend origin before images load.
+    let imageOrigin = 'http://127.0.0.1:8787';
+    try {
+      const candidate = new URL(new URLSearchParams(location.search).get('imageOrigin') || imageOrigin);
+      if (['http:', 'https:'].includes(candidate.protocol)
+        && ['localhost', '127.0.0.1', '[::1]'].includes(candidate.hostname)
+        && !candidate.username && !candidate.password && candidate.pathname === '/') {
+        imageOrigin = candidate.origin;
+      }
+    } catch {}
+    const policy = document.createElement('meta');
+    policy.httpEquiv = 'Content-Security-Policy';
+    policy.content = `default-src 'self'; img-src ${imageOrigin}; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';`;
+    document.head.appendChild(policy);
+  </script>
   <title>Amika Selfie</title>
   <style>
     :root {
@@ -168,7 +182,7 @@
     .image-preview-wrapper {
       flex: 1;
       width: 100%;
-      min-height: 220px;
+      min-height: 0;
       position: relative;
       border-radius: 8px;
       overflow: hidden;
@@ -192,6 +206,24 @@
     .selfie-image.loaded {
       opacity: 1;
       transform: scale(1);
+    }
+
+    .image-status {
+      position: absolute;
+      padding: 12px;
+      color: var(--text-muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    button:focus-visible, [role="button"]:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
 
     .caption-box {
@@ -277,6 +309,13 @@
       from { transform: scale(0.9); opacity: 0; }
       to { transform: scale(1); opacity: 1; }
     }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
   </style>
 </head>
 <body>
@@ -298,7 +337,7 @@
 
       <div class="toast-meta">
         <span id="progress-text">Menyiapkan pose...</span>
-        <span id="eta-text">Estimasi: ~90s</span>
+        <span id="eta-text">Estimasi belum tersedia</span>
       </div>
     </div>
 
@@ -312,8 +351,9 @@
         <button class="btn-close-icon" id="btn-close" title="Tutup">✕</button>
       </div>
 
-      <div class="image-preview-wrapper" id="image-wrapper" title="Klik untuk memperbesar">
-        <img class="selfie-image" id="selfie-img" src="" alt="Amika Selfie">
+      <div class="image-preview-wrapper" id="image-wrapper" role="button" tabindex="0" aria-label="Perbesar foto" title="Klik untuk memperbesar">
+        <span class="image-status" id="image-status" role="status">Memuat foto...</span>
+        <img class="selfie-image" id="selfie-img" alt="Foto Amika">
       </div>
 
       <div class="caption-box" id="caption-box">
@@ -335,14 +375,14 @@
         </button>
       </div>
 
-      <div class="auto-close-hint" id="auto-close-hint"></div>
+      <div class="auto-close-hint" id="auto-close-hint" role="status"></div>
     </div>
 
   </div>
 
   <!-- ZOOM MODAL (Enlarge) -->
-  <div class="zoom-overlay" id="zoom-overlay">
-    <img id="zoom-img" src="" alt="Enlarged Selfie">
+  <div class="zoom-overlay" id="zoom-overlay" role="button" tabindex="-1" aria-label="Kecilkan foto">
+    <img id="zoom-img" alt="Foto Amika diperbesar">
   </div>
 
   <script>
@@ -356,19 +396,34 @@
     const autoCloseHint = document.getElementById('auto-close-hint');
     const zoomOverlay = document.getElementById('zoom-overlay');
     const zoomImg = document.getElementById('zoom-img');
+    const imageStatus = document.getElementById('image-status');
+    const imageWrapper = document.getElementById('image-wrapper');
+    const cancelButton = document.getElementById('btn-cancel');
+    const saveButton = document.getElementById('btn-save');
+    const copyButton = document.getElementById('btn-copy');
+    const folderButton = document.getElementById('btn-folder');
+    const actionButtons = [saveButton, copyButton, folderButton];
+    const originalButtonContent = new Map(actionButtons.map((button) => [button, button.innerHTML]));
 
     let currentJobId = null;
     let currentImageUrl = null;
+    let currentState = null;
     let autoCloseTimer = null;
     let autoCloseSeconds = 30;
+    let configuredAutoCloseSeconds = 30;
+    let cardSize = { width: 360, height: 520 };
+    const buttonTimers = new Set();
 
-    // 1. Terima event dari main process
+    // Subscribe before the handshake so queued lifecycle events cannot be lost.
     if (window.selfieApi?.onSelfieEvent) {
       window.selfieApi.onSelfieEvent((payload) => {
-        if (!payload || !payload.type) return;
+        if (!payload || typeof payload.jobId !== 'string' || !payload.type) return;
+        if (payload.type !== 'selfie_started' && currentJobId && payload.jobId !== currentJobId
+          && !(payload.type === 'selfie_ready' && payload.replaceJob === true)) return;
 
         switch (payload.type) {
           case 'selfie_started':
+            if (payload.status === 'queued' || (currentJobId === payload.jobId && currentState === 'generating')) return;
             showGeneratingState(payload);
             break;
           case 'selfie_progress':
@@ -379,66 +434,114 @@
             break;
           case 'selfie_failed':
           case 'selfie_cancelled':
-            hidePopup();
+            showTerminalState(payload);
             break;
         }
       });
+      Promise.resolve(window.selfieApi.ready?.()).catch(() => {
+        progressText.textContent = 'Popup belum terhubung. Tutup lalu coba lagi.';
+        cancelButton.disabled = true;
+      });
+    }
+
+    function resetJob(data) {
+      clearAutoClose();
+      for (const timer of buttonTimers) clearTimeout(timer);
+      buttonTimers.clear();
+      currentJobId = data.jobId;
+      currentImageUrl = null;
+      zoomOverlay.style.display = 'none';
+      zoomImg.removeAttribute('src');
+      selfieImg.onload = null;
+      selfieImg.onerror = null;
+      selfieImg.removeAttribute('src');
+      selfieImg.classList.remove('loaded');
+      imageStatus.textContent = 'Memuat foto...';
+      imageStatus.style.display = 'block';
+      autoCloseHint.textContent = '';
+      cancelButton.disabled = false;
+      cancelButton.hidden = false;
+      cancelButton.textContent = 'Batal';
+      for (const button of actionButtons) {
+        button.disabled = true;
+        button.classList.remove('success');
+        button.innerHTML = originalButtonContent.get(button);
+      }
     }
 
     function showGeneratingState(data) {
-      clearAutoClose();
-      currentJobId = data.jobId;
+      resetJob(data);
+      currentState = 'generating';
       stateGen.style.display = 'flex';
       stateReady.style.display = 'none';
       progressFill.style.width = '0%';
       progressText.textContent = 'Menyiapkan kamera...';
-      const eta = data.etaSeconds || 90;
-      etaText.textContent = `Estimasi: ~${eta}s`;
-
-      // Minta main process resize ke toast compact (320x120)
-      window.selfieApi?.resizeWindow(320, 120);
+      const eta = data.etaSeconds;
+      etaText.textContent = Number.isFinite(eta) && eta >= 0 ? `Estimasi: ~${eta}s` : 'Estimasi belum tersedia';
     }
 
     function updateProgress(data) {
-      const pct = data.percentage !== undefined ? data.percentage : (data.value && data.max ? Math.round((data.value / data.max) * 100) : 0);
+      if (currentState !== 'generating') return;
+      const raw = Number.isFinite(data.percentage) ? data.percentage : (data.max > 0 ? Math.round((data.value / data.max) * 100) : 0);
+      const pct = Number.isFinite(raw) ? Math.min(100, Math.max(0, raw)) : 0;
       progressFill.style.width = `${pct}%`;
-      progressText.textContent = `Men-generate... (${pct}%)`;
+      progressText.textContent = `Memproses foto... (${pct}%)`;
     }
 
     function showReadyState(data) {
-      currentJobId = data.jobId;
+      resetJob(data);
+      currentState = 'ready';
       currentImageUrl = data.imageUrl;
+      cardSize = data.cardSize || { width: 360, height: 520 };
 
       stateGen.style.display = 'none';
       stateReady.style.display = 'flex';
 
-      selfieImg.classList.remove('loaded');
+      const jobId = currentJobId;
+      selfieImg.onload = () => {
+        if (currentJobId !== jobId || currentState !== 'ready') return;
+        selfieImg.classList.add('loaded');
+        imageStatus.style.display = 'none';
+        for (const button of actionButtons) button.disabled = false;
+      };
+      selfieImg.onerror = () => {
+        if (currentJobId !== jobId || currentState !== 'ready') return;
+        imageStatus.textContent = 'Foto gagal dimuat. Buka Folder untuk melihat hasilnya.';
+        folderButton.disabled = false;
+      };
       selfieImg.src = data.imageUrl;
       zoomImg.src = data.imageUrl;
 
-      selfieImg.onload = () => {
-        selfieImg.classList.add('loaded');
-      };
-
       captionBox.textContent = `"${data.caption || 'Ini fotonya buat kamu sayang~'}"`;
 
-      // Minta main process resize ke photo card mode (360x520)
-      window.selfieApi?.resizeWindow(360, 520);
+      configuredAutoCloseSeconds = Number.isFinite(data.autoCloseSeconds) ? data.autoCloseSeconds : 30;
+      startAutoCloseCountdown(configuredAutoCloseSeconds);
+    }
 
-      // Mulai hitung mundur auto-close
-      startAutoCloseCountdown(data.autoCloseSeconds || 30);
+    function showTerminalState(data) {
+      resetJob(data);
+      currentState = data.type === 'selfie_cancelled' ? 'cancelled' : 'failed';
+      stateGen.style.display = 'flex';
+      stateReady.style.display = 'none';
+      progressFill.style.width = '0%';
+      progressText.textContent = currentState === 'cancelled' ? 'Foto dibatalkan.' : 'Foto gagal dibuat. Silakan coba lagi.';
+      etaText.textContent = '';
+      cancelButton.disabled = true;
+      cancelButton.hidden = true;
     }
 
     function startAutoCloseCountdown(seconds) {
       clearAutoClose();
-      if (!seconds || seconds <= 0) {
+      if (!Number.isFinite(seconds) || seconds <= 0) {
         autoCloseHint.textContent = '';
         return;
       }
       autoCloseSeconds = seconds;
+      const jobId = currentJobId;
       autoCloseHint.textContent = `Menutup otomatis dalam ${autoCloseSeconds}s`;
 
       autoCloseTimer = setInterval(() => {
+        if (currentJobId !== jobId || currentState !== 'ready') return clearAutoClose();
         autoCloseSeconds -= 1;
         if (autoCloseSeconds <= 0) {
           clearAutoClose();
@@ -454,19 +557,36 @@
         clearInterval(autoCloseTimer);
         autoCloseTimer = null;
       }
+      autoCloseHint.textContent = '';
     }
 
     function hidePopup() {
       clearAutoClose();
-      window.selfieApi?.closePopup();
+      zoomOverlay.style.display = 'none';
+      Promise.resolve(window.selfieApi?.closePopup()).catch(() => {
+        autoCloseHint.textContent = 'Popup gagal ditutup. Coba lagi.';
+      });
     }
 
-    // Tombol Batal
-    document.getElementById('btn-cancel').addEventListener('click', () => {
-      if (currentJobId) {
-        window.selfieApi?.cancelJob(currentJobId);
+    cancelButton.addEventListener('click', async () => {
+      if (!currentJobId || currentState !== 'generating' || cancelButton.disabled) return;
+      const jobId = currentJobId;
+      cancelButton.disabled = true;
+      cancelButton.textContent = 'Membatalkan...';
+      try {
+        const result = await window.selfieApi?.cancelJob(jobId);
+        if (currentJobId !== jobId || currentState !== 'generating') return;
+        if (result === true || result?.cancelled === true || result?.ok === true) {
+          progressText.textContent = 'Menunggu pembatalan...';
+          return;
+        }
+        throw new Error('Cancellation was not accepted');
+      } catch {
+        if (currentJobId !== jobId || currentState !== 'generating') return;
+        progressText.textContent = 'Gagal membatalkan. Coba lagi.';
+        cancelButton.disabled = false;
+        cancelButton.textContent = 'Coba batal';
       }
-      hidePopup();
     });
 
     // Tombol Tutup
@@ -474,60 +594,95 @@
       hidePopup();
     });
 
-    // Zoom Image Klik
-    document.getElementById('image-wrapper').addEventListener('click', () => {
-      clearAutoClose(); // Jangan auto tutup saat sedang di-zoom
-      zoomOverlay.style.display = 'flex';
-      // Minta main process resize ke layar besar jika diperlukan
-      window.selfieApi?.resizeWindow(720, 720);
-    });
-
-    zoomOverlay.addEventListener('click', () => {
-      zoomOverlay.style.display = 'none';
-      window.selfieApi?.resizeWindow(360, 520);
-      startAutoCloseCountdown(15);
-    });
-
-    // Tombol Simpan
-    document.getElementById('btn-save').addEventListener('click', async () => {
+    function enlargeImage() {
+      if (currentState !== 'ready' || !selfieImg.classList.contains('loaded')) return;
       clearAutoClose();
-      const btn = document.getElementById('btn-save');
+      zoomOverlay.style.display = 'flex';
+      window.selfieApi?.resizeWindow(720, 720, true);
+      zoomOverlay.focus();
+    }
+
+    function shrinkImage() {
+      if (zoomOverlay.style.display !== 'flex') return;
+      zoomOverlay.style.display = 'none';
+      window.selfieApi?.resizeWindow(cardSize.width, cardSize.height, false);
+      startAutoCloseCountdown(configuredAutoCloseSeconds);
+      imageWrapper.focus();
+    }
+
+    imageWrapper.addEventListener('click', enlargeImage);
+    imageWrapper.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        enlargeImage();
+      }
+    });
+    zoomOverlay.addEventListener('click', shrinkImage);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        if (zoomOverlay.style.display === 'flex') shrinkImage();
+        else if (currentState !== 'generating') hidePopup();
+      }
+    });
+
+    function showActionSuccess(button, label, duration) {
+      const jobId = currentJobId;
+      button.classList.add('success');
+      button.textContent = label;
+      const timer = setTimeout(() => {
+        buttonTimers.delete(timer);
+        if (currentJobId !== jobId) return;
+        button.classList.remove('success');
+        button.innerHTML = originalButtonContent.get(button);
+      }, duration);
+      buttonTimers.add(timer);
+    }
+
+    saveButton.addEventListener('click', async () => {
+      if (!currentImageUrl || saveButton.disabled) return;
+      clearAutoClose();
+      const jobId = currentJobId;
+      saveButton.disabled = true;
       try {
         const res = await window.selfieApi?.saveImage(currentImageUrl);
-        if (res && res.saved) {
-          btn.classList.add('success');
-          btn.innerHTML = '<span>✓</span><span>Tersimpan</span>';
-          setTimeout(() => {
-            btn.classList.remove('success');
-            btn.innerHTML = '<span>💾</span><span>Simpan</span>';
-          }, 2500);
-        }
-      } catch (err) {
-        console.error('Gagal simpan:', err);
+        if (currentJobId !== jobId) return;
+        if (res?.saved) showActionSuccess(saveButton, 'Tersimpan', 2500);
+        else if (!res?.cancelled) autoCloseHint.textContent = 'Foto gagal disimpan. Coba lagi.';
+      } catch {
+        if (currentJobId === jobId) autoCloseHint.textContent = 'Foto gagal disimpan. Coba lagi.';
+      } finally {
+        if (currentJobId === jobId && currentState === 'ready') saveButton.disabled = false;
       }
     });
 
-    // Tombol Salin
-    document.getElementById('btn-copy').addEventListener('click', async () => {
+    copyButton.addEventListener('click', async () => {
+      if (!currentImageUrl || copyButton.disabled) return;
       clearAutoClose();
-      const btn = document.getElementById('btn-copy');
+      const jobId = currentJobId;
+      copyButton.disabled = true;
       try {
-        await window.selfieApi?.copyImage(currentImageUrl);
-        btn.classList.add('success');
-        btn.innerHTML = '<span>✓</span><span>Tersalin</span>';
-        setTimeout(() => {
-          btn.classList.remove('success');
-          btn.innerHTML = '<span>📋</span><span>Salin</span>';
-        }, 2000);
-      } catch (err) {
-        console.error('Gagal salin:', err);
+        const result = await window.selfieApi?.copyImage(currentImageUrl);
+        if (currentJobId !== jobId) return;
+        if (result === true || result?.copied === true || result?.ok === true) showActionSuccess(copyButton, 'Tersalin', 2000);
+        else autoCloseHint.textContent = 'Foto gagal disalin. Coba lagi.';
+      } catch {
+        if (currentJobId === jobId) autoCloseHint.textContent = 'Foto gagal disalin. Coba lagi.';
+      } finally {
+        if (currentJobId === jobId && currentState === 'ready') copyButton.disabled = false;
       }
     });
 
-    // Tombol Buka Folder
-    document.getElementById('btn-folder').addEventListener('click', () => {
+    folderButton.addEventListener('click', async () => {
+      if (folderButton.disabled) return;
       clearAutoClose();
-      window.selfieApi?.openFolder();
+      const jobId = currentJobId;
+      try {
+        const result = await window.selfieApi?.openFolder();
+        if (currentJobId !== jobId) return;
+        if (result === false || result?.ok === false) autoCloseHint.textContent = 'Folder gagal dibuka. Coba lagi.';
+      } catch {
+        if (currentJobId === jobId) autoCloseHint.textContent = 'Folder gagal dibuka. Coba lagi.';
+      }
     });
   </script>
 </body>
