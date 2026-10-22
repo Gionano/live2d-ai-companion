@@ -6,8 +6,7 @@ dist/
 build/
 
 # Environment and secrets (CRITICAL)
-.env
-.env.*
+.env*
 !.env.example
 *.local
 
@@ -23,6 +22,18 @@ rollout-*.jsonl
 .vendor-cubism-*/
 live2d-test.png
 data/
+
+# Generated selfie images when outputDir points inside the repository
+WaifuSelfies/
+
+# Local model binaries
+*.gguf
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.moc3
 
 # Legacy VRM assets, unused prototypes, and raw extraction
 live2d_models/
