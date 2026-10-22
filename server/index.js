@@ -44,6 +44,7 @@ import { detectSelfieIntent } from './selfie/intent.js';
 import { planSelfie } from './selfie/planner.js';
 import { jobManager } from './selfie/jobManager.js';
 import { installSelfieLifecycle, prepareSelfieJob } from './selfie/backendLifecycle.js';
+import { installSelfieFeatureControl, disabledSelfieResult } from './selfie/featureControl.js';
 import { installSelfieImagePolicy, installSelfieImageRoutes } from './selfie/imageRoutes.js';
 
 const app = express();
@@ -454,6 +455,7 @@ wss.on('connection', (socket, req) => {
   // Kirim status awal vision streaming ke client yang baru terhubung
   sendVisionInit(socket);
 
+  const handleSelfieFeature = installSelfieFeatureControl({ socket, manager: jobManager, send });
   socket.on('message', async (raw) => {
     let msg;
     try {
@@ -461,6 +463,8 @@ wss.on('connection', (socket, req) => {
     } catch {
       return;
     }
+    if (!msg || typeof msg !== 'object') return;
+    if (handleSelfieFeature(msg)) return;
 
     // 0. Sinyal selesai playback dari client untuk turn-taking
     if (msg.type === 'playback_finished') {
@@ -592,7 +596,7 @@ wss.on('connection', (socket, req) => {
       if (selfieIntent.isSelfie) {
         console.log(`[selfie] Intent selfie terdeteksi: "${text}" (keyword: ${selfieIntent.matchedKeyword})`);
 
-        const result = await prepareSelfieJob({
+        const result = disabledSelfieResult(socket) || await prepareSelfieJob({
           manager: jobManager,
           planner: planSelfie,
           userText: text,
