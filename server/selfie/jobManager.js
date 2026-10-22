@@ -4,7 +4,7 @@
 // - 1 job aktif, maxQueue antrean, cooldown antar foto, batas harian
 // - Berjalan ASYNCHRONOUS dan TIDAK memblokir percakapan turn-taking
 // - Mengirim event WebSocket (selfie_started, selfie_progress, selfie_ready, selfie_failed, selfie_cancelled)
-// - Menyajikan gambar lewat token acak tidak tertebak (/selfies/:token)
+// - Images use random tokens at /api/selfies/:token.
 // - Membersihkan job dan membebaskan VRAM setelah selesai/gagal/batal
 // ---------------------------------------------------------------------------
 import crypto from 'node:crypto';
@@ -449,7 +449,7 @@ export class JobManager {
       this.lastCompletedTime = Date.now();
       this._saveLimits();
 
-      const imageUrl = `/selfies/${token}`;
+      const imageUrl = `/api/selfies/${token}`;
       logSelfie(`[jobManager] Job selesai sukses dalam ${durationMs}ms -> ${imageUrl}`);
 
       // Broadcast event selesai ke semua client
@@ -526,7 +526,7 @@ export class JobManager {
     const job = this.activeJob;
     const ready = job?.readyEvent || (!job?.startedEvent && this._readyEvent);
     if (ready) {
-      const token = ready.imageUrl.slice('/selfies/'.length);
+      const token = ready.imageUrl.slice('/api/selfies/'.length);
       if (this.getFileByToken(token)) send({ ...ready });
     } else if (job?.startedEvent) {
       send({ ...job.startedEvent });

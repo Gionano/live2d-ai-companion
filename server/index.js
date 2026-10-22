@@ -44,8 +44,10 @@ import { detectSelfieIntent } from './selfie/intent.js';
 import { planSelfie } from './selfie/planner.js';
 import { jobManager } from './selfie/jobManager.js';
 import { installSelfieLifecycle, prepareSelfieJob } from './selfie/backendLifecycle.js';
+import { installSelfieImagePolicy, installSelfieImageRoutes } from './selfie/imageRoutes.js';
 
 const app = express();
+installSelfieImagePolicy(app, jobManager);
 // Frame base64 bisa lumayan besar — naikkan limit body JSON.
 app.use(express.json({ limit: '12mb' }));
 
@@ -223,42 +225,7 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// Endpoint HTTP lokal untuk menyajikan foto selfie (Point 15).
-// Terikat hanya ke localhost, token acak tidak tertebak, validasi path traversal outputDir.
-app.get(['/selfies/:token', '/api/selfies/:token'], (req, res) => {
-  const remoteIp = req.socket.remoteAddress || req.ip || '';
-  const isLocal =
-    remoteIp === '127.0.0.1' ||
-    remoteIp === '::1' ||
-    remoteIp === '::ffff:127.0.0.1' ||
-    remoteIp === 'localhost';
-  if (!isLocal) {
-    return res.status(403).json({ error: 'Akses hanya diizinkan dari localhost' });
-  }
-
-  const { token } = req.params;
-  const item = jobManager.getFileByToken(token);
-  if (!item || !item.filePath) {
-    return res.status(404).json({ error: 'Foto selfie tidak ditemukan atau token tidak valid' });
-  }
-
-  const outputDir = path.resolve(jobManager.config.outputDir);
-  const targetPath = path.resolve(item.filePath);
-
-  if (!targetPath.startsWith(outputDir)) {
-    return res.status(403).json({ error: 'Akses path tidak diizinkan' });
-  }
-
-  if (!fs.existsSync(targetPath)) {
-    return res.status(404).json({ error: 'File tidak ada di disk' });
-  }
-
-  const ext = path.extname(targetPath).toLowerCase();
-  const mimeType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'image/png';
-  res.setHeader('Content-Type', mimeType);
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  res.sendFile(targetPath);
-});
+installSelfieImageRoutes(app, jobManager);
 
 // --- WebSocket: STT hands-free (VAD dari browser) -> (vision) -> chat -------
 // Protokol pesan:
@@ -836,7 +803,7 @@ wss.on('connection', (socket, req) => {
 installSelfieLifecycle({ manager: jobManager, server, wss });
 
 const PORT = process.env.PORT || 8787;
-server.listen(PORT, () => {
+server.listen(PORT, '127.0.0.1', () => {
   console.log(
     `[server] 9inference + STT proxy jalan di http://localhost:${PORT} (ws: /ws)`,
   );

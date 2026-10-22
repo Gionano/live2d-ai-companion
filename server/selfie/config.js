@@ -14,6 +14,7 @@ const DEFAULTS = {
   provider: 'comfyui',
   comfyUrl: 'http://127.0.0.1:8000',
   outputDir: '',
+  allowLan: false,
   filenamePrefix: 'waifu_selfie',
   jobTimeoutMs: 600000,
   freeVramAfter: true,

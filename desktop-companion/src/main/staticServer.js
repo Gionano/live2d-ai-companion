@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { URL } from 'node:url';
 import { CONFIG } from './config.js';
-import { logger } from './logger.js';
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -28,20 +27,42 @@ const MIME_TYPES = {
   '.wav': 'audio/wav',
 };
 
+function getProxyHeaders(req, backendHost, backendPort, isWebSocket = false) {
+  const headers = { ...req.headers };
+  const appendForwarded = (name, value) => {
+    const previous = Array.isArray(headers[name]) ? headers[name].join(',') : headers[name];
+    headers[name] = previous ? `${previous},${value}` : value;
+  };
+  const encrypted = Boolean(req.socket.encrypted);
+  const protocol = isWebSocket ? (encrypted ? 'wss' : 'ws') : (encrypted ? 'https' : 'http');
+  const port = req.headers.host?.match(/:(\d+)$/)?.[1] || (encrypted ? '443' : '80');
+
+  appendForwarded('x-forwarded-for', req.socket.remoteAddress || '');
+  appendForwarded('x-forwarded-host', req.headers.host || '');
+  appendForwarded('x-forwarded-proto', protocol);
+  appendForwarded('x-forwarded-port', port);
+  headers.host = `${backendHost}:${backendPort}`;
+  return headers;
+}
+
 /**
  * Menjalankan server statis lokal (127.0.0.1) untuk menyajikan build statis frontend
  * dari folder resources/frontend-dist pada mode produksi, sekaligus mem-proxy
  * request /api dan upgrade WebSocket /ws ke backend lokal.
  */
-export function startProductionStaticServer(staticRootDir) {
+export async function startProductionStaticServer(staticRootDir, { backendUrl = CONFIG.backendUrl, logger = null } = {}) {
+  logger ||= (await import('./logger.js')).logger;
   return new Promise((resolve, reject) => {
-    const backendParsed = new URL(CONFIG.backendUrl);
-    const backendHost = backendParsed.hostname || '127.0.0.1';
+    const backendParsed = new URL(backendUrl);
+    const backendHost = backendParsed.hostname === 'localhost' ? '127.0.0.1' : backendParsed.hostname;
     const backendPort = Number(backendParsed.port) || 8787;
 
     const server = http.createServer((req, res) => {
       try {
         const reqUrl = new URL(req.url || '/', 'http://127.0.0.1');
+        if (/^\/api\/selfies(?:\/|$)/i.test(reqUrl.pathname)) {
+          res.setHeader('Cache-Control', 'no-store');
+        }
 
         // Proxy /api/* ke backend
         if (reqUrl.pathname.startsWith('/api')) {
@@ -51,7 +72,7 @@ export function startProductionStaticServer(staticRootDir) {
               port: backendPort,
               path: req.url,
               method: req.method,
-              headers: req.headers,
+              headers: getProxyHeaders(req, backendHost, backendPort),
             },
             (proxyRes) => {
               res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
@@ -106,7 +127,7 @@ export function startProductionStaticServer(staticRootDir) {
         port: backendPort,
         path: req.url,
         method: 'GET',
-        headers: req.headers,
+        headers: getProxyHeaders(req, backendHost, backendPort, true),
       });
 
       proxySocket.on('upgrade', (proxyRes, remoteSocket, remoteHead) => {

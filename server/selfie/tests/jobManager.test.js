@@ -169,12 +169,12 @@ test('2. Siklus Hidup Job, Event WebSocket, dan Token HTTP (Success Flow)', asyn
   assert.ok(types.includes('selfie_ready'), 'Harus mengirim selfie_ready');
 
   const readyEv = events.find((e) => e.type === 'selfie_ready');
-  assert.ok(readyEv.imageUrl.startsWith('/selfies/'), 'URL harus berupa /selfies/:token acak');
+  assert.ok(readyEv.imageUrl.startsWith('/api/selfies/'), 'Image URL must use the API proxy route');
   assert.equal(readyEv.caption, fakePlan.caption);
   assert.equal(readyEv.emotion, fakePlan.emotion);
 
   // Periksa token acak dapat diambil oleh router HTTP
-  const token = readyEv.imageUrl.replace('/selfies/', '');
+  const token = readyEv.imageUrl.replace('/api/selfies/', '');
   const fileData = jm.getFileByToken(token);
   assert.ok(fileData, 'Token harus terdaftar di tokenMap');
   assert.equal(fileData.filePath, 'C:\\Users\\Lenovo\\Pictures\\WaifuSelfies\\mock_test.png');
