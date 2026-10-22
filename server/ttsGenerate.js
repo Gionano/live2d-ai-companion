@@ -33,7 +33,8 @@ export function withFishEmotion(text, emotion = 'neutral') {
   return tag ? `${tag} ${text}` : text;
 }
 
-export async function* generateSpeech(text, emotion = 'neutral') {
+export async function* generateSpeech(text, emotion = 'neutral', { signal: abortSignal } = {}) {
+  if (abortSignal?.aborted) return;
   const expressiveText = withFishEmotion(text, emotion);
   const apiKey = process.env.FISH_API_KEY;
   if (!apiKey) throw new Error('FISH_API_KEY belum di-set (cek .env).');
@@ -54,7 +55,18 @@ export async function* generateSpeech(text, emotion = 'neutral') {
     }
   };
 
+  const onAbort = () => {
+    failure = new Error('Speech cancelled');
+    finished = true;
+    queue.length = 0;
+    signal();
+    ws.close();
+  };
+  abortSignal?.addEventListener('abort', onAbort, { once: true });
+  if (abortSignal?.aborted) onAbort();
+
   ws.on('open', () => {
+    if (abortSignal?.aborted) return;
     // start dengan text kosong; teks asli dikirim lewat TextEvent.
     ws.send(
       encode({
@@ -73,6 +85,7 @@ export async function* generateSpeech(text, emotion = 'neutral') {
   });
 
   ws.on('message', (data) => {
+    if (abortSignal?.aborted) return;
     let msg;
     try {
       msg = decode(data);
@@ -115,6 +128,7 @@ export async function* generateSpeech(text, emotion = 'neutral') {
       });
     }
   } finally {
+    abortSignal?.removeEventListener('abort', onAbort);
     if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
       ws.close();
     }
