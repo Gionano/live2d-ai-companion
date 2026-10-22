@@ -110,6 +110,21 @@ const desktopBridge = Object.freeze({
    */
   reportOverlayDiagnostics: (payload) =>
     ipcRenderer.invoke('desktop:report-overlay-diagnostics', payload),
+
+  /**
+   * Mengirim event selfie_* dari WebSocket renderer ke main process agar popup Electron tampil.
+   */
+  notifySelfieEvent: (event) => ipcRenderer.send('desktop:selfie-event', event),
+
+  /**
+   * Berlangganan permintaan pembatalan selfie dari popup window untuk diteruskan ke WebSocket backend.
+   */
+  onSelfieCancelRequested: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('desktop:selfie-cancel-requested', handler);
+    return () => ipcRenderer.removeListener('desktop:selfie-cancel-requested', handler);
+  },
 });
 
 contextBridge.exposeInMainWorld('desktopBridge', desktopBridge);

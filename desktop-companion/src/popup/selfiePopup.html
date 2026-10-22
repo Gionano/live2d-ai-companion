@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <!-- CSP ketat: hanya izinkan gambar dari localhost dan script lokal (Point 20) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' http://localhost:* http://127.0.0.1:* data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';">
+  <title>Amika Selfie</title>
+  <style>
+    :root {
+      --bg-glass: rgba(18, 22, 32, 0.88);
+      --border-glass: rgba(110, 190, 255, 0.35);
+      --accent: #5ab2ff;
+      --accent-glow: rgba(90, 178, 255, 0.4);
+      --text: #f0f6fc;
+      --text-muted: #8b9bb4;
+      --danger: #ff5a79;
+      --danger-hover: #ff335a;
+      --btn-bg: rgba(255, 255, 255, 0.08);
+      --btn-hover: rgba(255, 255, 255, 0.16);
+      --radius: 14px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: transparent;
+      color: var(--text);
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+    }
+
+    .popup-container {
+      background: var(--bg-glass);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 20px var(--accent-glow);
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.3s ease;
+    }
+
+    /* --- KEADAAN A: TOAST KOMPAK (GENERATING) --- */
+    #state-generating {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      height: 100%;
+      padding: 12px 14px;
+    }
+
+    .toast-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .toast-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .toast-avatar-icon {
+      font-size: 16px;
+      animation: pulse 1.8s infinite;
+    }
+
+    .btn-cancel-small {
+      background: rgba(255, 90, 121, 0.15);
+      border: 1px solid rgba(255, 90, 121, 0.4);
+      color: var(--danger);
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-cancel-small:hover {
+      background: var(--danger);
+      color: white;
+    }
+
+    .progress-bar-container {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      overflow: hidden;
+      margin: 8px 0 4px 0;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+      box-shadow: 0 0 8px var(--accent);
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+
+    .toast-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* --- KEADAAN B: GAMBAR SELESAI (READY) --- */
+    #state-ready {
+      display: none;
+      flex-direction: column;
+      height: 100%;
+      padding: 14px;
+      gap: 10px;
+    }
+
+    .ready-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .ready-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-close-icon {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .btn-close-icon:hover {
+      color: var(--text);
+      background: var(--btn-hover);
+    }
+
+    .image-preview-wrapper {
+      flex: 1;
+      width: 100%;
+      min-height: 220px;
+      position: relative;
+      border-radius: 8px;
+      overflow: hidden;
+      background: rgba(0, 0, 0, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-in;
+    }
+
+    .selfie-image {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: cover;
+      opacity: 0;
+      transform: scale(0.96);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+      border-radius: 8px;
+    }
+
+    .selfie-image.loaded {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .caption-box {
+      font-size: 12px;
+      line-height: 1.4;
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.04);
+      padding: 8px 10px;
+      border-radius: 8px;
+      border-left: 3px solid var(--accent);
+      font-style: italic;
+    }
+
+    .action-buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+    }
+
+    .btn-action {
+      background: var(--btn-bg);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: var(--text);
+      font-size: 11px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: all 0.2s;
+    }
+
+    .btn-action:hover {
+      background: var(--btn-hover);
+      border-color: var(--accent);
+    }
+
+    .btn-action.success {
+      background: rgba(74, 222, 128, 0.2);
+      border-color: rgba(74, 222, 128, 0.4);
+      color: #4ade80;
+    }
+
+    .auto-close-hint {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
+    /* --- OVERLAY ZOOM (ENLARGE S/D 80% LAYAR) --- */
+    .zoom-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.85);
+      backdrop-filter: blur(8px);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-out;
+    }
+
+    .zoom-overlay img {
+      max-width: 80vw;
+      max-height: 80vh;
+      object-fit: contain;
+      border-radius: 8px;
+      box-shadow: 0 0 30px rgba(0, 0, 0, 0.8);
+      animation: zoomIn 0.2s ease;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.15); }
+    }
+
+    @keyframes zoomIn {
+      from { transform: scale(0.9); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="popup-container" id="popup-root">
+
+    <!-- KEADAAN A: TOAST KOMPAK (PROGRESS & ETA) -->
+    <div id="state-generating">
+      <div class="toast-header">
+        <div class="toast-title">
+          <span class="toast-avatar-icon">📸</span>
+          <span>Amika sedang berfoto...</span>
+        </div>
+        <button class="btn-cancel-small" id="btn-cancel" title="Batalkan foto">Batal</button>
+      </div>
+
+      <div class="progress-bar-container">
+        <div class="progress-bar-fill" id="progress-fill"></div>
+      </div>
+
+      <div class="toast-meta">
+        <span id="progress-text">Menyiapkan pose...</span>
+        <span id="eta-text">Estimasi: ~90s</span>
+      </div>
+    </div>
+
+    <!-- KEADAAN B: GAMBAR SELESAI (PREVIEW & AKSI) -->
+    <div id="state-ready">
+      <div class="ready-header">
+        <div class="ready-title">
+          <span>✨</span>
+          <span>Foto Baru dari Amika</span>
+        </div>
+        <button class="btn-close-icon" id="btn-close" title="Tutup">✕</button>
+      </div>
+
+      <div class="image-preview-wrapper" id="image-wrapper" title="Klik untuk memperbesar">
+        <img class="selfie-image" id="selfie-img" src="" alt="Amika Selfie">
+      </div>
+
+      <div class="caption-box" id="caption-box">
+        "Ini fotonya sayang..."
+      </div>
+
+      <div class="action-buttons">
+        <button class="btn-action" id="btn-save" title="Simpan file ke komputer">
+          <span>💾</span>
+          <span>Simpan</span>
+        </button>
+        <button class="btn-action" id="btn-copy" title="Salin gambar ke clipboard">
+          <span>📋</span>
+          <span>Salin</span>
+        </button>
+        <button class="btn-action" id="btn-folder" title="Buka folder foto">
+          <span>📁</span>
+          <span>Folder</span>
+        </button>
+      </div>
+
+      <div class="auto-close-hint" id="auto-close-hint"></div>
+    </div>
+
+  </div>
+
+  <!-- ZOOM MODAL (Enlarge) -->
+  <div class="zoom-overlay" id="zoom-overlay">
+    <img id="zoom-img" src="" alt="Enlarged Selfie">
+  </div>
+
+  <script>
+    const stateGen = document.getElementById('state-generating');
+    const stateReady = document.getElementById('state-ready');
+    const progressFill = document.getElementById('progress-fill');
+    const progressText = document.getElementById('progress-text');
+    const etaText = document.getElementById('eta-text');
+    const selfieImg = document.getElementById('selfie-img');
+    const captionBox = document.getElementById('caption-box');
+    const autoCloseHint = document.getElementById('auto-close-hint');
+    const zoomOverlay = document.getElementById('zoom-overlay');
+    const zoomImg = document.getElementById('zoom-img');
+
+    let currentJobId = null;
+    let currentImageUrl = null;
+    let autoCloseTimer = null;
+    let autoCloseSeconds = 30;
+
+    // 1. Terima event dari main process
+    if (window.selfieApi?.onSelfieEvent) {
+      window.selfieApi.onSelfieEvent((payload) => {
+        if (!payload || !payload.type) return;
+
+        switch (payload.type) {
+          case 'selfie_started':
+            showGeneratingState(payload);
+            break;
+          case 'selfie_progress':
+            updateProgress(payload);
+            break;
+          case 'selfie_ready':
+            showReadyState(payload);
+            break;
+          case 'selfie_failed':
+          case 'selfie_cancelled':
+            hidePopup();
+            break;
+        }
+      });
+    }
+
+    function showGeneratingState(data) {
+      clearAutoClose();
+      currentJobId = data.jobId;
+      stateGen.style.display = 'flex';
+      stateReady.style.display = 'none';
+      progressFill.style.width = '0%';
+      progressText.textContent = 'Menyiapkan kamera...';
+      const eta = data.etaSeconds || 90;
+      etaText.textContent = `Estimasi: ~${eta}s`;
+
+      // Minta main process resize ke toast compact (320x120)
+      window.selfieApi?.resizeWindow(320, 120);
+    }
+
+    function updateProgress(data) {
+      const pct = data.percentage !== undefined ? data.percentage : (data.value && data.max ? Math.round((data.value / data.max) * 100) : 0);
+      progressFill.style.width = `${pct}%`;
+      progressText.textContent = `Men-generate... (${pct}%)`;
+    }
+
+    function showReadyState(data) {
+      currentJobId = data.jobId;
+      currentImageUrl = data.imageUrl;
+
+      stateGen.style.display = 'none';
+      stateReady.style.display = 'flex';
+
+      selfieImg.classList.remove('loaded');
+      selfieImg.src = data.imageUrl;
+      zoomImg.src = data.imageUrl;
+
+      selfieImg.onload = () => {
+        selfieImg.classList.add('loaded');
+      };
+
+      captionBox.textContent = `"${data.caption || 'Ini fotonya buat kamu sayang~'}"`;
+
+      // Minta main process resize ke photo card mode (360x520)
+      window.selfieApi?.resizeWindow(360, 520);
+
+      // Mulai hitung mundur auto-close
+      startAutoCloseCountdown(data.autoCloseSeconds || 30);
+    }
+
+    function startAutoCloseCountdown(seconds) {
+      clearAutoClose();
+      if (!seconds || seconds <= 0) {
+        autoCloseHint.textContent = '';
+        return;
+      }
+      autoCloseSeconds = seconds;
+      autoCloseHint.textContent = `Menutup otomatis dalam ${autoCloseSeconds}s`;
+
+      autoCloseTimer = setInterval(() => {
+        autoCloseSeconds -= 1;
+        if (autoCloseSeconds <= 0) {
+          clearAutoClose();
+          hidePopup();
+        } else {
+          autoCloseHint.textContent = `Menutup otomatis dalam ${autoCloseSeconds}s`;
+        }
+      }, 1000);
+    }
+
+    function clearAutoClose() {
+      if (autoCloseTimer) {
+        clearInterval(autoCloseTimer);
+        autoCloseTimer = null;
+      }
+    }
+
+    function hidePopup() {
+      clearAutoClose();
+      window.selfieApi?.closePopup();
+    }
+
+    // Tombol Batal
+    document.getElementById('btn-cancel').addEventListener('click', () => {
+      if (currentJobId) {
+        window.selfieApi?.cancelJob(currentJobId);
+      }
+      hidePopup();
+    });
+
+    // Tombol Tutup
+    document.getElementById('btn-close').addEventListener('click', () => {
+      hidePopup();
+    });
+
+    // Zoom Image Klik
+    document.getElementById('image-wrapper').addEventListener('click', () => {
+      clearAutoClose(); // Jangan auto tutup saat sedang di-zoom
+      zoomOverlay.style.display = 'flex';
+      // Minta main process resize ke layar besar jika diperlukan
+      window.selfieApi?.resizeWindow(720, 720);
+    });
+
+    zoomOverlay.addEventListener('click', () => {
+      zoomOverlay.style.display = 'none';
+      window.selfieApi?.resizeWindow(360, 520);
+      startAutoCloseCountdown(15);
+    });
+
+    // Tombol Simpan
+    document.getElementById('btn-save').addEventListener('click', async () => {
+      clearAutoClose();
+      const btn = document.getElementById('btn-save');
+      try {
+        const res = await window.selfieApi?.saveImage(currentImageUrl);
+        if (res && res.saved) {
+          btn.classList.add('success');
+          btn.innerHTML = '<span>✓</span><span>Tersimpan</span>';
+          setTimeout(() => {
+            btn.classList.remove('success');
+            btn.innerHTML = '<span>💾</span><span>Simpan</span>';
+          }, 2500);
+        }
+      } catch (err) {
+        console.error('Gagal simpan:', err);
+      }
+    });
+
+    // Tombol Salin
+    document.getElementById('btn-copy').addEventListener('click', async () => {
+      clearAutoClose();
+      const btn = document.getElementById('btn-copy');
+      try {
+        await window.selfieApi?.copyImage(currentImageUrl);
+        btn.classList.add('success');
+        btn.innerHTML = '<span>✓</span><span>Tersalin</span>';
+        setTimeout(() => {
+          btn.classList.remove('success');
+          btn.innerHTML = '<span>📋</span><span>Salin</span>';
+        }, 2000);
+      } catch (err) {
+        console.error('Gagal salin:', err);
+      }
+    });
+
+    // Tombol Buka Folder
+    document.getElementById('btn-folder').addEventListener('click', () => {
+      clearAutoClose();
+      window.selfieApi?.openFolder();
+    });
+  </script>
+</body>
+</html>

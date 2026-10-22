@@ -126,6 +126,20 @@ export const CONFIG = {
     toggleAvatarVisibility: process.env.SHORTCUT_HIDE_AVATAR || 'CommandOrControl+Alt+H',
   },
 
+  // Konfigurasi Popup Selfie / PAP (Fase D)
+  selfiePopup: {
+    enabled: true,
+    autoCloseSeconds: 30, // 0 = tidak auto close
+    toastWidth: 320,
+    toastHeight: 120,
+    cardWidth: 360,
+    cardHeight: 520,
+    zoomMaxWidthPercent: 0.8, // Maksimal 80% work area layar
+    zoomMaxHeightPercent: 0.8,
+    alwaysOnTopLevel: 'screen-saver',
+    contentProtection: true,
+  },
+
   // Nama file persistensi di app.getPath('userData')
   storage: {
     logDirName: 'logs',
