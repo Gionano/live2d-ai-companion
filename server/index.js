@@ -385,6 +385,8 @@ jobManager.setSpeechHandler(({ text, emotion }) => {
   enqueueSpeech(text, emotion);
 });
 
+streamingVisionManager.setSpeechHandler((text, emotion) => enqueueSpeech(text, emotion));
+
 function sendVisionInit(sock) {
   if (sock.readyState !== WebSocket.OPEN) return;
   sock.send(JSON.stringify({

@@ -7,8 +7,6 @@
 import { groq } from './groqClient.js';
 import { client } from './nineInferenceClient.js';
 import { FILTER_MODEL } from './modelConfig.js';
-import { generateSpeech } from './ttsGenerate.js';
-import { isVoiceConfigured } from './voiceConfig.js';
 import { markConversationActivity } from './modelWarmup.js';
 import { HISTORY_MESSAGE_LIMIT } from './llmChat.js';
 import { getServerTuning } from './serverConfig.js';
@@ -85,6 +83,7 @@ class StreamingVisionManager {
 
     this.broadcastFn = null;
     this.historyRef = null;
+    this.speechHandler = null;
 
     this.initPeriodicFilter();
   }
@@ -95,6 +94,10 @@ class StreamingVisionManager {
 
   setHistoryRef(history) {
     this.historyRef = history;
+  }
+
+  setSpeechHandler(fn) {
+    this.speechHandler = fn;
   }
 
   // Tandai apakah ada Vision Monitor yang terhubung.
@@ -411,24 +414,7 @@ Putuskan apakah Amika harus berkomentar secara spontan sekarang atau SKIP:
     }
 
     this.broadcast({ type: 'vision', text: `[Spontan] ${text}` });
-    this.broadcast({ type: 'emotion', emotion });
-
-    if (isVoiceConfigured()) {
-      try {
-        for await (const chunk of generateSpeech(text, emotion)) {
-          this.broadcast({
-            type: 'audio_output',
-            data: chunk.toString('base64'),
-            format: 'mp3',
-          });
-        }
-        this.broadcast({ type: 'audio_end' });
-      } catch (err) {
-        console.error('[StreamingVision:tts] Gagal generate TTS:', err.message);
-      }
-    }
-
-    this.broadcast({ type: 'amika_replied', text, emotion });
+    await this.speechHandler?.(text, emotion);
   }
 }
 
