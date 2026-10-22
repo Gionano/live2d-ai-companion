@@ -38,3 +38,23 @@ npm run selfie:test --provider=comfyui --preset=cepat
 Mencetak durasi antre / generate / unduh dan lokasi file. Rata-rata 5 durasi terakhir per preset disimpan untuk ETA.
 
 > Fitur nonaktif otomatis (dengan pesan jelas) bila provider tidak terjangkau.
+
+# Selfie module — remaining phases
+Rules: cloud LLM for chat/planner; local image provider only (ImageProvider interface); keys backend-only; don't change existing WS contract except selfie_* messages; tuning constants in selfie.config.json; stop after each phase and update docs/STATUS.md.
+
+## PHASE C — job manager, events, avatar speech
+1. Job manager: one active job, queue max = config.maxQueue, cooldown, daily limit. Persist cooldown/daily counters to a file (local date). If a request arrives during a job or cooldown, avatar replies in character (Indonesian, e.g. "masih fotoin yang tadi ya"); no new job.
+2. Jobs run async. Never block the conversation or the turn-taking state machine. Chat keeps using the cloud LLM.
+3. WS events: selfie_started {jobId, etaSeconds|null}, selfie_progress {jobId,value,max}, selfie_ready {jobId,imageUrl,caption}, selfie_failed {jobId,reason}, selfie_cancelled {jobId}. On client connect/reload, send a snapshot of the active job. etaSeconds = null if no duration history.
+4. Avatar speech via the existing TTS path: one short line at job start, caption (with emotion) when ready. Queue speech until turn state is IDLE; keep the existing safety timeout so state never sticks.
+5. Never send image base64 over WS. Serve images via local HTTP GET /selfies/:id: bind 127.0.0.1 only, random 128-bit crypto id, serve only files inside outputDir, no directory listing, unknown id -> 404.
+6. On failure/timeout: avatar says so in character, clean up the job, call provider.release(). On backend shutdown: interrupt the running job and release.
+7. Feature auto-disables with a clear message if the provider is unavailable.
+Test: "pap dong" -> short line, async job, events in log; chat works during job; 2nd request refused politely; caption spoken only when avatar is idle; kill ComfyUI mid-job -> selfie_failed and state recovers; imageUrl works locally only, random id -> 404; no base64 in WS frames; page reload mid-job restores progress.
+
+## PHASE D — popup UI (Electron)
+1. Separate popup BrowserWindow: frameless, always-on-top, NOT click-through, setContentProtection(true), placed near the avatar without covering it, clamped to the active display work area.
+2. States: (a) compact toast with progress bar, ETA, Cancel; (b) result: image with fade-in, click to enlarge (<=80% of screen), buttons Save As, Copy (nativeImage -> clipboard), Open folder, Close. Optional auto-close (config).
+3. Tray: "Pap feature" on/off toggle; "Pap gallery" (open outputDir or simple gallery of last 20).
+4. Security: local page, narrow preload (contextIsolation, no nodeIntegration), load images only from the localhost endpoint origin, no remote content.
+5. Non-Electron browser: in-page modal fallback.
