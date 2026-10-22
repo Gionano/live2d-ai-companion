@@ -38,6 +38,7 @@ const DEFAULTS = {
   cacheRetries: 1,
   etaHistorySize: 5,
   etaStoreFile: 'data/selfie-durations.json',
+  limitsStoreFile: 'data/selfie-limits.json',
   phrases: {
     initial: ['Tunggu ya sayang, aku pose dulu sebentar...'],
     busy: ['Masih fotoin yang tadi ya sayang, tunggu sebentar yaa~'],
@@ -98,6 +99,7 @@ export function loadSelfieConfig(overrides = {}) {
   cfg.workflowPath = resolveDir(cfg.workflowFile, path.join(ROOT_DIR, 'workflows', 'selfie.api.json'));
   cfg.mappingPath = resolveDir(cfg.mappingFile, path.join(ROOT_DIR, 'selfie.mapping.json'));
   cfg.etaStorePath = resolveDir(cfg.etaStoreFile, path.join(ROOT_DIR, 'data', 'selfie-durations.json'));
+  cfg.limitsStorePath = resolveDir(cfg.limitsStoreFile, path.join(ROOT_DIR, 'data', 'selfie-limits.json'));
   cfg.keywordsPath = resolveDir(cfg.keywordsFile, path.join(ROOT_DIR, 'config', 'selfieKeywords.json'));
   cfg.characterCardPath = resolveDir(cfg.characterCardFile, path.join(ROOT_DIR, 'config', 'characterCard.json'));
   cfg.moderationPath = resolveDir(cfg.moderationFile, path.join(ROOT_DIR, 'config', 'selfieModeration.json'));

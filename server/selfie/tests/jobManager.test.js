@@ -6,7 +6,26 @@
 // ---------------------------------------------------------------------------
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { JobManager } from '../jobManager.js';
+import { loadSelfieConfig } from '../config.js';
+
+function createTestManager(t, config = null) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'selfie-job-tests-'));
+  const manager = new JobManager({
+    ...(config || loadSelfieConfig()),
+    etaStorePath: path.join(directory, 'durations.json'),
+    limitsStorePath: path.join(directory, 'limits.json'),
+  });
+  t.after(async () => {
+    await manager.shutdown();
+    assert.ok(path.resolve(directory).startsWith(path.resolve(os.tmpdir(), 'selfie-job-tests-')));
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  return manager;
+}
 
 function createMockProvider({ available = true, delayMs = 10, fail = false, cancel = false } = {}) {
   let released = false;
@@ -48,7 +67,7 @@ function createMockProvider({ available = true, delayMs = 10, fail = false, canc
 
 test('1. JobManager: Eligibility Checks (Batas Harian, Cooldown, Sibuk, Provider)', async (t) => {
   await t.test('lolos jika sistem kosong dan provider tersedia', async () => {
-    const jm = new JobManager({
+    const jm = createTestManager(t, {
       dailyLimit: 5,
       cooldownMs: 1000,
       maxQueue: 1,
@@ -60,7 +79,7 @@ test('1. JobManager: Eligibility Checks (Batas Harian, Cooldown, Sibuk, Provider
   });
 
   await t.test('menolak jika provider gambar tidak tersedia', async () => {
-    const jm = new JobManager();
+    const jm = createTestManager(t);
     jm.provider = createMockProvider({ available: false });
 
     const check = await jm.canAcceptJob();
@@ -71,7 +90,7 @@ test('1. JobManager: Eligibility Checks (Batas Harian, Cooldown, Sibuk, Provider
   });
 
   await t.test('menolak jika batas harian tercapai', async () => {
-    const jm = new JobManager({ dailyLimit: 2 });
+    const jm = createTestManager(t, { dailyLimit: 2 });
     jm.provider = createMockProvider({ available: true });
     jm.dailyRecords.count = 2;
 
@@ -82,7 +101,7 @@ test('1. JobManager: Eligibility Checks (Batas Harian, Cooldown, Sibuk, Provider
   });
 
   await t.test('menolak jika masih dalam periode cooldown', async () => {
-    const jm = new JobManager({ cooldownMs: 10000 });
+    const jm = createTestManager(t, { cooldownMs: 10000 });
     jm.provider = createMockProvider({ available: true });
     jm.lastCompletedTime = Date.now() - 2000; // 8 detik tersisa
 
@@ -93,10 +112,10 @@ test('1. JobManager: Eligibility Checks (Batas Harian, Cooldown, Sibuk, Provider
   });
 
   await t.test('menolak jika antrean penuh (activeJob ada dan queue sudah maxQueue)', async () => {
-    const jm = new JobManager({ maxQueue: 1 });
+    const jm = createTestManager(t, { maxQueue: 1 });
     jm.provider = createMockProvider({ available: true });
-    jm.activeJob = { jobId: 'active-1' };
-    jm.queue = [{ jobId: 'queue-1' }];
+    assert.equal(jm.tryAdmit().allowed, true);
+    assert.equal(jm.tryAdmit().allowed, true);
 
     const check = await jm.canAcceptJob();
     assert.equal(check.allowed, false);
@@ -106,7 +125,7 @@ test('1. JobManager: Eligibility Checks (Batas Harian, Cooldown, Sibuk, Provider
 });
 
 test('2. Siklus Hidup Job, Event WebSocket, dan Token HTTP (Success Flow)', async (t) => {
-  const jm = new JobManager({
+  const jm = createTestManager(t, {
     cooldownMs: 500,
     dailyLimit: 10,
     freeVramAfter: true,
@@ -121,6 +140,7 @@ test('2. Siklus Hidup Job, Event WebSocket, dan Token HTTP (Success Flow)', asyn
   jm.setSpeechHandler((msg) => spokenMessages.push(msg));
 
   const fakePlan = {
+    slots: {},
     positivePrompt: 'A test selfie',
     negativePrompt: 'blurry',
     referenceImage: 'default.jpg',
@@ -131,7 +151,7 @@ test('2. Siklus Hidup Job, Event WebSocket, dan Token HTTP (Success Flow)', asyn
   const submitRes = await jm.submitJob({ plan: fakePlan, preset: 'cepat' });
   assert.equal(submitRes.ok, true);
   assert.ok(submitRes.jobId);
-  assert.ok(submitRes.etaSeconds > 0);
+  assert.equal(submitRes.etaSeconds, null);
 
   // Ucapan awal harus langsung diantrekan
   assert.equal(spokenMessages.length, 1);
@@ -169,7 +189,7 @@ test('2. Siklus Hidup Job, Event WebSocket, dan Token HTTP (Success Flow)', asyn
 });
 
 test('3. Pembatalan Job (Cancellation Flow)', async (t) => {
-  const jm = new JobManager();
+  const jm = createTestManager(t);
   const mockProv = createMockProvider({ delayMs: 50 });
   jm.provider = mockProv;
 
@@ -180,6 +200,7 @@ test('3. Pembatalan Job (Cancellation Flow)', async (t) => {
   jm.setSpeechHandler((msg) => spoken.push(msg));
 
   const fakePlan = {
+    slots: {},
     positivePrompt: 'A test selfie',
     negativePrompt: '',
     referenceImage: 'default.jpg',
@@ -205,7 +226,7 @@ test('3. Pembatalan Job (Cancellation Flow)', async (t) => {
 });
 
 test('4. Penanganan Kegagalan / Error pada Generator (Failure Flow)', async (t) => {
-  const jm = new JobManager();
+  const jm = createTestManager(t);
   const mockProv = createMockProvider({ fail: true });
   jm.provider = mockProv;
 
@@ -216,6 +237,7 @@ test('4. Penanganan Kegagalan / Error pada Generator (Failure Flow)', async (t) 
   jm.setSpeechHandler((msg) => spoken.push(msg));
 
   const fakePlan = {
+    slots: {},
     positivePrompt: 'A test selfie',
     negativePrompt: '',
     referenceImage: 'default.jpg',

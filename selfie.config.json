@@ -27,6 +27,7 @@
   "cacheRetries": 1,
   "etaHistorySize": 5,
   "etaStoreFile": "data/selfie-durations.json",
+  "limitsStoreFile": "data/selfie-limits.json",
   "phrases": {
     "initial": [
       "Tunggu ya sayang, aku pose dulu sebentar...",

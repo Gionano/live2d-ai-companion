@@ -42,6 +42,7 @@ import { memoryManager } from './memoryManager.js';
 import { detectSelfieIntent } from './selfie/intent.js';
 import { planSelfie } from './selfie/planner.js';
 import { jobManager } from './selfie/jobManager.js';
+import { installSelfieLifecycle, prepareSelfieJob } from './selfie/backendLifecycle.js';
 
 const app = express();
 // Frame base64 bisa lumayan besar — naikkan limit body JSON.
@@ -735,38 +736,25 @@ wss.on('connection', (socket, req) => {
       if (selfieIntent.isSelfie) {
         console.log(`[selfie] Intent selfie terdeteksi: "${text}" (keyword: ${selfieIntent.matchedKeyword})`);
 
-        // 1. Cek kelayakan job (cooldown, batas harian, provider aktif)
-        const check = await jobManager.canAcceptJob();
-        if (!check.allowed) {
-          console.log(`[selfie] Permintaan ditolak: ${check.reason}`);
-          await playSpokenMessage(check.text, check.emotion);
+        const result = await prepareSelfieJob({
+          manager: jobManager,
+          planner: planSelfie,
+          userText: text,
+          history,
+        });
+        if (!result.ok) {
+          console.log(`[selfie] Request rejected: ${result.reason}`);
+          await playSpokenMessage(result.text, result.emotion);
           history.push({ role: 'user', content: text });
-          history.push({ role: 'assistant', content: check.text });
+          history.push({ role: 'assistant', content: result.text });
           return;
         }
 
-        // 2. Rencanakan adegan via Cloud LLM Planner
-        const planRes = await planSelfie({ userText: text, history });
-        if (!planRes.ok) {
-          if (planRes.blocked) {
-            console.log(`[selfie] Ditolak oleh pembatas konten: ${planRes.reason}`);
-            await playSpokenMessage(planRes.refusalText, planRes.emotion);
-            history.push({ role: 'user', content: text });
-            history.push({ role: 'assistant', content: planRes.refusalText });
-            return;
-          }
-          const failMsg = jobManager.pickPhrase('failed') || 'Maaf sayang, fotonya belum bisa diproses sekarang.';
-          await playSpokenMessage(failMsg, 'malu');
-          return;
-        }
-
-        // 3. Daftarkan job ke JobManager (asinkron, non-blocking turn-taking)
         history.push({ role: 'user', content: text });
-        history.push({ role: 'assistant', content: planRes.plan.caption });
-        await jobManager.submitJob({ plan: planRes.plan, skipInitialSpeech: true });
+        history.push({ role: 'assistant', content: result.plan.caption });
 
         // Ucapkan ucapan awal segera lewat pipeline TTS ("tunggu ya, aku pose dulu")
-        const initialText = jobManager.pickPhrase('initial') || 'Tunggu ya sayang, aku pose dulu sebentar...';
+        const initialText = result.initialText || jobManager.pickPhrase('initial') || 'Tunggu ya sayang, aku pose dulu sebentar...';
         await playSpokenMessage(initialText, 'sayang');
         return;
       }
@@ -961,6 +949,9 @@ wss.on('connection', (socket, req) => {
     }
   });
 });
+
+// Install after role assignment so monitor sockets do not receive selfie snapshots.
+installSelfieLifecycle({ manager: jobManager, server, wss });
 
 const PORT = process.env.PORT || 8787;
 server.listen(PORT, () => {
