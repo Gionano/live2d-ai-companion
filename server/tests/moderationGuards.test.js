@@ -4,13 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadModeration, checkModeration, _resetModerationCache } from '../moderation.js';
-import { planSelfie } from '../planner.js';
-import { buildPrompt, loadCharacterCard } from '../promptBuilder.js';
-import { normalizeSlots } from '../slotMatcher.js';
+import { loadModeration, checkModeration, _resetModerationCache } from '../selfie/moderation.js';
+import { planSelfie } from '../selfie/planner.js';
+import { buildPrompt, loadCharacterCard } from '../selfie/promptBuilder.js';
+import { normalizeSlots } from '../selfie/slotMatcher.js';
 
-const MODERATION_PATH = fileURLToPath(new URL('../../../config/selfieModeration.json', import.meta.url));
-const CHARACTER_CARD_PATH = fileURLToPath(new URL('../../../config/characterCard.json', import.meta.url));
+const MODERATION_PATH = fileURLToPath(new URL('../../config/selfieModeration.json', import.meta.url));
+const CHARACTER_CARD_PATH = fileURLToPath(new URL('../../config/characterCard.json', import.meta.url));
 // Baseline count from config/selfieModeration.json; additions must not lower this floor.
 const MIN_FORBIDDEN_PHRASES = 80;
 

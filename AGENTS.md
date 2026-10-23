@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 
 - `src/` contains the vanilla JavaScript browser companion, Live2D controllers, and audio/WebSocket logic; `index.html` is the entry page.
-- `server/` contains the Express/WebSocket backend and AI integrations. Selfie generation lives in `server/selfie/`, with tests in `server/selfie/tests/`.
+- `server/` contains the Express/WebSocket backend and AI integrations. Selfie generation lives in `server/selfie/`; automated tests live in `server/tests/`.
 - `desktop-companion/` is a separate Electron package; `src/main/` manages windows and capture, while `src/preload/` exposes renderer bridges.
 - `vision-monitor/` is a separate Vite dashboard with a Node WebSocket bridge.
 - `public/models/live2d/` holds model assets; `vendor/live2d/` holds the Cubism framework. `config/`, `workflows/`, and `docs/` contain configuration, image-generation workflows, and documentation.
@@ -15,7 +15,7 @@ Use Node.js 18+. Run commands from the root unless specified. Run `npm install` 
 - `npm run dev:all`: start the backend on port 8787 and Vite frontend on port 5173.
 - `npm run server` / `npm run dev`: start either service independently.
 - `npm run build`: compile the frontend into `dist/`; `npm run preview` serves that build locally.
-- `npm test`: run all selfie tests; `npm run selfie:test-b` and `npm run selfie:test-c` run planner and job-manager tests individually.
+- `npm test`: run all automated tests; `npm run selfie:test-b` and `npm run selfie:test-c` run planner and job-manager tests individually.
 - `npm --prefix vision-monitor run start`: start the monitor bridge and dashboard.
 - `npm --prefix desktop-companion run dev`: launch Electron after starting the root services.
 - In `desktop-companion/`, run `npm run build:frontend`, then `npm run dist` to produce a Windows x64 NSIS installer.

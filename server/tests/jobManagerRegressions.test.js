@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { JobManager } from '../jobManager.js';
-import { loadSelfieConfig } from '../config.js';
+import { JobManager } from '../selfie/jobManager.js';
+import { loadSelfieConfig } from '../selfie/config.js';
 
 const PLAN = {
   slots: {},

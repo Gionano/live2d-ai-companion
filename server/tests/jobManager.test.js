@@ -2,15 +2,15 @@
 // jobManager.test.js  (unit tests untuk Fase C)
 // Menguji: JobManager, antrean, cooldown, batas harian, event WebSocket,
 // token mapping HTTP, pembatalan, dan penanganan kegagalan.
-// Dijalankan dengan: node --test server/selfie/tests/jobManager.test.js
+// Run with: node --test server/tests/jobManager.test.js
 // ---------------------------------------------------------------------------
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { JobManager } from '../jobManager.js';
-import { loadSelfieConfig } from '../config.js';
+import { JobManager } from '../selfie/jobManager.js';
+import { loadSelfieConfig } from '../selfie/config.js';
 
 function createTestManager(t, config = null) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'selfie-job-tests-'));

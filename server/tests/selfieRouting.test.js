@@ -4,16 +4,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 
-const companionSource = fs.readFileSync(new URL('../../../src/companion.js', import.meta.url), 'utf8');
-const mainSource = fs.readFileSync(new URL('../../../desktop-companion/src/main/index.js', import.meta.url), 'utf8');
-const preloadSource = fs.readFileSync(new URL('../../../desktop-companion/src/preload/preload.cjs', import.meta.url), 'utf8');
-const securitySource = fs.readFileSync(new URL('../../../desktop-companion/src/main/security.js', import.meta.url), 'utf8')
+const companionSource = fs.readFileSync(new URL('../../src/companion.js', import.meta.url), 'utf8');
+const mainSource = fs.readFileSync(new URL('../../desktop-companion/src/main/index.js', import.meta.url), 'utf8');
+const preloadSource = fs.readFileSync(new URL('../../desktop-companion/src/preload/preload.cjs', import.meta.url), 'utf8');
+const securitySource = fs.readFileSync(new URL('../../desktop-companion/src/main/security.js', import.meta.url), 'utf8')
   .replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
 const clone = value => JSON.parse(JSON.stringify(value));
 const selfieTypes = ['selfie_started', 'selfie_progress', 'selfie_ready', 'selfie_failed', 'selfie_cancelled'];
 
 test('tray exposes the persisted Pap toggle and gallery actions', () => {
-  const source = fs.readFileSync(new URL('../../../desktop-companion/src/main/trayManager.js', import.meta.url), 'utf8');
+  const source = fs.readFileSync(new URL('../../desktop-companion/src/main/trayManager.js', import.meta.url), 'utf8');
   let menu;
   const toggles = [];
   let galleries = 0;

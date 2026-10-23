@@ -5,9 +5,9 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
-import { ComfyUiProvider } from '../providers/comfyuiProvider.js';
-import { IMAGE_ERROR } from '../imageProvider.js';
-import { JobManager } from '../jobManager.js';
+import { ComfyUiProvider } from '../selfie/providers/comfyuiProvider.js';
+import { IMAGE_ERROR } from '../selfie/imageProvider.js';
+import { JobManager } from '../selfie/jobManager.js';
 
 function deferred() {
   let resolve;

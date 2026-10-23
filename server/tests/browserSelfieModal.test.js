@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const source = fs.readFileSync(new URL('../../../src/browserSelfieModal.js', import.meta.url), 'utf8')
+const source = fs.readFileSync(new URL('../../src/browserSelfieModal.js', import.meta.url), 'utf8')
   .replace('export function handleBrowserSelfieModal', 'function handleBrowserSelfieModal');
 const origin = 'http://localhost:5173';
 const imagePath = `/api/selfies/${'a'.repeat(32)}`;

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { SpeechController } from '../../speechController.js';
-import { SpeechPlayback, TurnState } from '../../../src/speechPlayback.js';
-import { planSelfie } from '../planner.js';
-import { prepareSelfieJob } from '../backendLifecycle.js';
+import { SpeechController } from '../speechController.js';
+import { SpeechPlayback, TurnState } from '../../src/speechPlayback.js';
+import { planSelfie } from '../selfie/planner.js';
+import { prepareSelfieJob } from '../selfie/backendLifecycle.js';
 
 function deferred() {
   let resolve;
@@ -182,7 +182,7 @@ test('streamed chat sentences share one ID and failed partial audio waits for pl
 // Execute the real input branch with fake providers, without starting the backend
 // or loading credentials. This catches stale results in the handler's catch/finally.
 function inputHandler(socket, controller, transcribeAudio, generateReplyStream = async function* () {}) {
-  const source = fs.readFileSync(new URL('../../index.js', import.meta.url), 'utf8');
+  const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
   const start = source.indexOf("    if (msg.type !== 'audio_input' && msg.type !== 'text_input') return;");
   const end = source.indexOf('\n  });\n});', start);
   assert.ok(start >= 0 && end > start);

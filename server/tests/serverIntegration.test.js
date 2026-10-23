@@ -8,11 +8,11 @@ import path from 'node:path';
 import express from 'express';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createServer as createViteServer } from 'vite';
-import viteConfig from '../../../vite.config.js';
-import { startProductionStaticServer } from '../../../desktop-companion/src/main/staticServer.js';
-import { JobManager } from '../jobManager.js';
-import { installSelfieLifecycle } from '../backendLifecycle.js';
-import { installSelfieImagePolicy, installSelfieImageRoutes, isLocalImageRequest } from '../imageRoutes.js';
+import viteConfig from '../../vite.config.js';
+import { startProductionStaticServer } from '../../desktop-companion/src/main/staticServer.js';
+import { JobManager } from '../selfie/jobManager.js';
+import { installSelfieLifecycle } from '../selfie/backendLifecycle.js';
+import { installSelfieImagePolicy, installSelfieImageRoutes, isLocalImageRequest } from '../selfie/imageRoutes.js';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=', 'base64');
 const PLAN = { slots: {}, positivePrompt: 'portrait', negativePrompt: 'blur', caption: 'Ini fotonya sayang.', emotion: 'sayang' };

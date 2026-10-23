@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { installSelfieFeatureControl, disabledSelfieResult } from '../featureControl.js';
-import { prepareSelfieJob } from '../backendLifecycle.js';
-import { SpeechController } from '../../speechController.js';
+import { installSelfieFeatureControl, disabledSelfieResult } from '../selfie/featureControl.js';
+import { prepareSelfieJob } from '../selfie/backendLifecycle.js';
+import { SpeechController } from '../speechController.js';
 
 function harness(socket = {}) {
   const events = [];
@@ -64,7 +64,7 @@ test('feature control remains per socket and preserves a supplied setting', () =
 });
 
 test('the real selfie input branch skips provider and planner while disabled and still replies', async () => {
-  const source = fs.readFileSync(new URL('../../index.js', import.meta.url), 'utf8');
+  const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
   const start = source.indexOf("    if (msg.type !== 'audio_input' && msg.type !== 'text_input') return;");
   const end = source.indexOf('\n  });\n});', start);
   assert.ok(start >= 0 && end > start);

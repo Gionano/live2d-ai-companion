@@ -6,8 +6,8 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
-import { JobManager } from '../jobManager.js';
-import { installSelfieLifecycle, prepareSelfieJob } from '../backendLifecycle.js';
+import { JobManager } from '../selfie/jobManager.js';
+import { installSelfieLifecycle, prepareSelfieJob } from '../selfie/backendLifecycle.js';
 
 const plan = {
   slots: {},

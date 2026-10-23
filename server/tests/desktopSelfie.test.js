@@ -6,7 +6,7 @@ import os from 'node:os';
 import vm from 'node:vm';
 import { pathToFileURL } from 'node:url';
 import { EventEmitter, once } from 'node:events';
-import { JobManager } from '../jobManager.js';
+import { JobManager } from '../selfie/jobManager.js';
 
 const TOKEN = 'a'.repeat(32);
 const IMAGE_URL = `http://localhost:8787/api/selfies/${TOKEN}`;
@@ -78,7 +78,7 @@ function harness(t, sender = async () => true) {
     },
     clearTimeout(timer) { timers.delete(timer); },
   });
-  const source = fs.readFileSync(new URL('../../../desktop-companion/src/main/selfieWindowManager.js', import.meta.url), 'utf8');
+  const source = fs.readFileSync(new URL('../../desktop-companion/src/main/selfieWindowManager.js', import.meta.url), 'utf8');
   const start = source.indexOf('export class SelfieWindowManager');
   const end = source.indexOf('export const selfieWindowManager', start);
   vm.runInContext(source.slice(start, end).replace('export class', 'class') + '\nglobalThis.Manager = SelfieWindowManager;', context);
@@ -164,7 +164,7 @@ test('popup cannot invoke the overlay capture or generic desktop IPC APIs', () =
   const context = vm.createContext({
     URL, CONFIG: { frontendUrl: 'http://localhost:5173' }, logger: { info() {}, warn() {}, error() {} },
   });
-  const source = fs.readFileSync(new URL('../../../desktop-companion/src/main/security.js', import.meta.url), 'utf8');
+  const source = fs.readFileSync(new URL('../../desktop-companion/src/main/security.js', import.meta.url), 'utf8');
   vm.runInContext(source.replace(/^import .*;\r?\n/gm, '').replaceAll('export function', 'function'), context);
   context.registerTrustedDesktopWindow(overlay);
   const trusted = { sender: contents, senderFrame: contents.mainFrame };

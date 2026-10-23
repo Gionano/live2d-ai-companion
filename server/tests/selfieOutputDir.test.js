@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
-import packageSelfieConfig from '../../../desktop-companion/scripts/packageSelfieConfig.js';
-import { resolveLocalSelfieOutputDir } from '../../../desktop-companion/src/main/selfieOutputDir.js';
+import packageSelfieConfig from '../../desktop-companion/scripts/packageSelfieConfig.js';
+import { resolveLocalSelfieOutputDir } from '../../desktop-companion/src/main/selfieOutputDir.js';
 
 function fixture(t) {
   const serverRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'selfie-local-config-'));
@@ -20,7 +20,7 @@ function fixture(t) {
 
 // Exercise the backend loader with a fixture root while retaining its actual resolution rules.
 function serverOutputDir(serverRoot) {
-  const source = fs.readFileSync(new URL('../config.js', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../selfie/config.js', import.meta.url), 'utf8')
     .replace(/^import .*;\r?\n/gm, '')
     .replace(/^export const ROOT_DIR = .*;$/m, '')
     .replace(/^export /gm, '');
@@ -81,7 +81,7 @@ test('chosen config files reject missing, invalid JSON, and malformed directorie
 });
 
 test('electron-builder selects the ESM packaging hook that writes the narrow local snapshot', () => {
-  const manifest = JSON.parse(fs.readFileSync(new URL('../../../desktop-companion/package.json', import.meta.url), 'utf8'));
+  const manifest = JSON.parse(fs.readFileSync(new URL('../../desktop-companion/package.json', import.meta.url), 'utf8'));
   assert.equal(manifest.build.afterPack, './scripts/packageSelfieConfig.js');
   assert.equal(typeof packageSelfieConfig, 'function');
   assert.equal(manifest.build.files.includes('src/**/*'), true);

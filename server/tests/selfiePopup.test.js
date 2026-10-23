@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const popupHtml = fs.readFileSync(new URL('../../../desktop-companion/src/popup/selfiePopup.html', import.meta.url), 'utf8');
+const popupHtml = fs.readFileSync(new URL('../../desktop-companion/src/popup/selfiePopup.html', import.meta.url), 'utf8');
 const scripts = [...popupHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
 
 function createPopup(overrides = {}, imageOrigin = 'http://127.0.0.1:8787') {

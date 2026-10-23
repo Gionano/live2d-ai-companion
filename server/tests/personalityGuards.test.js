@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const PERSONALITY_URL = new URL('../../personality.js', import.meta.url);
+const PERSONALITY_URL = new URL('../personality.js', import.meta.url);
 const MIN_ADULT_AGE = 18;
 const ENGLISH_SMALL = [
   'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',

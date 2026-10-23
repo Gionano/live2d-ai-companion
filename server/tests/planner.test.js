@@ -2,16 +2,16 @@
 // planner.test.js  (unit tests untuk Fase B)
 // Menguji: deteksi intent, validasi slot, perakitan prompt, pembatas konten,
 // dan fallback saat JSON rusak.
-// Dijalankan dengan: node --test server/selfie/tests/planner.test.js
+// Run with: node --test server/tests/planner.test.js
 // ---------------------------------------------------------------------------
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { detectSelfieIntent } from '../intent.js';
-import { checkModeration } from '../moderation.js';
-import { matchSlot, normalizeSlots, levenshteinDistance, findClosestMatch } from '../slotMatcher.js';
-import { buildPrompt, loadCharacterCard } from '../promptBuilder.js';
-import { parsePlannerJson, planSelfie } from '../planner.js';
+import { detectSelfieIntent } from '../selfie/intent.js';
+import { checkModeration } from '../selfie/moderation.js';
+import { matchSlot, normalizeSlots, levenshteinDistance, findClosestMatch } from '../selfie/slotMatcher.js';
+import { buildPrompt, loadCharacterCard } from '../selfie/promptBuilder.js';
+import { parsePlannerJson, planSelfie } from '../selfie/planner.js';
 
 test('1. Deteksi Intent Selfie (Teks STT / Typed)', async (t) => {
   await t.test('mengenali berbagai variasi permintaan selfie', () => {
