@@ -17,6 +17,7 @@
   },
   "build": {
     "appId": "com.amika.desktopcompanion",
+    "afterPack": "./scripts/packageSelfieConfig.js",
     "productName": "Amika Desktop Companion",
     "directories": {
       "output": "dist-electron"

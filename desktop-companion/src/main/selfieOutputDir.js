@@ -21,6 +21,14 @@ function isHomeRelative(value) {
   return value === '~' || value.startsWith('~/') || value.startsWith('~\\');
 }
 
+// A bundled relative path keeps the external server root used during packaging.
+// Leave home/default values unresolved until the installed user's main process reads them.
+export function createPackagedSelfieConfig(configPath) {
+  const outputDir = readLocalSelfieOutputDir(configPath, { allowMissing: true });
+  return { outputDir: outputDir && !isHomeRelative(outputDir) && !path.isAbsolute(outputDir)
+    ? path.resolve(path.dirname(configPath), outputDir) : outputDir };
+}
+
 export function resolveLocalSelfieOutputDir({ isPackaged = false, resourcesPath, serverRoot, configPath } = {}) {
   if (configPath && !path.isAbsolute(configPath)) throw new Error('SELFIE_CONFIG_PATH must be absolute');
   const sourcePath = configPath || path.join(isPackaged ? resourcesPath : serverRoot, 'selfie.config.json');

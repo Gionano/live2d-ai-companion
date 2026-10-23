@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
+import packageSelfieConfig from '../../../desktop-companion/scripts/packageSelfieConfig.js';
 import { resolveLocalSelfieOutputDir } from '../../../desktop-companion/src/main/selfieOutputDir.js';
 
 function fixture(t) {
@@ -28,20 +29,30 @@ function serverOutputDir(serverRoot) {
   return context.loadSelfieConfig().outputDir;
 }
 
-test('development gallery folder matches backend default, absolute, relative, and home paths', (t) => {
+test('development and installed gallery folders match backend default, absolute, relative, and home paths', (t) => {
   const f = fixture(t);
   for (const outputDir of ['', '  ', path.join(f.serverRoot, 'absolute-photos'), 'photos', '../shared-photos',
     '~', '~/Pictures/CustomSelfies', '~\\Pictures\\CustomSelfies']) {
     f.write({ outputDir, provider: 'comfyui', comfyUrl: 'http://private-provider', privateSetting: '/private/path' });
     const expected = serverOutputDir(f.serverRoot);
     assert.equal(resolveLocalSelfieOutputDir({ serverRoot: f.serverRoot }), expected, `development: ${outputDir}`);
+    packageSelfieConfig({ appOutDir: f.appOutDir, packager: { projectDir: f.projectDir } });
+    assert.equal(resolveLocalSelfieOutputDir({ isPackaged: true, resourcesPath: f.resourcesPath }), expected, `installed: ${outputDir}`);
+    const bundled = JSON.parse(fs.readFileSync(path.join(f.resourcesPath, 'selfie.config.json'), 'utf8'));
+    assert.deepEqual(Object.keys(bundled), ['outputDir']);
+    if (outputDir.startsWith('~')) assert.equal(bundled.outputDir, outputDir);
+    if (!outputDir.trim()) assert.equal(bundled.outputDir, '');
+    if (outputDir === 'photos') assert.equal(bundled.outputDir, path.join(f.serverRoot, 'photos'));
   }
 });
 
-test('missing development config follows backend defaults', (t) => {
+test('missing development config follows backend defaults and gets a default installed snapshot', (t) => {
   const f = fixture(t);
   const expected = serverOutputDir(f.serverRoot);
   assert.equal(resolveLocalSelfieOutputDir({ serverRoot: f.serverRoot }), expected);
+  packageSelfieConfig({ appOutDir: f.appOutDir, packager: { projectDir: f.projectDir } });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.resourcesPath, 'selfie.config.json'), 'utf8')), { outputDir: '' });
+  assert.equal(resolveLocalSelfieOutputDir({ isPackaged: true, resourcesPath: f.resourcesPath }), expected);
 });
 
 test('main-only local config override keeps an external backend folder when packaged settings differ', (t) => {
@@ -65,5 +76,13 @@ test('chosen config files reject missing, invalid JSON, and malformed directorie
     fs.writeFileSync(f.configPath, invalid);
     assert.throws(() => resolveLocalSelfieOutputDir({ serverRoot: f.serverRoot }), /Cannot read local|Invalid local/);
     assert.throws(() => resolveLocalSelfieOutputDir({ configPath: f.configPath, isPackaged: true, resourcesPath: f.resourcesPath }), /Cannot read local|Invalid local/);
+    assert.throws(() => packageSelfieConfig({ appOutDir: f.appOutDir, packager: { projectDir: f.projectDir } }), /Cannot read local|Invalid local/);
   }
+});
+
+test('electron-builder selects the ESM packaging hook that writes the narrow local snapshot', () => {
+  const manifest = JSON.parse(fs.readFileSync(new URL('../../../desktop-companion/package.json', import.meta.url), 'utf8'));
+  assert.equal(manifest.build.afterPack, './scripts/packageSelfieConfig.js');
+  assert.equal(typeof packageSelfieConfig, 'function');
+  assert.equal(manifest.build.files.includes('src/**/*'), true);
 });
