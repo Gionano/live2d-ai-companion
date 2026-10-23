@@ -58,3 +58,27 @@ Test: "pap dong" -> short line, async job, events in log; chat works during job;
 3. Tray: "Pap feature" on/off toggle; "Pap gallery" (open outputDir or simple gallery of last 20).
 4. Security: local page, narrow preload (contextIsolation, no nodeIntegration), load images only from the localhost endpoint origin, no remote content.
 5. Non-Electron browser: in-page modal fallback.
+
+### Cancellation and reconnect behavior
+
+Cancel delivery acknowledges the request, not completion. The browser keeps the job visible as
+`Membatalkan...` until `selfie_cancelled` or `selfie_failed` arrives. If generation finishes first,
+`selfie_ready` still displays the image; a late cancellation acknowledgment cannot dismiss it.
+Escape closes the browser dialog in every state and restores focus to the previous control.
+
+`selfie_snapshot` is authoritative: `{ activeJobId: string | null, events: [...] }` carries the
+active job's started/latest-progress events or ready result. Clients reset stale state and timers
+before replaying these events. Completed results have `activeJobId: null` and one ready event;
+an empty event list hides an existing dialog without creating a new one.
+Ready results use `autoCloseSeconds` from the backend, defaulting to 30; zero keeps the result open.
+
+Placement retries a compact card when normal candidates overlap the avatar. If every compact
+candidate still overlaps, it uses the smallest intersection and logs a warning. Display changes
+retry the requested size, including after zoom/shrink. Every resize publishes the actual layout.
+Result cards scroll whenever content overflows; captions wrap and action rows remain reachable.
+Gallery actions read local configuration in the desktop main process and open only an existing
+configured directory; files, missing paths, traversal, and symlink/junction escapes are rejected.
+See [Desktop selfie packaging](desktopSelfiePackaging.md) for installed gallery configuration.
+HTTP `/api/selfies/settings` exposes only server capability (`enabled`) and `autoCloseSeconds`.
+It requires matching Origin or same-origin/none Fetch-Site metadata, retains the localhost Host and
+loopback-only checks, and sends no-store responses without CORS headers.
