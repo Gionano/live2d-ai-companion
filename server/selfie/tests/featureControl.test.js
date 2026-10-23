@@ -8,7 +8,8 @@ import { SpeechController } from '../../speechController.js';
 function harness(socket = {}) {
   const events = [];
   let snapshots = 0;
-  const snapshot = { type: 'selfie_started', jobId: 'active-job', etaSeconds: null };
+  const snapshot = { type: 'selfie_snapshot', activeJobId: 'active-job',
+    events: [{ type: 'selfie_started', jobId: 'active-job', etaSeconds: null }] };
   const manager = {
     config: { outputDir: 'configured/selfies' },
     sendSnapshot(send) { snapshots++; send(snapshot); },
@@ -31,20 +32,21 @@ test('feature control defaults enabled without sending or accepting malformed se
   assert.deepEqual(h.events, []);
 });
 
-test('disabling confirms the configured gallery directory and re-enabling restores the snapshot', () => {
+test('disabling confirms feature state without output paths and re-enabling restores the snapshot', () => {
   const h = harness();
   assert.equal(h.handle({ type: 'selfie_feature', enabled: false }), true);
   assert.equal(h.socket.selfieEnabled, false);
   assert.equal(h.snapshots, 0);
-  assert.deepEqual(h.events, [{ type: 'selfie_feature', enabled: false, outputDir: 'configured/selfies' }]);
+  assert.deepEqual(h.events, [{ type: 'selfie_feature', enabled: false }]);
   assert.equal(disabledSelfieResult(h.socket).reason, 'FEATURE_DISABLED');
 
   assert.equal(h.handle({ type: 'selfie_feature', enabled: true }), true);
   assert.equal(h.snapshots, 1);
   assert.equal(disabledSelfieResult(h.socket), null);
   assert.deepEqual(h.events.slice(1), [
-    { type: 'selfie_feature', enabled: true, outputDir: 'configured/selfies' },
-    { type: 'selfie_started', jobId: 'active-job', etaSeconds: null },
+    { type: 'selfie_feature', enabled: true },
+    { type: 'selfie_snapshot', activeJobId: 'active-job',
+      events: [{ type: 'selfie_started', jobId: 'active-job', etaSeconds: null }] },
   ]);
 });
 

@@ -10,7 +10,7 @@ function createPopup(overrides = {}, imageOrigin = 'http://127.0.0.1:8787') {
   const elements = new Map();
   const intervals = new Map();
   const timeouts = new Map();
-  const calls = { close: 0, cancel: [], resize: [], handshake: 0 };
+  const calls = { close: 0, cancel: [], resize: [], resizeModes: [], save: [], copy: [], folder: 0, handshake: 0 };
   const policies = [];
   let onEvent;
   let nextTimer = 1;
@@ -56,11 +56,14 @@ function createPopup(overrides = {}, imageOrigin = 'http://127.0.0.1:8787') {
         onSelfieEvent: (handler) => { onEvent = handler; },
         ready: () => { assert.equal(typeof onEvent, 'function'); calls.handshake += 1; },
         closePopup: () => { calls.close += 1; },
-        resizeWindow: (width, height) => calls.resize.push({ width, height }),
+        resizeWindow: (width, height, zoomed) => {
+          calls.resize.push({ width, height });
+          calls.resizeModes.push(zoomed);
+        },
         cancelJob: (jobId) => { calls.cancel.push(jobId); return { ok: true, cancelled: true }; },
-        saveImage: async () => ({ saved: true }),
-        copyImage: async () => true,
-        openFolder: async () => true,
+        saveImage: async (url) => { calls.save.push(url); return { saved: true }; },
+        copyImage: async (url) => { calls.copy.push(url); return true; },
+        openFolder: async () => { calls.folder += 1; return true; },
         ...overrides,
       },
     },
@@ -108,6 +111,117 @@ test('accepted ready snapshots replace an old hidden popup job after feature ree
   assert.match(popup.element('selfie-img').src, /new/);
   popup.emit({ type: 'selfie_cancelled', jobId: 'old' });
   assert.equal(popup.element('state-ready').style.display, 'flex');
+});
+
+test('popup reset clears stale auto-close, feedback and image state before reconnect replay or none', async () => {
+  const popup = createPopup();
+  start(popup, 'old');
+  ready(popup, 'old', { autoCloseSeconds: 30 });
+  await popup.element('btn-copy').click();
+  assert.equal(popup.timeouts.size, 1);
+  popup.emit({ type: 'selfie_reset' });
+  assert.equal(popup.intervals.size, 0);
+  assert.equal(popup.timeouts.size, 0);
+  assert.equal(popup.element('selfie-img').src, undefined);
+  assert.equal(popup.element('state-ready').style.display, 'none');
+  assert.equal(popup.element('state-generating').style.display, 'none');
+  ready(popup, 'new', { replaceJob: true, autoCloseSeconds: 0, cardSize: { width: 320, height: 120 } });
+  assert.equal(popup.element('state-ready').style.overflowY, 'auto');
+  assert.equal(popup.element('image-wrapper').style.minHeight, '64px');
+  assert.equal(popup.element('btn-save').disabled, false);
+  popup.emit({ type: 'selfie_layout', jobId: 'new', cardSize: { width: 360, height: 520 } });
+  assert.equal(popup.element('state-ready').style.overflowY, 'auto');
+  assert.equal(popup.element('image-wrapper').style.minHeight, '0');
+});
+
+test('ready content can scroll at every size and preserves caption and action rows', async () => {
+  const readyStyles = popupHtml.match(/#state-ready\s*\{([^}]+)\}/)[1];
+  assert.match(readyStyles, /min-height:\s*0;/);
+  assert.match(readyStyles, /overflow-y:\s*auto;/);
+  assert.match(popupHtml, /#state-ready > :not\(\.image-preview-wrapper\)\s*\{\s*flex-shrink:\s*0;/);
+  assert.match(popupHtml, /\.caption-box\s*\{[^}]*overflow-wrap:\s*anywhere;/);
+  assert.match(popupHtml, /\.action-buttons\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit, minmax\(80px, 1fr\)\);/);
+
+  for (const cardSize of [{ width: 320, height: 120 }, { width: 200, height: 520 }, { width: 360, height: 520 }]) {
+    const popup = createPopup();
+    const caption = 'Ini fotonya buat kamu. '.repeat(80);
+    ready(popup, 'first', { cardSize, caption, autoCloseSeconds: 0 });
+    assert.equal(popup.element('state-ready').style.overflowY, 'auto');
+    assert.equal(popup.element('caption-box').textContent, `"${caption}"`);
+    for (const id of ['btn-close', 'btn-save', 'btn-copy', 'btn-folder']) {
+      assert.equal(popup.element(id).hidden, false, `${id} must remain available at ${cardSize.width}x${cardSize.height}`);
+      assert.equal(popup.element(id).disabled, false);
+    }
+    await popup.element('btn-save').click();
+    await popup.element('btn-copy').click();
+    await popup.element('btn-folder').click();
+    assert.equal(popup.calls.save.length, 1);
+    assert.equal(popup.calls.copy.length, 1);
+    assert.equal(popup.calls.folder, 1);
+    await popup.element('btn-close').click();
+    assert.equal(popup.calls.close, 1);
+  }
+});
+
+test('zoom, display change and shrink consume the actual placement and clear compact sizing', async () => {
+  const popup = createPopup();
+  ready(popup, 'first', { cardSize: { width: 320, height: 120 }, autoCloseSeconds: 0 });
+  assert.equal(popup.element('image-wrapper').style.minHeight, '64px');
+  await popup.element('image-wrapper').click();
+  assert.equal(popup.calls.resizeModes.at(-1), true);
+
+  popup.emit({ type: 'selfie_layout', jobId: 'first', cardSize: { width: 576, height: 448 }, zoomed: true });
+  assert.equal(popup.element('image-wrapper').style.minHeight, '64px');
+  popup.emit({ type: 'selfie_layout', jobId: 'first', cardSize: { width: 720, height: 720 }, zoomed: true });
+  assert.equal(popup.element('image-wrapper').style.minHeight, '0');
+  assert.equal(popup.element('zoom-overlay').style.display, 'flex');
+
+  popup.element('document').key('Escape');
+  assert.equal(popup.calls.resizeModes.at(-1), false);
+  assert.deepEqual(popup.calls.resize.at(-1), { width: 320, height: 120 }, 'Zoom layout must not replace the last card dimensions');
+  popup.emit({ type: 'selfie_layout', jobId: 'first', cardSize: { width: 360, height: 520 }, zoomed: false });
+  assert.equal(popup.element('zoom-overlay').style.display, 'none');
+  assert.equal(popup.element('image-wrapper').style.minHeight, '0');
+  assert.equal(popup.element('state-ready').style.overflowY, 'auto');
+
+  popup.emit({ type: 'selfie_layout', jobId: 'first', cardSize: { width: 300, height: 150 }, zoomed: false });
+  assert.equal(popup.element('image-wrapper').style.minHeight, '64px');
+  popup.emit({ type: 'selfie_layout', jobId: 'first', cardSize: { width: 360, height: 520 }, zoomed: false });
+  popup.emit({ type: 'selfie_layout', jobId: 'old', cardSize: { width: 320, height: 120 }, zoomed: false });
+  assert.equal(popup.element('image-wrapper').style.minHeight, '0', 'A stale layout cannot restore compact styling');
+  await popup.element('image-wrapper').click();
+  popup.element('document').key('Escape');
+  assert.deepEqual(popup.calls.resize.at(-1), { width: 360, height: 520 });
+  assert.equal(popup.intervals.size, 0);
+});
+
+test('same-job reconnect reset isolates a pending popup cancellation callback', async () => {
+  let finish;
+  const popup = createPopup({ cancelJob: () => new Promise(resolve => { finish = resolve; }) });
+  start(popup, 'same');
+  const pending = popup.element('btn-cancel').click();
+  popup.emit({ type: 'selfie_reset' });
+  start(popup, 'same');
+  popup.emit({ type: 'selfie_progress', jobId: 'same', value: 2, max: 4 });
+  finish({ ok: false });
+  await pending;
+  assert.equal(popup.element('progress-text').textContent, 'Memproses foto... (50%)');
+  assert.equal(popup.element('btn-cancel').textContent, 'Batal');
+  assert.equal(popup.element('btn-cancel').disabled, false);
+});
+
+test('same-job reconnect ready isolates a pending popup image action callback', async () => {
+  let finish;
+  const popup = createPopup({ copyImage: () => new Promise(resolve => { finish = resolve; }) });
+  ready(popup, 'same', { autoCloseSeconds: 0 });
+  const pending = popup.element('btn-copy').click();
+  popup.emit({ type: 'selfie_reset' });
+  ready(popup, 'same', { replaceJob: true, autoCloseSeconds: 0 });
+  finish({ copied: true });
+  await pending;
+  assert.equal(popup.element('btn-copy').innerHTML, 'btn-copy');
+  assert.notEqual(popup.element('btn-copy').textContent, 'Tersalin');
+  assert.equal(popup.timeouts.size, 0);
 });
 
 test('popup preserves unknown and zero ETA, and configured zero disables auto-close', () => {

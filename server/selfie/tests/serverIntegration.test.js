@@ -146,7 +146,9 @@ test('HTTP and WS serve only registered, unexpired images inside the real output
     assert.equal(response.headers['content-type'], 'image/png');
     assert.deepEqual(response.body, PNG);
     const reconnected = await connect(t, backend.baseUrl);
-    assert.deepEqual(await reconnected.waitFor('selfie_ready'), ready);
+    assert.deepEqual(await reconnected.waitFor('selfie_snapshot'), {
+      type: 'selfie_snapshot', activeJobId: null, events: [ready],
+    });
   });
 
   const register = (token, filePath, timestamp = Date.now()) => {
@@ -208,6 +210,47 @@ test('HTTP and WS serve only registered, unexpired images inside the real output
   });
 });
 
+test('selfie settings expose capability and auto-close only to same-origin local requests', async (t) => {
+  const backend = await createBackend(t);
+  const settingsUrl = `${backend.baseUrl}/api/selfies/settings`;
+  for (const autoCloseSeconds of [30, 0, 12]) {
+    backend.manager.config.autoCloseSeconds = autoCloseSeconds;
+    for (const headers of [{ 'Sec-Fetch-Site': 'none' }, { 'Sec-Fetch-Site': 'same-origin' },
+      { Origin: backend.baseUrl }, { Origin: backend.baseUrl, 'Sec-Fetch-Site': 'same-origin' }]) {
+      const local = await get(settingsUrl, headers);
+      assertPrivateResponse(local, 200);
+      assert.deepEqual(JSON.parse(local.body.toString()), { enabled: true, autoCloseSeconds });
+      assert.equal(local.body.toString().includes(backend.outputDir), false);
+      assert.equal(local.body.toString().includes('outputDir'), false);
+    }
+  }
+  backend.manager.config.allowLan = true;
+  for (const headers of [
+    {},
+    { 'X-Forwarded-For': '192.168.1.50' },
+    { 'X-Forwarded-For': '127.0.0.1, 192.168.1.50' },
+    { Host: 'foreign.example' },
+    { 'X-Forwarded-Host': 'foreign.example' },
+    { Origin: 'http://foreign.example' },
+    { Origin: 'null' },
+    { Origin: `${backend.baseUrl}/other` },
+    { Origin: backend.baseUrl.replace('127.0.0.1', 'localhost') },
+    { Origin: backend.baseUrl.replace('http:', 'https:') },
+    { Origin: 'http://localhost:5173', 'Sec-Fetch-Site': 'same-origin' },
+    { Origin: backend.baseUrl, 'Sec-Fetch-Site': 'cross-site' },
+    { Origin: backend.baseUrl, 'Sec-Fetch-Site': 'same-site' },
+    { 'Sec-Fetch-Site': 'cross-site' },
+    { 'Sec-Fetch-Site': 'same-site' },
+    { 'Sec-Fetch-Site': 'unknown' },
+  ]) assertPrivateResponse(await get(settingsUrl, headers), 403);
+  assertPrivateResponse(await get(settingsUrl.replace('/settings', '/SETTINGS/'), { Origin: 'null' }), 403);
+  assertPrivateResponse(await get(settingsUrl, { Origin: 'http://foreign.example', 'Content-Type': 'application/json' }, 'POST', '{broken'), 403);
+  assertPrivateResponse(await get(settingsUrl, {
+    Origin: 'http://foreign.example', 'Access-Control-Request-Method': 'GET',
+  }, 'OPTIONS'), 403);
+  assert.equal(isLocalImageRequest({ socket: { remoteAddress: '192.168.1.50' }, headers: {} }), false);
+});
+
 for (const frontend of ['Vite dev', 'Electron production']) {
   test(`${frontend} proxies the genuine WS image URL and preserves image access policy`, async (t) => {
     const backend = await createBackend(t);
@@ -251,6 +294,14 @@ for (const frontend of ['Vite dev', 'Electron production']) {
     assertPrivateResponse(await get(baseUrl + ready.imageUrl, { 'X-Forwarded-For': '127.0.0.1, 192.168.1.50' }), 403);
     assert.match(backend.requests.at(-1).headers['x-forwarded-for'], /192\.168\.1\.50,\s*(?:::ffff:)?127\.0\.0\.1$/);
     assertPrivateResponse(await get(baseUrl + ready.imageUrl, { Host: 'attacker.example', 'X-Forwarded-Host': 'localhost' }), 403);
+    const settingsUrl = `${baseUrl}/api/selfies/settings`;
+    const settings = await get(settingsUrl, { Origin: baseUrl, 'Sec-Fetch-Site': 'same-origin' });
+    assertPrivateResponse(settings, 200);
+    assert.deepEqual(JSON.parse(settings.body.toString()), { enabled: true, autoCloseSeconds: 30 });
+    assert.equal(settings.body.toString().includes('outputDir'), false);
+    assertPrivateResponse(await get(settingsUrl, { Origin: 'http://foreign.example' }), 403);
+    assertPrivateResponse(await get(settingsUrl, { Origin: baseUrl, 'Sec-Fetch-Site': 'same-site' }), 403);
+    assertPrivateResponse(await get(settingsUrl, { Origin: 'http://foreign.example', 'X-Forwarded-Host': 'foreign.example' }), 403);
     assertPrivateResponse(await get(`${baseUrl}/api/selfies/unknown`, { Origin: 'http://localhost:5173' }), 404);
     assertPrivateResponse(await get(baseUrl + ready.imageUrl, { 'X-Forwarded-For': 'fe80::1%12' }), 403);
     assertPrivateResponse(await get(baseUrl + ready.imageUrl,

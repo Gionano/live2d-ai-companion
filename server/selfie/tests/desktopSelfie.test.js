@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import vm from 'node:vm';
+import { pathToFileURL } from 'node:url';
 import { EventEmitter, once } from 'node:events';
 import { JobManager } from '../jobManager.js';
 
@@ -15,7 +16,7 @@ function harness(t, sender = async () => true) {
   const windows = [];
   const timers = new Map();
   let nextTimer = 0;
-  const effects = { protections: 0, fetched: [], copied: [], folders: [], dialogs: [] };
+  const effects = { protections: 0, fetched: [], copied: [], folders: [], dialogs: [], warnings: [] };
   class FakeWindow extends EventEmitter {
     constructor(options = {}) {
       super();
@@ -24,7 +25,7 @@ function harness(t, sender = async () => true) {
       this.visible = false;
       this.destroyed = false;
       this.webContents = new EventEmitter();
-      this.webContents.mainFrame = {};
+      this.webContents.mainFrame = { url: 'http://localhost:5173/?mode=overlay' };
       this.webContents.sent = [];
       this.webContents.send = (channel, event) => this.webContents.sent.push({ channel, event });
       this.webContents.setWindowOpenHandler = (callback) => { this.windowOpen = callback; };
@@ -41,7 +42,11 @@ function harness(t, sender = async () => true) {
     setContentProtection(enabled) { this.protected = enabled; }
     setAlwaysOnTop(enabled) { this.onTop = enabled; }
     setIgnoreMouseEvents(enabled) { this.ignoreMouse = enabled; }
-    loadFile(file, options) { this.loaded = { file, options }; return Promise.resolve(); }
+    loadFile(file, options) {
+      this.loaded = { file, options };
+      this.webContents.mainFrame.url = `${pathToFileURL(file).href}?${new URLSearchParams(options.query)}`;
+      return Promise.resolve();
+    }
     showInactive() { this.visible = true; this.emit('show'); }
     hide() { this.visible = false; }
     destroy() { this.destroyed = true; this.emit('closed'); }
@@ -53,7 +58,7 @@ function harness(t, sender = async () => true) {
   const screen = new EventEmitter();
   screen.workArea = { x: 0, y: 0, width: 1200, height: 800 };
   screen.getDisplayMatching = () => ({ workArea: screen.workArea });
-  const config = { backendUrl: 'http://localhost:8787', selfiePopup: { autoCloseSeconds: 0 } };
+  const config = { frontendUrl: 'http://localhost:5173', backendUrl: 'http://localhost:8787', selfiePopup: { autoCloseSeconds: 0 } };
   const clipboard = { writeImage: (image) => effects.copied.push(image) };
   const nativeImage = { createFromBuffer: (buffer) => ({ buffer, isEmpty: () => false }) };
   const dialog = { showSaveDialog: async (...args) => { effects.dialogs.push(args); return { canceled: true }; } };
@@ -63,9 +68,9 @@ function harness(t, sender = async () => true) {
     return { ok: true, arrayBuffer: async () => Uint8Array.from([1, 2, 3]).buffer };
   };
   const context = vm.createContext({
-    path, fs, os, URL, Buffer, BrowserWindow: FakeWindow, ipcMain, screen, clipboard,
+    path, fs, os, URL, pathToFileURL, Buffer, BrowserWindow: FakeWindow, ipcMain, screen, clipboard,
     nativeImage, dialog, shell, fetch: fetchImage, CONFIG: config,
-    __dirname: path.resolve('desktop-companion/src/main'), logger: { info() {}, error() {} },
+    __dirname: path.resolve('desktop-companion/src/main'), logger: { info() {}, error() {}, warn: (...args) => effects.warnings.push(args) },
     setTimeout(callback) {
       const timer = { id: ++nextTimer, unref() {} };
       timers.set(timer, callback);
@@ -171,6 +176,77 @@ test('popup cannot invoke the overlay capture or generic desktop IPC APIs', () =
   ]) assert.throws(() => context.assertTrustedSender(event, 'desktop:capture-screen'), /Untrusted/);
 });
 
+test('every popup IPC and overlay relay rejects a wrong-origin main frame', async (t) => {
+  const h = harness(t);
+  h.relay({ type: 'selfie_started', jobId: 'one' });
+  const popup = h.manager.popupWindow;
+  const trustedUrl = popup.webContents.mainFrame.url;
+  for (const url of ['https://foreign.example/', pathToFileURL(path.resolve('AGENTS.md')).href]) {
+    popup.webContents.mainFrame.url = url;
+    for (const channel of h.handlers.keys()) {
+      assert.equal((await h.invoke(channel, IMAGE_URL)).ok, false, `${channel}: ${url}`);
+    }
+  }
+  popup.webContents.mainFrame.url = trustedUrl;
+  assert.equal((await h.invoke('selfie:popup-ready')).ok, true);
+  for (const url of ['https://foreign.example/', 'http://localhost:9999/', 'file:///index.html',
+    'http://user@localhost:5173/']) {
+    h.overlay.webContents.mainFrame.url = url;
+    h.relay({ type: 'selfie_started', jobId: 'intruder' });
+    assert.equal(h.manager.currentJobId, 'one');
+  }
+});
+
+test('authoritative reconnect replaces different completed job, replays same job and clears none in one popup', async (t) => {
+  const h = harness(t);
+  h.relay({ type: 'selfie_started', jobId: 'old' });
+  await h.invoke('selfie:popup-ready');
+  const popup = h.manager.popupWindow;
+  h.relay({ type: 'selfie_failed', jobId: 'old' });
+  const staleHide = [...h.timers.values()][0];
+  h.relay({ type: 'selfie_snapshot', activeJobId: null,
+    events: [{ type: 'selfie_ready', jobId: 'new', imageUrl: IMAGE_URL, autoCloseSeconds: 7 }] });
+  assert.equal(h.manager.currentJobId, 'new');
+  assert.equal(h.manager._jobState, 'ready');
+  assert.equal(h.timers.size, 0);
+  staleHide();
+  assert.equal(popup.visible, true);
+  assert.deepEqual(popup.webContents.sent.slice(-2).map(({ event }) => event.type), ['selfie_reset', 'selfie_ready']);
+  assert.equal(popup.webContents.sent.at(-1).event.autoCloseSeconds, 7);
+  await h.invoke('selfie:close-popup');
+  h.relay({ type: 'selfie_snapshot', activeJobId: null,
+    events: [{ type: 'selfie_ready', jobId: 'new', imageUrl: IMAGE_URL, autoCloseSeconds: 0 }] });
+  assert.equal(popup.visible, true);
+  assert.equal(popup.webContents.sent.at(-1).event.autoCloseSeconds, 0);
+  h.relay({ type: 'selfie_snapshot', activeJobId: 'running', events: [
+    { type: 'selfie_started', jobId: 'running' }, { type: 'selfie_progress', jobId: 'running', value: 2, max: 3 },
+  ] });
+  assert.equal(h.manager.currentJobId, 'running');
+  assert.equal(h.manager._jobState, 'running');
+  h.relay({ type: 'selfie_snapshot', activeJobId: null, events: [] });
+  assert.equal(popup.visible, false);
+  assert.equal(h.manager.currentJobId, null);
+  assert.equal(h.manager.currentImageUrl, null);
+  assert.equal(h.manager._jobState, null);
+  assert.equal(h.timers.size, 0);
+  assert.equal(popup.webContents.sent.at(-1).event.type, 'selfie_reset');
+  assert.equal(h.windows.length, 2);
+  assert.equal(h.manager.popupWindow, popup);
+});
+
+test('same-job reconnect running snapshot prevents an old terminal hide timer from hiding the popup', async (t) => {
+  const h = harness(t);
+  h.relay({ type: 'selfie_started', jobId: 'same' });
+  await h.invoke('selfie:popup-ready');
+  h.relay({ type: 'selfie_failed', jobId: 'same' });
+  const staleHide = [...h.timers.values()][0];
+  h.relay({ type: 'selfie_snapshot', activeJobId: 'same', events: [{ type: 'selfie_started', jobId: 'same' }] });
+  staleHide();
+  assert.equal(h.manager.popupWindow.visible, true);
+  assert.equal(h.manager._jobState, 'running');
+  assert.equal(h.timers.size, 0);
+});
+
 test('desktop placement finds a non-overlapping free side even when avatar shoulder alignment overflows', (t) => {
   const h = harness(t);
   h.screen.workArea = { x: 0, y: 0, width: 1000, height: 600 };
@@ -179,6 +255,108 @@ test('desktop placement finds a non-overlapping free side even when avatar shoul
   const bounds = h.manager.popupWindow.getBounds();
   assert.ok(bounds.x + bounds.width <= h.overlay.bounds.x);
   assert.ok(bounds.y >= 0 && bounds.y + bounds.height <= 600);
+});
+
+function intersectionArea(a, b) {
+  return Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x))
+    * Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+}
+
+for (const [width, height] of [[800, 600], [1024, 768]]) {
+  test(`desktop retries compact placement on ${width}x${height} and warns only for unavoidable overlap`, (t) => {
+    const h = harness(t);
+    h.screen.workArea = { x: 0, y: 0, width, height };
+    h.overlay.bounds = { x: (width - 420) / 2, y: 20, width: 420, height: height - 40 };
+    h.relay({ type: 'selfie_ready', jobId: 'one', imageUrl: IMAGE_URL });
+    const bounds = h.manager.popupWindow.getBounds();
+    assert.equal(bounds.width, 320);
+    assert.equal(bounds.height, 120);
+    assert.equal(intersectionArea(bounds, h.overlay.bounds), height === 600 ? 14904 : 2808);
+    assert.equal(h.effects.warnings.length, 1);
+    const positions = [
+      { x: 8, y: 60, width: 320, height: 120 },
+      { x: width - 328, y: 60, width: 320, height: 120 },
+      { x: 8, y: 8, width: 320, height: 120 },
+      { x: 8, y: height - 128, width: 320, height: 120 },
+    ];
+    assert.equal(intersectionArea(bounds, h.overlay.bounds), Math.min(...positions.map(position => intersectionArea(position, h.overlay.bounds))));
+    assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= width && bounds.y + bounds.height <= height);
+  });
+}
+
+test('display change retries original result size then compact candidates without overlaps when a free slot exists', async (t) => {
+  const h = harness(t);
+  h.screen.workArea = { x: 0, y: 0, width: 1024, height: 768 };
+  h.overlay.bounds = { x: 260, y: 250, width: 500, height: 500 };
+  h.relay({ type: 'selfie_ready', jobId: 'one', imageUrl: IMAGE_URL });
+  await h.invoke('selfie:popup-ready');
+  const popup = h.manager.popupWindow;
+  assert.equal(popup.bounds.height, 120);
+  assert.equal(intersectionArea(popup.bounds, h.overlay.bounds), 0);
+  assert.equal(h.effects.warnings.length, 0);
+  h.screen.workArea = { x: 0, y: 0, width: 800, height: 600 };
+  h.overlay.bounds = { x: 190, y: 20, width: 420, height: 560 };
+  h.screen.emit('display-metrics-changed');
+  assert.equal(popup.bounds.height, 120);
+  assert.equal(h.effects.warnings.length, 1);
+  assert.equal(popup.webContents.sent.at(-1).event.type, 'selfie_layout');
+  h.screen.workArea = { x: 0, y: 0, width: 1600, height: 1000 };
+  h.screen.emit('display-removed');
+  assert.equal(popup.bounds.width, 360);
+  assert.equal(popup.bounds.height, 520);
+  assert.equal(intersectionArea(popup.bounds, h.overlay.bounds), 0);
+  assert.equal(h.manager.popupWindow, popup);
+  assert.equal(h.windows.length, 2);
+});
+
+test('popup shrink keeps the full card request and every resize/display event publishes current layout', async (t) => {
+  const h = harness(t);
+  h.screen.workArea = { x: 0, y: 0, width: 800, height: 600 };
+  h.overlay.bounds = { x: 190, y: 20, width: 420, height: 560 };
+  h.relay({ type: 'selfie_ready', jobId: 'one', imageUrl: IMAGE_URL });
+  await h.invoke('selfie:popup-ready');
+  const popup = h.manager.popupWindow;
+  const compact = { ...popup.bounds };
+  assert.equal(compact.height, 120);
+  await h.invoke('selfie:resize-popup', { width: 720, height: 720, zoomed: true });
+  assert.equal(popup.webContents.sent.at(-1).event.type, 'selfie_layout');
+  assert.equal(popup.webContents.sent.at(-1).event.zoomed, true);
+  await h.invoke('selfie:resize-popup', { width: compact.width, height: compact.height, zoomed: false });
+  assert.equal(popup.bounds.height, 120);
+  assert.equal(h.manager._requestedSize.width, 360);
+  assert.equal(h.manager._requestedSize.height, 520);
+  assert.equal(popup.webContents.sent.at(-1).event.cardSize.height, 120);
+  assert.equal(popup.webContents.sent.at(-1).event.zoomed, false);
+  h.screen.workArea = { x: 0, y: 0, width: 1600, height: 1000 };
+  h.screen.emit('display-metrics-changed');
+  assert.equal(popup.bounds.width, 360);
+  assert.equal(popup.bounds.height, 520);
+  assert.equal(popup.webContents.sent.at(-1).event.cardSize.width, 360);
+  assert.equal(popup.webContents.sent.at(-1).event.cardSize.height, 520);
+  popup.bounds = { x: 624, y: 60, width: 280, height: 200 };
+  popup.emit('resize');
+  assert.equal(popup.webContents.sent.at(-1).event.cardSize.width, 280);
+  assert.equal(popup.webContents.sent.at(-1).event.cardSize.height, 200);
+  assert.equal(h.windows.length, 2);
+});
+
+test('shrinking after a display expansion exits the zoom cap and immediately restores full card layout', async (t) => {
+  const h = harness(t);
+  h.screen.workArea = { x: 0, y: 0, width: 800, height: 600 };
+  h.overlay.bounds = { x: 190, y: 20, width: 420, height: 560 };
+  h.relay({ type: 'selfie_ready', jobId: 'one', imageUrl: IMAGE_URL });
+  await h.invoke('selfie:popup-ready');
+  const popup = h.manager.popupWindow;
+  await h.invoke('selfie:resize-popup', { width: 720, height: 720, zoomed: true });
+  h.screen.workArea = { x: 0, y: 0, width: 1600, height: 1000 };
+  h.screen.emit('display-removed');
+  const beforeShrink = popup.webContents.sent.length;
+  const result = await h.invoke('selfie:resize-popup', { width: 320, height: 120, zoomed: false });
+  assert.equal(result.bounds.width, 360);
+  assert.equal(result.bounds.height, 520);
+  assert.equal(popup.webContents.sent.length, beforeShrink + 1);
+  assert.equal(popup.webContents.sent.at(-1).event.zoomed, false);
+  assert.equal(popup.webContents.sent.at(-1).event.cardSize.height, 520);
 });
 
 test('desktop reuses one popup across queued, ready, failed and cancelled jobs without stale hide timers', async (t) => {
@@ -261,6 +439,7 @@ test('desktop Save As writes selected file and gallery opens the configured outp
     fs.rmSync(directory, { recursive: true, force: true });
   });
   const output = path.join(directory, 'photos');
+  fs.mkdirSync(output);
   h.manager.outputDir = output;
   h.relay({ type: 'selfie_ready', jobId: 'one', imageUrl: IMAGE_URL });
   await h.invoke('selfie:popup-ready');
@@ -271,6 +450,46 @@ test('desktop Save As writes selected file and gallery opens the configured outp
   assert.equal((await h.invoke('selfie:open-folder')).ok, true);
   assert.equal(h.effects.folders[0], output);
   assert.equal(fs.existsSync(output), true);
+});
+
+test('gallery opens only an existing configured directory and rejects files, missing paths and traversal', async (t) => {
+  const h = harness(t);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'selfie-gallery-tests-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const gallery = path.join(directory, 'gallery');
+  fs.mkdirSync(gallery);
+  const file = path.join(directory, 'file.txt');
+  fs.writeFileSync(file, 'test');
+  for (const target of [file, path.join(directory, 'missing'), path.join(gallery, 'child') + `${path.sep}..`,
+    path.join(gallery, 'child') + `${path.sep}..${path.sep}..`, 'gallery']) {
+    h.manager.resolveOutputDir = async () => target;
+    assert.equal((await h.manager.openGalleryFolder()).ok, false, target);
+  }
+  assert.equal(h.effects.folders.length, 0);
+  assert.equal(fs.existsSync(path.join(directory, 'missing')), false);
+  h.manager.resolveOutputDir = async () => gallery;
+  h.manager.outputDir = file;
+  assert.equal((await h.manager.openGalleryFolder()).ok, true);
+  assert.deepEqual(h.effects.folders, [fs.realpathSync(gallery)]);
+  h.manager.resolveOutputDir = async () => { throw new Error('Backend unavailable'); };
+  assert.equal((await h.manager.openGalleryFolder()).ok, false);
+  assert.equal(h.effects.folders.length, 1);
+});
+
+test('gallery rejects symlink or junction escapes including ancestor redirects', async (t) => {
+  const h = harness(t);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'selfie-gallery-links-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const outside = path.join(directory, 'outside');
+  const linked = path.join(directory, 'gallery');
+  fs.mkdirSync(outside);
+  fs.mkdirSync(path.join(outside, 'photos'));
+  fs.symlinkSync(outside, linked, process.platform === 'win32' ? 'junction' : 'dir');
+  for (const target of [linked, path.join(linked, 'photos')]) {
+    h.manager.resolveOutputDir = async () => target;
+    assert.equal((await h.manager.openGalleryFolder()).ok, false, target);
+  }
+  assert.equal(h.effects.folders.length, 0);
 });
 
 test('popup Cancel reaches real JobManager with a fake provider and unavailable delivery is reported', async (t) => {

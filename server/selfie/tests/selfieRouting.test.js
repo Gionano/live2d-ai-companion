@@ -7,6 +7,8 @@ import vm from 'node:vm';
 const companionSource = fs.readFileSync(new URL('../../../src/companion.js', import.meta.url), 'utf8');
 const mainSource = fs.readFileSync(new URL('../../../desktop-companion/src/main/index.js', import.meta.url), 'utf8');
 const preloadSource = fs.readFileSync(new URL('../../../desktop-companion/src/preload/preload.cjs', import.meta.url), 'utf8');
+const securitySource = fs.readFileSync(new URL('../../../desktop-companion/src/main/security.js', import.meta.url), 'utf8')
+  .replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
 const clone = value => JSON.parse(JSON.stringify(value));
 const selfieTypes = ['selfie_started', 'selfie_progress', 'selfie_ready', 'selfie_failed', 'selfie_cancelled'];
 
@@ -133,6 +135,21 @@ test('all five browser selfie events use the modal and Cancel reaches the connec
   assert.equal(h.browserEvents[0].cancel('browser-job'), false);
 });
 
+test('authoritative reconnect snapshots reach desktop and browser before conversation filtering', () => {
+  const snapshot = {
+    type: 'selfie_snapshot', activeJobId: null,
+    events: [{ type: 'selfie_ready', jobId: 'last-ready', imageUrl: '/api/selfies/token', autoCloseSeconds: 0 }],
+  };
+  for (const desktop of [true, false]) {
+    const h = companionHarness({ desktop });
+    h.sockets[0].receive(snapshot);
+    h.sockets[0].receive({ type: 'selfie_snapshot', activeJobId: null, events: [] });
+    const forwarded = desktop ? h.forwarded : h.browserEvents.map(entry => entry.event);
+    assert.deepEqual(forwarded, [snapshot, { type: 'selfie_snapshot', activeJobId: null, events: [] }]);
+    assert.deepEqual(h.conversationEvents, []);
+  }
+});
+
 test('desktop Cancel reports disconnected and failed WS sends without a false acknowledgement', () => {
   const h = companionHarness();
   const cancel = { type: 'selfie_cancel', jobId: 'desktop-job' };
@@ -173,14 +190,14 @@ test('a late startup snapshot cannot overwrite a newer tray toggle', async () =>
   assert.deepEqual(h.sockets[0].sent, [{ type: 'selfie_feature', enabled: false }]);
 });
 
-test('gallery directory reaches desktop without conversation state and malformed messages are ignored', () => {
+test('renderer never forwards a gallery path and malformed messages are ignored', () => {
   const h = companionHarness();
   const event = { type: 'selfie_feature', enabled: true, outputDir: 'C:\\Pictures\\Selfies' };
   h.sockets[0].receive(event);
   h.sockets[0].receive(null);
   h.sockets[0].receive(1);
   h.sockets[0].listeners.get('message')({ data: 'not json' });
-  assert.deepEqual(h.settings, [event]);
+  assert.deepEqual(h.settings, []);
   assert.deepEqual(h.forwarded, []);
   assert.deepEqual(h.conversationEvents, []);
 });
@@ -230,11 +247,11 @@ test('overlay preload only forwards cancellation commands and acknowledges the a
   ]);
   unsubscribe();
   assert.equal(h.handlers.has('desktop:selfie-command'), false);
-  h.bridge.notifySelfieSettings({ outputDir: 'configured-path', ignored: 'extra' });
-  assert.deepEqual(h.sent.at(-1), { channel: 'desktop:selfie-settings', payload: { outputDir: 'configured-path' } });
+  assert.equal(h.bridge.notifySelfieSettings, undefined);
 });
 
-function mainHarness() {
+function mainHarness({ backendUrl = 'http://localhost:8787', resolveLocalOutputDir = () => path.resolve('configured-selfies'),
+  isPackaged = false, configPath } = {}) {
   const handlers = new Map();
   const timers = new Map();
   const sent = [];
@@ -247,6 +264,13 @@ function mainHarness() {
   const context = vm.createContext({
     overlayWindow,
     selfieWindowManager: { outputDir: 'initial-directory' },
+    URL,
+    CONFIG: { frontendUrl: 'http://localhost:5173', backendUrl, backendWorkingDir: path.resolve('.') },
+    logger: { info() {}, warn() {}, error() {} },
+    app: { isPackaged },
+    process: { resourcesPath: path.resolve('packaged-resources'), env: { SELFIE_CONFIG_PATH: configPath } },
+    resolveLocalSelfieOutputDir: resolveLocalOutputDir,
+    fetch: () => { throw new Error('Gallery configuration must stay local'); },
     ipcMain: { on: (channel, handler) => handlers.set(channel, handler) },
     randomUUID: () => `request-${++nextId}`,
     path,
@@ -257,6 +281,8 @@ function mainHarness() {
     },
     clearTimeout: timer => timers.delete(timer),
   });
+  vm.runInContext(securitySource, context, { filename: 'desktop-security.js' });
+  context.registerTrustedDesktopWindow(overlayWindow);
   const start = mainSource.indexOf('const selfieCommands = new Map();');
   const end = mainSource.indexOf('\n/**', start);
   const handlersStart = mainSource.indexOf('function registerIpcHandlers() {');
@@ -271,10 +297,11 @@ globalThis.pendingSelfieCommands = selfieCommands;`, context, { filename: 'main-
     context, handlers, timers, sent, overlayWindow,
     sender: { sender: overlayWindow.webContents, senderFrame: frame },
     send: message => context.sendSelfieCommand(message),
+    resolveOutputDir: () => context.resolveSelfieOutputDir(),
   };
 }
 
-test('main cancellation acknowledgements require the overlay window and its main frame', async () => {
+test('main cancellation acknowledgements require the overlay main frame and its trusted origin', async () => {
   const h = mainHarness();
   const task = h.send({ type: 'selfie_cancel', jobId: 'job-1' });
   const payload = { requestId: h.sent[0].payload.requestId, sent: true };
@@ -282,6 +309,11 @@ test('main cancellation acknowledgements require the overlay window and its main
   acknowledge({ sender: { mainFrame: h.sender.senderFrame }, senderFrame: h.sender.senderFrame }, payload);
   acknowledge({ sender: h.sender.sender, senderFrame: { url: h.sender.senderFrame.url } }, payload);
   acknowledge(h.sender, { ...payload, requestId: 'unknown-request' });
+  h.sender.senderFrame.url = 'https://foreign.example/?mode=overlay';
+  acknowledge(h.sender, payload);
+  h.sender.senderFrame.url = '';
+  acknowledge(h.sender, payload);
+  h.sender.senderFrame.url = 'http://localhost:5173/?mode=overlay';
   assert.equal(h.context.pendingSelfieCommands.size, 1);
   assert.equal(h.timers.size, 1);
   acknowledge(h.sender, payload);
@@ -307,28 +339,76 @@ test('main cancellation fails cleanly for timeout, destroyed overlay, and a send
   assert.equal(h.context.pendingSelfieCommands.size, 0);
 });
 
-test('gallery output directory IPC rejects unrelated windows, subframes, and relative paths', () => {
-  const h = mainHarness();
-  const update = h.handlers.get('desktop:selfie-settings');
-  const absolute = path.resolve('configured-selfies');
-  update({ sender: {}, senderFrame: h.sender.senderFrame }, { outputDir: absolute });
-  update({ sender: h.sender.sender, senderFrame: {} }, { outputDir: absolute });
-  update(h.sender, { outputDir: 'relative-path' });
-  update(h.sender, { outputDir: null });
-  assert.equal(h.context.selfieWindowManager.outputDir, 'initial-directory');
-  update(h.sender, { outputDir: absolute });
-  assert.equal(h.context.selfieWindowManager.outputDir, absolute);
+test('gallery output directory has no renderer IPC or HTTP dependency and uses main-only local configuration', async () => {
+  const requests = [];
+  const outputDir = path.resolve('configured-selfies');
+  const h = mainHarness({ resolveLocalOutputDir: options => { requests.push(options); return outputDir; } });
+  assert.equal(h.handlers.has('desktop:selfie-settings'), false);
+  assert.equal(await h.resolveOutputDir(), outputDir);
+  assert.equal(requests.length, 1);
+  assert.deepEqual(clone(requests[0]), {
+    isPackaged: false, resourcesPath: path.resolve('packaged-resources'), serverRoot: path.resolve('.'),
+  });
+});
+
+test('installed gallery configuration passes its local override and reports local resolution failures', async () => {
+  const configPath = path.resolve('external-server', 'selfie.config.json');
+  const requests = [];
+  const h = mainHarness({ isPackaged: true, configPath, resolveLocalOutputDir: options => { requests.push(options); return 'configured'; } });
+  assert.equal(await h.resolveOutputDir(), 'configured');
+  assert.equal(requests[0].isPackaged, true);
+  assert.equal(requests[0].configPath, configPath);
+  const failed = mainHarness({ resolveLocalOutputDir: () => { throw new Error('Invalid local selfie output directory'); } });
+  await assert.rejects(failed.resolveOutputDir(), /Invalid local selfie output directory/);
+});
+
+test('navigation and redirects both reject foreign origins and allow the registered frontend', () => {
+  const context = vm.createContext({ URL, CONFIG: { frontendUrl: 'http://localhost:5173' }, logger: { info() {}, warn() {}, error() {} } });
+  vm.runInContext(securitySource, context);
+  const handlers = new Map();
+  let openHandler;
+  context.hardenWindowNavigation({ webContents: {
+    on: (name, handler) => handlers.set(name, handler),
+    setWindowOpenHandler: handler => { openHandler = handler; },
+  } });
+  for (const name of ['will-navigate', 'will-redirect']) {
+    let prevented = 0;
+    const event = { preventDefault: () => { prevented++; } };
+    handlers.get(name)(event, 'https://foreign.example');
+    handlers.get(name)(event, 'http://localhost:5173/?mode=overlay');
+    handlers.get(name)(event, 'file:///unregistered.html');
+    assert.equal(prevented, 2);
+  }
+  assert.equal(openHandler({ url: 'http://localhost:5173' }).action, 'deny');
+});
+
+test('overlay CSP has no remote fonts and file trust is limited to the registered page', () => {
+  const context = vm.createContext({ URL, CONFIG: { frontendUrl: 'http://localhost:5173', backendUrl: 'http://localhost:8787' }, logger: { info() {}, warn() {}, error() {} } });
+  vm.runInContext(securitySource, context);
+  context.registerTrustedOrigin('file:///frontend/index.html');
+  assert.equal(context.isTrustedUrl('file:///frontend/index.html?mode=overlay'), true);
+  assert.equal(context.isTrustedUrl('file:///other/index.html'), false);
+  assert.equal(context.isTrustedUrl('http://user:secret@localhost:5173'), false);
+  let headersHandler;
+  context.configureSessionSecurity({
+    setPermissionCheckHandler() {}, setPermissionRequestHandler() {},
+    webRequest: { onHeadersReceived: handler => { headersHandler = handler; } },
+  });
+  let csp;
+  headersHandler({ url: 'http://localhost:5173/', responseHeaders: {} }, response => {
+    csp = response.responseHeaders['Content-Security-Policy'][0];
+  });
+  assert.match(csp, /font-src 'self' data:/);
+  assert.doesNotMatch(csp, /fonts\.googleapis\.com|fonts\.gstatic\.com/);
 });
 
 test('generic desktop IPC denies the popup and subframes even when their local URL is trusted', () => {
-  const source = fs.readFileSync(new URL('../../../desktop-companion/src/main/security.js', import.meta.url), 'utf8')
-    .replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
   const context = vm.createContext({
     URL,
     CONFIG: { frontendUrl: 'http://localhost:5173' },
     logger: { info() {}, warn() {}, error() {} },
   });
-  vm.runInContext(source, context, { filename: 'desktop-security.js' });
+  vm.runInContext(securitySource, context, { filename: 'desktop-security.js' });
   const mainFrame = { url: 'http://localhost:5173/?mode=overlay' };
   const window = { isDestroyed: () => false, webContents: { mainFrame } };
   const sender = { sender: window.webContents, senderFrame: mainFrame };
@@ -340,6 +420,12 @@ test('generic desktop IPC denies the popup and subframes even when their local U
   assert.throws(() => context.assertTrustedSender({ sender: { mainFrame: popupFrame }, senderFrame: popupFrame }), /Untrusted/);
   mainFrame.url = 'https://untrusted.example';
   assert.throws(() => context.assertTrustedSender(sender), /Untrusted/);
+  context.registerTrustedOrigin('http://127.0.0.1:49421');
+  context.registerTrustedDesktopWindow(window, 'http://127.0.0.1:49421/?mode=overlay');
+  mainFrame.url = 'http://localhost:5173';
+  assert.throws(() => context.assertTrustedSender(sender), /Untrusted/);
+  mainFrame.url = 'http://127.0.0.1:49421/?mode=overlay';
+  assert.equal(context.assertTrustedSender(sender), true);
   mainFrame.url = 'http://localhost:5173';
   window.isDestroyed = () => true;
   assert.throws(() => context.assertTrustedSender(sender), /Untrusted/);

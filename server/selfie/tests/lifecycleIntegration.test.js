@@ -167,7 +167,7 @@ test('each companion WS connection receives current progress or ready snapshot',
   });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
-  const connect = async (role = '', expectedCount = 2) => {
+  const connect = async (role = '', expectedCount = 1) => {
     const socket = new WebSocket(`ws://127.0.0.1:${server.address().port}/ws${role}`);
     const messages = [];
     const received = deferred();
@@ -181,16 +181,21 @@ test('each companion WS connection receives current progress or ready snapshot',
     return messages;
   };
 
+  assert.deepEqual(await connect(), [{ type: 'selfie_snapshot', activeJobId: null, events: [] }]);
   const submitted = await manager.submitJob({ plan, skipInitialSpeech: true });
   await started.promise;
   const first = await connect();
   const reconnect = await connect();
   for (const messages of [first, reconnect]) {
-    assert.equal(messages[0].type, 'selfie_started');
-    assert.equal(messages[0].jobId, submitted.jobId);
-    assert.equal(messages[0].etaSeconds, null);
-    assert.equal(messages[1].type, 'selfie_progress');
-    assert.equal(messages[1].percentage, 40);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].type, 'selfie_snapshot');
+    assert.equal(messages[0].activeJobId, submitted.jobId);
+    const replay = messages[0].events;
+    assert.equal(replay[0].type, 'selfie_started');
+    assert.equal(replay[0].jobId, submitted.jobId);
+    assert.equal(replay[0].etaSeconds, null);
+    assert.equal(replay[1].type, 'selfie_progress');
+    assert.equal(replay[1].percentage, 40);
   }
   const monitor = await connect('?role=monitor', 0);
   assert.deepEqual(monitor, []);
@@ -199,7 +204,7 @@ test('each companion WS connection receives current progress or ready snapshot',
   completed.resolve({ imagePath: path.join(directory, 'photo.png') });
   const readyEvent = await ready.promise;
   const afterCompletion = await connect('', 1);
-  assert.deepEqual(afterCompletion, [readyEvent]);
+  assert.deepEqual(afterCompletion, [{ type: 'selfie_snapshot', activeJobId: null, events: [readyEvent] }]);
 });
 
 test('backend SIGINT, SIGTERM, and server close await one interrupt and release before exit', async (t) => {

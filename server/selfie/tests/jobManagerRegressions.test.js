@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { JobManager } from '../jobManager.js';
+import { loadSelfieConfig } from '../config.js';
 
 const PLAN = {
   slots: {},
@@ -494,11 +495,18 @@ test('each connection snapshot replays started and the last progress only to tha
   manager.sendSnapshot((event) => secondClient.push(event));
 
   assert.deepEqual(firstClient, secondClient);
-  assert.deepEqual(firstClient.map((event) => event.type), ['selfie_started', 'selfie_progress']);
-  assert.ok(firstClient.every((event) => event.jobId === submitted.jobId));
-  assert.equal(firstClient[0].etaSeconds, null);
-  assert.equal(firstClient[1].value, 5);
-  assert.equal(firstClient[1].percentage, 63);
+  assert.equal(firstClient.length, 1);
+  assert.equal(firstClient[0].type, 'selfie_snapshot');
+  assert.equal(firstClient[0].activeJobId, submitted.jobId);
+  const replay = firstClient[0].events;
+  assert.deepEqual(replay.map((event) => event.type), ['selfie_started', 'selfie_progress']);
+  assert.ok(replay.every((event) => event.jobId === submitted.jobId));
+  assert.equal(replay[0].etaSeconds, null);
+  assert.equal(replay[1].value, 5);
+  assert.equal(replay[1].percentage, 63);
+  replay[1].value = 0;
+  assert.equal(manager.activeJob.lastProgress.value, 5, 'snapshot callers cannot change server state');
+  assert.equal(secondClient[0].events[1].value, 5);
   assert.equal(events.length, broadcastCount);
 });
 
@@ -506,7 +514,7 @@ test('completed snapshot replays ready and unknown duration has null ETA for bot
   const { manager, provider, waitForEvent } = createHarness(t);
   const emptySnapshot = [];
   manager.sendSnapshot((event) => emptySnapshot.push(event));
-  assert.deepEqual(emptySnapshot, []);
+  assert.deepEqual(emptySnapshot, [{ type: 'selfie_snapshot', activeJobId: null, events: [] }]);
 
   const first = await manager.submitJob({ plan: PLAN, preset: 'cepat' });
   assert.equal(first.etaSeconds, null);
@@ -515,10 +523,67 @@ test('completed snapshot replays ready and unknown duration has null ETA for bot
   await flushLifecycle();
   const completedSnapshot = [];
   manager.sendSnapshot((event) => completedSnapshot.push(event));
-  assert.deepEqual(completedSnapshot, [ready]);
+  assert.deepEqual(completedSnapshot, [{ type: 'selfie_snapshot', activeJobId: null, events: [ready] }]);
 
   const second = await manager.submitJob({ plan: PLAN, preset: 'kualitas' });
   assert.equal(second.etaSeconds, null);
+});
+
+test('ready and reconnect snapshots preserve shared auto-close including disabled auto-close', async (t) => {
+  for (const autoCloseSeconds of [undefined, 0, 7]) {
+    await t.test(`autoCloseSeconds ${autoCloseSeconds ?? 'default'}`, async (t) => {
+      const { manager, provider, waitForEvent } = createHarness(t, { autoCloseSeconds });
+      const submitted = await manager.submitJob({ plan: PLAN });
+      (await provider.waitForRun()).complete();
+      const ready = await waitForEvent('selfie_ready', submitted.jobId);
+      assert.equal(ready.autoCloseSeconds, autoCloseSeconds ?? 30);
+      await flushLifecycle();
+      const snapshots = [];
+      manager.sendSnapshot(event => snapshots.push(event));
+      assert.deepEqual(snapshots, [{ type: 'selfie_snapshot', activeJobId: null, events: [ready] }]);
+      assert.equal(JSON.stringify(snapshots).includes('fake-selfie.png'), false);
+    });
+  }
+  assert.equal(loadSelfieConfig({ autoCloseSeconds: 0 }).autoCloseSeconds, 0);
+  assert.equal(loadSelfieConfig({ autoCloseSeconds: -1 }).autoCloseSeconds, 30);
+});
+
+test('expired completed results and cancelled jobs send an authoritative empty snapshot', async (t) => {
+  const { manager, provider, waitForEvent } = createHarness(t);
+  const submitted = await manager.submitJob({ plan: PLAN });
+  (await provider.waitForRun()).complete();
+  const ready = await waitForEvent('selfie_ready', submitted.jobId);
+  await flushLifecycle();
+  const token = ready.imageUrl.slice('/api/selfies/'.length);
+  manager.tokenMap.get(token).timestamp = Date.now() - 24 * 60 * 60 * 1000 - 1;
+  const snapshots = [];
+  manager.sendSnapshot(event => snapshots.push(event));
+  assert.deepEqual(snapshots, [{ type: 'selfie_snapshot', activeJobId: null, events: [] }]);
+  const next = await manager.submitJob({ plan: PLAN });
+  await provider.waitForRun(1);
+  await manager.cancelJob(next.jobId);
+  await flushLifecycle();
+  snapshots.length = 0;
+  manager.sendSnapshot(event => snapshots.push(event));
+  assert.deepEqual(snapshots, [{ type: 'selfie_snapshot', activeJobId: null, events: [] }]);
+});
+
+test('snapshots identify a pending admission and never replay an aborted active job', async (t) => {
+  const { manager, provider, waitForEvent } = createHarness(t);
+  const first = await manager.submitJob({ plan: PLAN });
+  (await provider.waitForRun()).complete();
+  await waitForEvent('selfie_ready', first.jobId);
+  await flushLifecycle();
+  const pending = manager.tryAdmit();
+  const snapshots = [];
+  manager.sendSnapshot(event => snapshots.push(event));
+  assert.deepEqual(snapshots, [{ type: 'selfie_snapshot', activeJobId: pending.jobId, events: [] }]);
+  await manager.submitJob({ plan: PLAN, admission: pending });
+  await provider.waitForRun(1);
+  manager.activeJob.abortController.abort();
+  snapshots.length = 0;
+  manager.sendSnapshot(event => snapshots.push(event));
+  assert.deepEqual(snapshots, [{ type: 'selfie_snapshot', activeJobId: null, events: [] }]);
 });
 
 test('shutdown aborts running work, refunds pending jobs and releases exactly once', async (t) => {
