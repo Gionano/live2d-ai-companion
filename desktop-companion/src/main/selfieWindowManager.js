@@ -52,10 +52,11 @@ export class SelfieWindowManager {
     } catch { /* An invalid backend origin must never allow remote image access. */ }
   }
 
-  init({ overlayWindow, webSocketSender, outputDir, onContentProtectionUpdated }) {
+  init({ overlayWindow, webSocketSender, outputDir, resolveOutputDir, onContentProtectionUpdated }) {
     this.overlayWindow = overlayWindow;
     this.webSocketSender = webSocketSender;
     if (outputDir) this.outputDir = outputDir;
+    this.resolveOutputDir = resolveOutputDir;
     this.onContentProtectionUpdated = onContentProtectionUpdated;
     this._registerIpcHandlers();
     for (const eventName of ['display-added', 'display-removed', 'display-metrics-changed']) {
@@ -89,10 +90,17 @@ export class SelfieWindowManager {
 
   async openGalleryFolder() {
     try {
-      if (!fs.existsSync(this.outputDir)) {
-        fs.mkdirSync(this.outputDir, { recursive: true });
-      }
-      const error = await this.dependencies.shell.openPath(this.outputDir);
+      const configured = this.resolveOutputDir ? await this.resolveOutputDir() : this.outputDir;
+      if (typeof configured !== 'string' || !path.isAbsolute(configured)
+        || configured.split(/[\\/]/).includes('..')) throw new Error('Invalid gallery directory');
+      const allowedDirectory = path.resolve(configured);
+      if ((await fs.promises.lstat(allowedDirectory)).isSymbolicLink()) throw new Error('Invalid gallery directory');
+      const directory = await fs.promises.realpath(allowedDirectory);
+      const relative = path.relative(allowedDirectory, directory);
+      if (relative !== ''
+        || !(await fs.promises.stat(directory)).isDirectory()) throw new Error('Invalid gallery directory');
+      this.outputDir = allowedDirectory;
+      const error = await this.dependencies.shell.openPath(directory);
       return error ? { ok: false, error } : { ok: true };
     } catch (err) {
       logger.error('SelfiePopup', 'Gagal membuka folder galeri:', { error: err.message });

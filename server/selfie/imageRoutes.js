@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
+import { normalizeAutoCloseSeconds } from './config.js';
 
 const IMAGE_TYPES = {
   '.png': 'image/png',
@@ -43,6 +44,24 @@ function hasAllowedHost(req) {
   return hosts.length > 0 && hosts.every(host => LOCAL_HOST.test(host));
 }
 
+function isSameOriginSettingsRequest(req) {
+  const fetchSite = req.headers['sec-fetch-site'];
+  if (fetchSite !== undefined && fetchSite !== 'same-origin' && fetchSite !== 'none') return false;
+  const origin = req.headers.origin;
+  if (origin === undefined) return fetchSite === 'same-origin' || fetchSite === 'none';
+  try {
+    const parsed = new URL(origin);
+    const forwardedHosts = headerValues(req.headers['x-forwarded-host']);
+    const forwardedProtocols = headerValues(req.headers['x-forwarded-proto']);
+    const host = forwardedHosts.at(-1) || req.headers.host;
+    const protocol = forwardedProtocols.at(-1) || (req.socket.encrypted ? 'https' : 'http');
+    return ['http', 'https'].includes(protocol) && parsed.origin === origin
+      && origin === new URL(`${protocol}://${host}`).origin;
+  } catch {
+    return false;
+  }
+}
+
 export function installSelfieImagePolicy(app, manager) {
   app.use(['/api/selfies', '/selfies'], (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -53,12 +72,21 @@ export function installSelfieImagePolicy(app, manager) {
     if (!hasAllowedHost(req) || manager.config.allowLan !== true && !isLocalImageRequest(req)) {
       return res.status(403).json({ error: 'Akses hanya diizinkan dari localhost' });
     }
+    if (req.baseUrl.toLowerCase() === '/api/selfies' && /^\/settings\/?$/i.test(req.path)
+      && (!isLocalImageRequest(req) || !isSameOriginSettingsRequest(req))) {
+      return res.status(403).json({ error: 'Akses hanya diizinkan dari origin yang sama di localhost' });
+    }
     next();
   });
 }
 
 export function installSelfieImageRoutes(app, manager) {
   installSelfieImagePolicy(app, manager);
+  // Enabled describes server capability; per-connection feature toggles use WebSocket.
+  // Filesystem configuration is private to the server and desktop main process.
+  app.get('/api/selfies/settings', (req, res) => {
+    res.json({ enabled: true, autoCloseSeconds: normalizeAutoCloseSeconds(manager.config.autoCloseSeconds) });
+  });
   // Keep the direct route as an alias; all events publish the proxied API route.
   app.get(['/api/selfies/:token', '/selfies/:token'], (req, res) => {
     const item = manager.getFileByToken(req.params.token);

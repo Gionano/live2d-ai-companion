@@ -116,10 +116,6 @@ const desktopBridge = Object.freeze({
    */
   notifySelfieEvent: (event) => ipcRenderer.send('desktop:selfie-event', event),
 
-  notifySelfieSettings: (settings) => ipcRenderer.send('desktop:selfie-settings', {
-    outputDir: settings?.outputDir,
-  }),
-
   // Return whether a narrow selfie command reached the connected backend socket.
   onSelfieCommand: (callback) => {
     if (typeof callback !== 'function') return () => {};

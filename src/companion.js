@@ -587,7 +587,6 @@ function connectWS() {
     }
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'selfie_feature') {
-      window.desktopBridge?.notifySelfieSettings?.(msg);
       return;
     }
     if (['selfie_started', 'selfie_progress', 'selfie_ready', 'selfie_failed', 'selfie_cancelled', 'selfie_snapshot'].includes(msg.type)) {

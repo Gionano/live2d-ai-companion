@@ -17,6 +17,7 @@ import { clampBoundsToWorkArea, windowStateStore } from './windowStateStore.js';
 import { TrayManager } from './trayManager.js';
 import { captureService } from './captureService.js';
 import { selfieWindowManager } from './selfieWindowManager.js';
+import { resolveLocalSelfieOutputDir } from './selfieOutputDir.js';
 import { randomUUID } from 'node:crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -64,6 +65,15 @@ function sendSelfieCommand(message) {
       selfieCommands.delete(requestId);
       resolve(false);
     }
+  });
+}
+
+async function resolveSelfieOutputDir() {
+  return resolveLocalSelfieOutputDir({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    serverRoot: CONFIG.backendWorkingDir,
+    configPath: process.env.SELFIE_CONFIG_PATH,
   });
 }
 
@@ -409,13 +419,6 @@ function registerIpcHandlers() {
     selfieCommands.delete(payload.requestId);
     pending.resolve(payload.sent === true);
   });
-  ipcMain.on('desktop:selfie-settings', (event, settings) => {
-    if (!overlayWindow || overlayWindow.isDestroyed() || event.sender !== overlayWindow.webContents
-      || event.senderFrame !== overlayWindow.webContents.mainFrame) return;
-    if (typeof settings?.outputDir === 'string' && path.isAbsolute(settings.outputDir)) {
-      selfieWindowManager.outputDir = settings.outputDir;
-    }
-  });
   ipcMain.handle('desktop:get-app-info', (event) => {
     assertTrustedSender(event, 'desktop:get-app-info');
     return {
@@ -630,6 +633,7 @@ async function createOverlayWindow() {
   selfieWindowManager.init({
     overlayWindow,
     webSocketSender: sendSelfieCommand,
+    resolveOutputDir: resolveSelfieOutputDir,
     onContentProtectionUpdated: () => captureService.markContentProtectionUpdated(),
   });
   selfieWindowManager.setSelfieEnabled(windowStateStore.state.selfieEnabled);

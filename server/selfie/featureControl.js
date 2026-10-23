@@ -4,7 +4,7 @@ export function installSelfieFeatureControl({ socket, manager, send }) {
   return (message) => {
     if (!message || message.type !== 'selfie_feature' || typeof message.enabled !== 'boolean') return false;
     socket.selfieEnabled = message.enabled;
-    send({ type: 'selfie_feature', enabled: message.enabled, outputDir: manager.config.outputDir });
+    send({ type: 'selfie_feature', enabled: message.enabled });
     if (message.enabled) manager.sendSnapshot(send);
     return true;
   };
