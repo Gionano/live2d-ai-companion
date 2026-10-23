@@ -145,8 +145,15 @@
       display: none;
       flex-direction: column;
       height: 100%;
+      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
       padding: 14px;
       gap: 10px;
+    }
+
+    #state-ready > :not(.image-preview-wrapper) {
+      flex-shrink: 0;
     }
 
     .ready-header {
@@ -235,11 +242,12 @@
       border-radius: 8px;
       border-left: 3px solid var(--accent);
       font-style: italic;
+      overflow-wrap: anywhere;
     }
 
     .action-buttons {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
       gap: 6px;
     }
 
@@ -432,6 +440,9 @@
           case 'selfie_ready':
             showReadyState(payload);
             break;
+          case 'selfie_layout':
+            if (currentState === 'ready') applyCardLayout(payload);
+            break;
           case 'selfie_failed':
           case 'selfie_cancelled':
             showTerminalState(payload);
@@ -492,7 +503,7 @@
       resetJob(data);
       currentState = 'ready';
       currentImageUrl = data.imageUrl;
-      cardSize = data.cardSize || { width: 360, height: 520 };
+      applyCardLayout(data);
 
       stateGen.style.display = 'none';
       stateReady.style.display = 'flex';
@@ -516,6 +527,15 @@
 
       configuredAutoCloseSeconds = Number.isFinite(data.autoCloseSeconds) ? data.autoCloseSeconds : 30;
       startAutoCloseCountdown(configuredAutoCloseSeconds);
+    }
+
+    function applyCardLayout(data) {
+      const size = data.cardSize || { width: 360, height: 520 };
+      if (!data.zoomed) cardSize = size;
+      const compact = size.height < 480 || size.width < 300;
+      // Captions and action rows can overflow even a full-size card.
+      stateReady.style.overflowY = 'auto';
+      imageWrapper.style.minHeight = compact ? '64px' : '0';
     }
 
     function showTerminalState(data) {

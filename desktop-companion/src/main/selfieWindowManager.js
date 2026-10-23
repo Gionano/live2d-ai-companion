@@ -37,8 +37,9 @@ export class SelfieWindowManager {
     this._destroyed = false;
     this._reposition = () => {
       if (this.popupWindow && !this.popupWindow.isDestroyed()) {
-        const { width, height } = this.popupWindow.getBounds();
-        this.positionNearAvatar(width, height, this._isZoomed);
+        const { width, height, zoomed } = this._requestedSize || this.popupWindow.getBounds();
+        const bounds = this.positionNearAvatar(width, height, zoomed);
+        this._sendLayoutUpdate(bounds);
       }
     };
     this.backendOrigin = null;
@@ -135,6 +136,9 @@ export class SelfieWindowManager {
     this.popupWindow.setIgnoreMouseEvents(false); // TIDAK click-through, tombol dapat diklik
     this.onContentProtectionUpdated?.();
     win.on('show', () => this.onContentProtectionUpdated?.());
+    win.on('resize', () => {
+      if (this.popupWindow === win && !win.isDestroyed()) this._sendLayoutUpdate(win.getBounds());
+    });
     win.webContents.session?.setPermissionCheckHandler(() => false);
     win.webContents.session?.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -172,6 +176,7 @@ export class SelfieWindowManager {
     if (!this.popupWindow || this.popupWindow.isDestroyed()) return;
     if (!Number.isFinite(targetWidth) || !Number.isFinite(targetHeight) || targetWidth <= 0 || targetHeight <= 0) return;
 
+    this._requestedSize = { width: targetWidth, height: targetHeight, zoomed };
     let overlayBounds = { x: 100, y: 100, width: 400, height: 600 };
     if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
       overlayBounds = this.overlayWindow.getBounds();
@@ -192,47 +197,38 @@ export class SelfieWindowManager {
     const screenCenterX = workArea.x + workArea.width / 2;
     const isAvatarOnRight = avatarCenterX >= screenCenterX;
 
-    let targetX = 0;
-    if (isAvatarOnRight) {
-      // Tempatkan di sisi kiri avatar
-      targetX = overlayBounds.x - targetWidth - 14;
-    } else {
-      // Tempatkan di sisi kanan avatar
-      targetX = overlayBounds.x + overlayBounds.width + 14;
+    const overlapArea = ({ x, y, width, height }) => Math.max(0,
+      Math.min(x + width, overlayBounds.x + overlayBounds.width) - Math.max(x, overlayBounds.x))
+      * Math.max(0, Math.min(y + height, overlayBounds.y + overlayBounds.height) - Math.max(y, overlayBounds.y));
+    const candidatesFor = (width, height) => {
+      width = Math.floor(width);
+      height = Math.floor(height);
+      const left = overlayBounds.x - width - 14;
+      const right = overlayBounds.x + overlayBounds.width + 14;
+      const preferredX = isAvatarOnRight ? left : right;
+      return [
+        { x: preferredX, y: overlayBounds.y + 40 },
+        { x: isAvatarOnRight ? right : left, y: overlayBounds.y + 40 },
+        { x: preferredX, y: overlayBounds.y - height - 14 },
+        { x: preferredX, y: overlayBounds.y + overlayBounds.height + 14 },
+      ].map(({ x, y }) => ({
+        x: Math.round(Math.max(workArea.x + margin, Math.min(x, workArea.x + workArea.width - width - margin))),
+        y: Math.round(Math.max(workArea.y + margin, Math.min(y, workArea.y + workArea.height - height - margin))),
+        width, height,
+      }));
+    };
+    let candidates = candidatesFor(targetWidth, targetHeight);
+    let bounds = candidates.find(candidate => overlapArea(candidate) === 0);
+    if (!bounds) {
+      candidates = candidatesFor(Math.min(targetWidth, config?.toastWidth ?? 320),
+        Math.min(targetHeight, config?.toastHeight ?? 120));
+      bounds = candidates.find(candidate => overlapArea(candidate) === 0);
     }
-
-    // Posisikan sejajar bagian atas dada / bahu avatar
-    let targetY = overlayBounds.y + 40;
-
-    // Batasi strictly di dalam workArea monitor aktif
-    const minX = workArea.x + margin;
-    const maxX = workArea.x + workArea.width - targetWidth - margin;
-    const minY = workArea.y + margin;
-    const maxY = workArea.y + workArea.height - targetHeight - margin;
-
-    // Prefer a free side when clamping would otherwise overlap the avatar.
-    const candidates = [
-      { x: overlayBounds.x - targetWidth - 14, y: targetY },
-      { x: overlayBounds.x + overlayBounds.width + 14, y: targetY },
-      { x: targetX, y: overlayBounds.y - targetHeight - 14 },
-      { x: targetX, y: overlayBounds.y + overlayBounds.height + 14 },
-    ];
-    const freePosition = candidates.map(({ x, y }) => ({
-      x: Math.max(minX, Math.min(x, maxX)),
-      y: Math.max(minY, Math.min(y, maxY)),
-    })).find(({ x, y }) => x + targetWidth <= overlayBounds.x || x >= overlayBounds.x + overlayBounds.width
-      || y + targetHeight <= overlayBounds.y || y >= overlayBounds.y + overlayBounds.height);
-    if (freePosition) ({ x: targetX, y: targetY } = freePosition);
-
-    targetX = Math.max(minX, Math.min(targetX, maxX));
-    targetY = Math.max(minY, Math.min(targetY, maxY));
-
-    this.popupWindow.setBounds({
-      x: Math.round(targetX),
-      y: Math.round(targetY),
-      width: Math.floor(targetWidth),
-      height: Math.floor(targetHeight),
-    });
+    if (!bounds) {
+      bounds = candidates.reduce((best, candidate) => overlapArea(candidate) < overlapArea(best) ? candidate : best);
+      logger.warn('SelfiePopup', 'No placement avoids the avatar; using minimum overlap', { overlapArea: overlapArea(bounds), bounds });
+    }
+    this.popupWindow.setBounds(bounds);
     return this.popupWindow.getBounds();
   }
 
@@ -347,6 +343,14 @@ export class SelfieWindowManager {
     }
     this._pendingEvents = this._pendingEvents.filter(({ type }) => type !== event.type);
     this._pendingEvents.push(event);
+  }
+
+  _sendLayoutUpdate(bounds) {
+    if (!bounds || this._jobState !== 'ready' || !this._eventSnapshot.has('selfie_ready')) return;
+    this._sendPopupEvent({
+      type: 'selfie_layout', jobId: this.currentJobId,
+      cardSize: { width: bounds.width, height: bounds.height }, zoomed: this._isZoomed,
+    });
   }
 
   _clearHideTimer() {
@@ -474,7 +478,13 @@ export class SelfieWindowManager {
     handle('selfie:resize-popup', (size) => {
       if (!size || !Number.isFinite(size.width) || !Number.isFinite(size.height)
         || size.width <= 0 || size.height <= 0 || this._jobState !== 'ready') return { ok: false };
-      const bounds = this.positionNearAvatar(size.width, size.height, size.zoomed !== false);
+      const zoomed = size.zoomed !== false;
+      const config = this.dependencies.config.selfiePopup;
+      // Shrinking restores the requested card size, never the last clamped size.
+      const width = zoomed ? size.width : config?.cardWidth ?? 360;
+      const height = zoomed ? size.height : config?.cardHeight ?? 520;
+      const bounds = this.positionNearAvatar(width, height, zoomed);
+      this._sendLayoutUpdate(bounds);
       return { ok: true, bounds };
     });
   }
