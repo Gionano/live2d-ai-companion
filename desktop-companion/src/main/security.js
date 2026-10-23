@@ -2,10 +2,13 @@ import { CONFIG } from './config.js';
 import { logger } from './logger.js';
 
 let trustedOrigins = new Set();
+const trustedFilePages = new Set();
 let trustedDesktopWindow = null;
+let trustedDesktopUrl = CONFIG.frontendUrl;
 
-export function registerTrustedDesktopWindow(win) {
+export function registerTrustedDesktopWindow(win, url = CONFIG.frontendUrl) {
   trustedDesktopWindow = win;
+  trustedDesktopUrl = url;
 }
 
 /**
@@ -14,6 +17,13 @@ export function registerTrustedDesktopWindow(win) {
 export function registerTrustedOrigin(urlStr) {
   try {
     const parsed = new URL(urlStr);
+    if (parsed.username || parsed.password) return;
+    if (parsed.protocol === 'file:') {
+      parsed.search = '';
+      parsed.hash = '';
+      trustedFilePages.add(parsed.href);
+      return;
+    }
     trustedOrigins.add(parsed.origin);
     // Tambahkan ekuivalen localhost <-> 127.0.0.1 pada port yang sama
     if (parsed.hostname === 'localhost') {
@@ -39,8 +49,11 @@ export function isTrustedUrl(urlStr) {
   if (!urlStr || typeof urlStr !== 'string') return false;
   try {
     const parsed = new URL(urlStr);
+    if (parsed.username || parsed.password) return false;
     if (parsed.protocol === 'file:') {
-      return true;
+      parsed.search = '';
+      parsed.hash = '';
+      return trustedFilePages.has(parsed.href);
     }
     return trustedOrigins.has(parsed.origin);
   } catch {
@@ -54,12 +67,24 @@ export function isTrustedUrl(urlStr) {
  */
 export function assertTrustedSender(event, channelName = 'unknown') {
   const senderFrame = event?.senderFrame;
-  const senderUrl = senderFrame?.url || event?.sender?.getURL?.() || '';
+  const senderUrl = senderFrame?.url || '';
+  let matchesDesktopUrl = false;
+  try {
+    const actual = new URL(senderUrl);
+    const expected = new URL(trustedDesktopUrl);
+    if (actual.protocol === 'file:' && expected.protocol === 'file:') {
+      actual.search = expected.search = '';
+      actual.hash = expected.hash = '';
+      matchesDesktopUrl = actual.href === expected.href;
+    } else {
+      matchesDesktopUrl = actual.origin === expected.origin;
+    }
+  } catch { /* A missing or invalid frame URL is not trusted. */ }
 
   if (!trustedDesktopWindow || trustedDesktopWindow.isDestroyed()
     || event?.sender !== trustedDesktopWindow.webContents
     || senderFrame !== trustedDesktopWindow.webContents.mainFrame
-    || !isTrustedUrl(senderUrl)) {
+    || !matchesDesktopUrl || !isTrustedUrl(senderUrl)) {
     logger.warn('Security', `Menolak IPC '${channelName}' dari pengirim tidak dikenal`, {
       senderUrl,
     });
@@ -125,8 +150,8 @@ export function configureSessionSecurity(session) {
       `default-src 'self' ${allowedOriginsList}`,
       // 'unsafe-inline' & 'wasm-unsafe-eval' diperlukan oleh Vite HMR (dev) dan Live2D Cubism Core WASM/JS
       `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' ${allowedOriginsList}`,
-      `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com ${allowedOriginsList}`,
-      `font-src 'self' data: https://fonts.gstatic.com`,
+      `style-src 'self' 'unsafe-inline' ${allowedOriginsList}`,
+      `font-src 'self' data:`,
       `img-src 'self' data: blob: ${allowedOriginsList}`,
       `media-src 'self' data: blob:`,
       `connect-src 'self' ${allowedOriginsList} ${allowedWsList} ${backendOrigin} ${backendWsOrigin} ws://localhost:* http://localhost:* ws://127.0.0.1:* http://127.0.0.1:*`,
@@ -153,10 +178,12 @@ export function hardenWindowNavigation(win) {
     return { action: 'deny' };
   });
 
-  win.webContents.on('will-navigate', (event, targetUrl) => {
+  const guardNavigation = (event, targetUrl) => {
     if (!isTrustedUrl(targetUrl)) {
       logger.warn('Security', 'Memblokir navigasi ke URL eksternal', { targetUrl });
       event.preventDefault();
     }
-  });
+  };
+  win.webContents.on('will-navigate', guardNavigation);
+  win.webContents.on('will-redirect', guardNavigation);
 }

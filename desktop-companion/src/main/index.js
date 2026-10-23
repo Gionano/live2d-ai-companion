@@ -1,6 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { app, BrowserWindow, globalShortcut, ipcMain, screen, session } from 'electron';
 import { CONFIG } from './config.js';
@@ -411,8 +411,9 @@ function getMainWindowDiagnostics() {
  */
 function registerIpcHandlers() {
   ipcMain.on('desktop:selfie-command-result', (event, payload) => {
-    if (!overlayWindow || overlayWindow.isDestroyed() || event.sender !== overlayWindow.webContents
-      || event.senderFrame !== overlayWindow.webContents.mainFrame) return;
+    try {
+      assertTrustedSender(event, 'desktop:selfie-command-result');
+    } catch { return; }
     const pending = selfieCommands.get(payload?.requestId);
     if (!pending) return;
     clearTimeout(pending.timer);
@@ -602,6 +603,7 @@ async function createOverlayWindow() {
   const activePresetId = windowStateStore.getActivePresetId();
   const presetConfig = windowStateStore.getActivePresetConfig();
   const initialBounds = windowStateStore.getPresetBounds(activePresetId);
+  const entry = await resolveFrontendEntryUrl(true);
 
   overlayWindow = new BrowserWindow({
     x: initialBounds.x,
@@ -629,11 +631,14 @@ async function createOverlayWindow() {
     },
   });
 
-  registerTrustedDesktopWindow(overlayWindow);
+  const trustedOverlayUrl = entry.type === 'file' ? pathToFileURL(entry.target).href : entry.target;
+  registerTrustedOrigin(trustedOverlayUrl);
+  registerTrustedDesktopWindow(overlayWindow, trustedOverlayUrl);
   selfieWindowManager.init({
     overlayWindow,
     webSocketSender: sendSelfieCommand,
     resolveOutputDir: resolveSelfieOutputDir,
+    trustedOverlayUrl,
     onContentProtectionUpdated: () => captureService.markContentProtectionUpdated(),
   });
   selfieWindowManager.setSelfieEnabled(windowStateStore.state.selfieEnabled);
@@ -683,7 +688,6 @@ async function createOverlayWindow() {
   overlayWindow.on('moved', () => handleWindowGeometryChange('window-moved'));
   overlayWindow.on('resized', () => handleWindowGeometryChange('window-resized'));
 
-  const entry = await resolveFrontendEntryUrl(true);
   if (entry.type === 'file') {
     await overlayWindow.loadFile(entry.target, entry.query ? { query: entry.query } : undefined);
   } else {

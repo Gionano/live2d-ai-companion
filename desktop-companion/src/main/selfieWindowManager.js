@@ -9,7 +9,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BrowserWindow, clipboard, dialog, nativeImage, screen, shell, ipcMain } from 'electron';
 import { CONFIG } from './config.js';
 import { logger } from './logger.js';
@@ -52,11 +52,12 @@ export class SelfieWindowManager {
     } catch { /* An invalid backend origin must never allow remote image access. */ }
   }
 
-  init({ overlayWindow, webSocketSender, outputDir, resolveOutputDir, onContentProtectionUpdated }) {
+  init({ overlayWindow, webSocketSender, outputDir, resolveOutputDir, trustedOverlayUrl, onContentProtectionUpdated }) {
     this.overlayWindow = overlayWindow;
     this.webSocketSender = webSocketSender;
     if (outputDir) this.outputDir = outputDir;
     this.resolveOutputDir = resolveOutputDir;
+    this.trustedOverlayUrl = trustedOverlayUrl || this.dependencies.config.frontendUrl;
     this.onContentProtectionUpdated = onContentProtectionUpdated;
     this._registerIpcHandlers();
     for (const eventName of ['display-added', 'display-removed', 'display-metrics-changed']) {
@@ -397,8 +398,17 @@ export class SelfieWindowManager {
   }
 
   _isTrustedSender(event, window) {
-    return Boolean(window && !window.isDestroyed() && event?.sender === window.webContents
-      && event.senderFrame === window.webContents.mainFrame);
+    if (!window || window.isDestroyed() || event?.sender !== window.webContents
+      || event.senderFrame !== window.webContents.mainFrame || !event.senderFrame?.url) return false;
+    try {
+      const senderUrl = new URL(event.senderFrame.url);
+      if (senderUrl.username || senderUrl.password) return false;
+      const allowed = new URL(window === this.overlayWindow ? this.trustedOverlayUrl
+        : pathToFileURL(path.resolve(__dirname, '../popup/selfiePopup.html')).href);
+      return allowed.protocol === 'file:'
+        ? senderUrl.protocol === 'file:' && senderUrl.host === allowed.host && senderUrl.pathname === allowed.pathname
+        : ['http:', 'https:'].includes(senderUrl.protocol) && senderUrl.origin === allowed.origin;
+    } catch { return false; }
   }
 
   _resolveImageUrl(value) {
