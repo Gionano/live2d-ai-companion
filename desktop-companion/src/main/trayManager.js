@@ -71,6 +71,8 @@ export class TrayManager {
     if (!this.tray) return;
 
     const state = this.handlers.getState();
+    const shortcutLabel = (label, id) =>
+      `${label} (${state.shortcuts?.[id]?.activeLabel || 'shortcut tidak tersedia'})`;
 
     // --- Preset submenu items ---
     const presetItems = Object.values(CONFIG.overlay.presets).map((preset) => ({
@@ -114,8 +116,7 @@ export class TrayManager {
 
     const contextMenu = Menu.buildFromTemplate([
       {
-        label: state.isVisible ? 'Sembunyikan Avatar' : 'Tampilkan Avatar',
-        accelerator: CONFIG.shortcuts.toggleAvatarVisibility,
+        label: shortcutLabel(state.isVisible ? 'Sembunyikan Avatar' : 'Tampilkan Avatar', 'toggleAvatarVisibility'),
         click: () => this.handlers.onToggleVisible?.(),
       },
       { type: 'separator' },
@@ -137,9 +138,8 @@ export class TrayManager {
 
       // --- Mode Edit ---
       {
-        label: 'Mode Edit Posisi & Ukuran',
+        label: shortcutLabel('Mode Edit Posisi & Ukuran', 'toggleEditMode'),
         type: 'checkbox',
-        accelerator: CONFIG.shortcuts.toggleEditMode,
         checked: Boolean(state.editMode),
         click: (menuItem) => this.handlers.onToggleEditMode?.(menuItem.checked),
       },
@@ -162,9 +162,8 @@ export class TrayManager {
 
       // --- Mute Mic ---
       {
-        label: 'Mute Mikrofon',
+        label: shortcutLabel('Mute Mikrofon', 'toggleMuteMic'),
         type: 'checkbox',
-        accelerator: CONFIG.shortcuts.toggleMuteMic,
         checked: Boolean(state.muteMic),
         click: (menuItem) => this.handlers.onToggleMuteMic?.(menuItem.checked),
       },

@@ -466,6 +466,16 @@ wss.on('connection', (socket, req) => {
     if (!msg || typeof msg !== 'object') return;
     if (handleSelfieFeature(msg)) return;
 
+    if (msg.type === 'mic_mute') {
+      if (typeof msg.muted !== 'boolean') return;
+      socket.micMuted = msg.muted;
+      console.log('[mic] Microphone mute state:', socket.micMuted);
+      if (socket.micMuted && socket.sttTurnId) {
+        speechController.cancelTurn(socket, socket.sttTurnId, 'MIC_MUTED');
+      }
+      return;
+    }
+
     // 0. Sinyal selesai playback dari client untuk turn-taking
     if (msg.type === 'playback_finished') {
       speechController.acknowledge(socket, msg.speechId);
@@ -530,6 +540,10 @@ wss.on('connection', (socket, req) => {
 
     if (msg.type !== 'audio_input' && msg.type !== 'text_input') return;
     const isTyped = msg.type === 'text_input';
+    if (!isTyped && socket.micMuted) {
+      speechController.rejectInput(socket, 'MIC_MUTED');
+      return;
+    }
 
     // Reject input explicitly so the client can restore its optimistic UI.
     if (speechController.isBusy(socket)) {
@@ -574,7 +588,12 @@ wss.on('connection', (socket, req) => {
         console.log(`[typed] input teks: ${JSON.stringify(text)}`);
       } else {
         const tSttStart = performance.now();
-        text = await transcribeAudio(buf, `audio.${extFromMime(mime)}`, { signal: turn.signal });
+        socket.sttTurnId = turn.turnId;
+        try {
+          text = await transcribeAudio(buf, `audio.${extFromMime(mime)}`, { signal: turn.signal });
+        } finally {
+          if (socket.sttTurnId === turn.turnId) socket.sttTurnId = null;
+        }
         if (!isCurrent()) return;
         tSttEnd = performance.now();
         console.log(`[timing] STT: ${ms(tSttStart, tSttEnd)}ms (t+${ms(tPipe, tSttEnd)})`);

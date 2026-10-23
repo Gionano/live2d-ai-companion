@@ -85,15 +85,23 @@ const desktopBridge = Object.freeze({
   },
 
   /**
-   * Berlangganan event perubahan status mute mikrofon dari tray/shortcut.
-   * Callback menerima boolean (true = muted, false = unmuted).
+   * Subscribe to microphone mute changes and their revision/active shortcut.
    */
   onMuteMicChanged: (callback) => {
     if (typeof callback !== 'function') return () => {};
-    const handler = (_event, muted) => callback(muted);
+    const handler = (_event, muted, details) => callback(muted, details);
     ipcRenderer.on('desktop:mute-mic-changed', handler);
     return () => ipcRenderer.removeListener('desktop:mute-mic-changed', handler);
   },
+
+  // Report only microphone/indicator state; never expose a raw Electron object.
+  reportMicState: (state) => ipcRenderer.send('desktop:mic-state-applied', {
+    revision: Number(state?.revision),
+    muted: state?.muted === true,
+    captureActive: state?.captureActive === true,
+    recording: state?.recording === true,
+    indicatorMuted: state?.indicatorMuted === true,
+  }),
 
   /**
    * Berlangganan event perubahan state/preset/ukuran overlay dari main process.

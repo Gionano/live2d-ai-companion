@@ -463,7 +463,7 @@ class WindowStateStore {
       wingExpressionName: CONFIG.overlay.wingExpressionName,
       wingParameterId: CONFIG.overlay.wingParameterId,
       hiddenHalfBodyPartIds: CONFIG.overlay.hiddenHalfBodyPartIds,
-      editShortcut: CONFIG.shortcuts.toggleEditMode,
+      editShortcut: CONFIG.shortcuts.toggleEditMode.preferred,
     };
   }
 }

@@ -91,6 +91,7 @@ function companionHarness({ desktop = true, initialState = Promise.resolve({ sel
     window: { desktopBridge: desktop ? bridge : undefined },
     location: { protocol: 'http:', host: 'localhost:5173' },
     WebSocket: FakeWebSocket,
+    isMicMutedByDesktop: true,
     isScreenActive: () => false,
     turnState: { handle: event => conversationEvents.push(clone(event)) },
     handleBrowserSelfieModal: (event, cancel) => browserEvents.push({ event: clone(event), cancel }),
@@ -169,15 +170,15 @@ test('tray setting is applied initially, changes once, and survives socket recon
   state.resolve({ selfieEnabled: false });
   await state.promise;
   h.sockets[0].open();
-  assert.deepEqual(h.sockets[0].sent, [{ type: 'selfie_feature', enabled: false }]);
+  assert.deepEqual(h.sockets[0].sent, [{ type: 'mic_mute', muted: true }, { type: 'selfie_feature', enabled: false }]);
   h.stateChanged({ selfieEnabled: false, windowBounds: { x: 10 } });
   h.stateChanged({ screenVision: true });
-  assert.equal(h.sockets[0].sent.length, 1);
+  assert.equal(h.sockets[0].sent.length, 2);
   h.stateChanged({ selfieEnabled: true });
   assert.deepEqual(h.sockets[0].sent.at(-1), { type: 'selfie_feature', enabled: true });
   h.reconnect();
   h.sockets[1].open();
-  assert.deepEqual(h.sockets[1].sent, [{ type: 'selfie_feature', enabled: true }]);
+  assert.deepEqual(h.sockets[1].sent, [{ type: 'mic_mute', muted: true }, { type: 'selfie_feature', enabled: true }]);
 });
 
 test('a late startup snapshot cannot overwrite a newer tray toggle', async () => {
@@ -187,7 +188,7 @@ test('a late startup snapshot cannot overwrite a newer tray toggle', async () =>
   state.resolve({ selfieEnabled: true });
   await state.promise;
   h.sockets[0].open();
-  assert.deepEqual(h.sockets[0].sent, [{ type: 'selfie_feature', enabled: false }]);
+  assert.deepEqual(h.sockets[0].sent, [{ type: 'mic_mute', muted: true }, { type: 'selfie_feature', enabled: false }]);
 });
 
 test('renderer never forwards a gallery path and malformed messages are ignored', () => {

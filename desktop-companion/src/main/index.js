@@ -15,6 +15,7 @@ import {
 import { startProductionStaticServer } from './staticServer.js';
 import { clampBoundsToWorkArea, windowStateStore } from './windowStateStore.js';
 import { TrayManager } from './trayManager.js';
+import { loadShortcutConfig, registerShortcuts } from './shortcutManager.js';
 import { captureService } from './captureService.js';
 import { selfieWindowManager } from './selfieWindowManager.js';
 import { resolveLocalSelfieOutputDir } from './selfieOutputDir.js';
@@ -37,7 +38,9 @@ if (process.env.FORCE_DEVICE_SCALE_FACTOR) {
 // 1. Single Instance Lock
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
-  logger.warn('Main', 'Instance lain sudah berjalan. Menutup instance kedua.');
+  logger.warn('Main', 'Another instance is already running; exiting this launch without registering shortcuts.', {
+    logFile: logger.getLogFilePath(),
+  });
   app.quit();
   process.exit(0);
 }
@@ -46,6 +49,9 @@ let overlayWindow = null;
 let backendProcess = null;
 let staticServerInstance = null;
 let trayManager = null;
+let shortcutStates = {};
+let muteRevision = 0;
+let focusRequested = false;
 let isApplyingProgrammaticBounds = false;
 const selfieCommands = new Map();
 
@@ -227,13 +233,17 @@ function enforceOverlayWindowFlags() {
  * Mengirimkan snapshot state overlay terbaru ke renderer via IPC.
  */
 function broadcastOverlayState(reason = 'state-updated') {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  const snapshot = {
-    ...windowStateStore.getSnapshot(),
-    reason,
-    windowBounds: overlayWindow.getBounds(),
-  };
-  overlayWindow.webContents.send('desktop:overlay-state-changed', snapshot);
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    const snapshot = {
+      ...windowStateStore.getSnapshot(),
+      muteRevision,
+      shortcuts: shortcutStates,
+      editShortcut: shortcutStates.toggleEditMode?.activeLabel || null,
+      reason,
+      windowBounds: overlayWindow.getBounds(),
+    };
+    overlayWindow.webContents.send('desktop:overlay-state-changed', snapshot);
+  }
   trayManager?.rebuildMenu();
 }
 
@@ -435,8 +445,28 @@ function registerIpcHandlers() {
     assertTrustedSender(event, 'desktop:get-overlay-state');
     return {
       ...windowStateStore.getSnapshot(),
+      muteRevision,
+      shortcuts: shortcutStates,
+      editShortcut: shortcutStates.toggleEditMode?.activeLabel || null,
       windowBounds: overlayWindow && !overlayWindow.isDestroyed() ? overlayWindow.getBounds() : null,
     };
+  });
+
+  ipcMain.on('desktop:mic-state-applied', (event, payload) => {
+    try {
+      assertTrustedSender(event, 'desktop:mic-state-applied');
+    } catch { return; }
+    if (!payload || payload.revision !== muteRevision || payload.muted !== windowStateStore.state.muteMic) return;
+    const report = {
+      revision: muteRevision,
+      muted: payload.muted,
+      captureActive: payload.captureActive === true,
+      recording: payload.recording === true,
+      indicatorMuted: payload.indicatorMuted === true,
+    };
+    const applied = !report.muted || (!report.captureActive && !report.recording && report.indicatorMuted);
+    logger[applied ? 'info' : 'warn']('Mic', 'Renderer applied microphone state', report);
+    trayManager?.rebuildMenu();
   });
 
   ipcMain.handle('desktop:set-overlay-preset', (event, presetId) => {
@@ -741,27 +771,33 @@ function setupDisplayChangeListeners() {
 }
 
 function setupGlobalShortcuts() {
-  const shortcuts = [
-    {
-      key: CONFIG.shortcuts.toggleEditMode,
+  const filePath = process.env.DESKTOP_SHORTCUTS_PATH
+    ? path.resolve(process.env.DESKTOP_SHORTCUTS_PATH)
+    : path.join(app.getPath('userData'), CONFIG.storage.shortcutConfigFileName);
+  const shortcuts = loadShortcutConfig({ filePath, defaults: CONFIG.shortcuts, logger });
+  shortcutStates = registerShortcuts({
+    globalShortcut,
+    shortcuts,
+    logger,
+    notify: (title, body) => trayManager?.notify(title, body),
+    handlers: {
+      toggleEditMode: {
       label: 'Mode Edit',
-      handler: () => {
+      handler: (accelerator) => {
         const next = !windowStateStore.state.editMode;
-        applyEditModeState(next, `shortcut:${CONFIG.shortcuts.toggleEditMode}`);
+        applyEditModeState(next, `shortcut:${accelerator}`);
       },
-    },
-    {
-      key: CONFIG.shortcuts.toggleMuteMic,
+      },
+      toggleMuteMic: {
       label: 'Mute Mikrofon',
-      handler: () => {
+      handler: (accelerator) => {
         const next = !windowStateStore.state.muteMic;
-        toggleMuteMic(next, `shortcut:${CONFIG.shortcuts.toggleMuteMic}`);
+        toggleMuteMic(next, `shortcut:${accelerator}`);
       },
-    },
-    {
-      key: CONFIG.shortcuts.toggleAvatarVisibility,
+      },
+      toggleAvatarVisibility: {
       label: 'Tampilkan/Sembunyikan Avatar',
-      handler: () => {
+      handler: (accelerator) => {
         if (!overlayWindow || overlayWindow.isDestroyed()) return;
         if (overlayWindow.isVisible()) {
           overlayWindow.hide();
@@ -769,42 +805,12 @@ function setupGlobalShortcuts() {
           overlayWindow.show();
           enforceOverlayWindowFlags();
         }
-        trayManager?.rebuildMenu();
-        broadcastOverlayState(`shortcut:${CONFIG.shortcuts.toggleAvatarVisibility}`);
+        broadcastOverlayState(`shortcut:${accelerator}`);
+      },
       },
     },
-  ];
-
-  for (const { key, label, handler } of shortcuts) {
-    if (!key) continue;
-    try {
-      const ok = globalShortcut.register(key, handler);
-      if (ok) {
-        logger.info('Shortcuts', `Global shortcut ${label} berhasil didaftarkan`, {
-          shortcut: key,
-        });
-      } else {
-        logger.warn(
-          'Shortcuts',
-          `Gagal mendaftarkan global shortcut ${label} (kemungkinan dipakai aplikasi lain)`,
-          { shortcut: key },
-        );
-        trayManager?.notify(
-          'Shortcut Global Bentrok',
-          `Gagal mendaftarkan shortcut ${key} (${label}). Kemungkinan sedang dipakai aplikasi lain.`,
-        );
-      }
-    } catch (err) {
-      logger.error('Shortcuts', `Error saat mendaftarkan global shortcut ${label}`, {
-        shortcut: key,
-        error: err.message,
-      });
-      trayManager?.notify(
-        'Shortcut Global Gagal',
-        `Tidak dapat mendaftarkan shortcut ${key} (${label}): ${err.message}`,
-      );
-    }
-  }
+  });
+  broadcastOverlayState('shortcuts-registered');
 }
 
 /**
@@ -813,10 +819,14 @@ function setupGlobalShortcuts() {
  */
 function toggleMuteMic(enabled, reason = 'toggle-mute-mic') {
   const muted = windowStateStore.setMuteMic(enabled);
+  muteRevision += 1;
+  logger.info('Main', 'Microphone mute toggled; sending renderer IPC', { muteMic: muted, reason, revision: muteRevision });
   if (overlayWindow && !overlayWindow.isDestroyed()) {
-    overlayWindow.webContents.send('desktop:mute-mic-changed', muted);
+    overlayWindow.webContents.send('desktop:mute-mic-changed', muted, {
+      revision: muteRevision,
+      shortcut: shortcutStates.toggleMuteMic?.activeLabel || null,
+    });
   }
-  logger.info('Main', 'Status Mute Mikrofon diubah', { muteMic: muted, reason });
   broadcastOverlayState(reason);
 }
 
@@ -873,6 +883,7 @@ function setupSystemTray() {
       editMode: windowStateStore.state.editMode,
       clickThrough: windowStateStore.state.clickThrough,
       muteMic: windowStateStore.state.muteMic,
+      shortcuts: shortcutStates,
       screenVision: windowStateStore.state.screenVision,
       selfieEnabled: windowStateStore.state.selfieEnabled,
       isVisible: Boolean(overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible()),
@@ -929,13 +940,21 @@ function setupSystemTray() {
   trayManager.init();
 }
 
-app.on('second-instance', () => {
-  logger.info('Main', 'Percobaan menjalankan instance kedua terdeteksi; memfokuskan overlay.');
-  if (overlayWindow) {
+function focusOverlayWindow() {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
     if (overlayWindow.isMinimized()) overlayWindow.restore();
     overlayWindow.show();
     enforceOverlayWindowFlags();
+    overlayWindow.focus();
+    focusRequested = false;
+  } else {
+    focusRequested = true;
   }
+}
+
+app.on('second-instance', () => {
+  logger.info('Main', 'Second launch detected; focusing the first instance. No shortcuts will be registered by the second instance.');
+  focusOverlayWindow();
 });
 
 app.whenReady().then(async () => {
@@ -956,6 +975,7 @@ app.whenReady().then(async () => {
     setupSystemTray();
     captureService.init((title, body) => trayManager?.notify(title, body));
     setupGlobalShortcuts();
+    if (focusRequested) focusOverlayWindow();
   } catch (err) {
     logger.error('Main', 'Gagal membuat jendela overlay', { error: err.message });
   }

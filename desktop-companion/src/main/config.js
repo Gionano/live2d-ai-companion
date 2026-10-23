@@ -119,11 +119,20 @@ export const CONFIG = {
     blackFrameSampleStep: 16, // langkah sampling piksel untuk pengecekan cepat
   },
 
-  // Global Shortcuts Default (Fase 3)
+  // Defaults used to create userData/shortcuts.json on first launch.
   shortcuts: {
-    toggleMuteMic: process.env.SHORTCUT_MUTE_MIC || 'CommandOrControl+Alt+M',
-    toggleEditMode: process.env.SHORTCUT_EDIT_MODE || 'CommandOrControl+Alt+E',
-    toggleAvatarVisibility: process.env.SHORTCUT_HIDE_AVATAR || 'CommandOrControl+Alt+H',
+    toggleMuteMic: {
+      preferred: 'Control+Alt+Shift+M',
+      fallbacks: ['Control+Alt+Shift+F9', 'Control+Alt+Shift+F10'],
+    },
+    toggleEditMode: {
+      preferred: 'Control+Alt+E',
+      fallbacks: ['Control+Alt+Shift+E', 'Control+Alt+Shift+F11'],
+    },
+    toggleAvatarVisibility: {
+      preferred: 'Control+Alt+H',
+      fallbacks: ['Control+Alt+Shift+H', 'Control+Alt+Shift+F12'],
+    },
   },
 
   // Konfigurasi Popup Selfie / PAP (Fase D)
@@ -145,5 +154,6 @@ export const CONFIG = {
     logDirName: 'logs',
     logFileName: 'companion.log',
     windowStateFileName: 'window-state.json',
+    shortcutConfigFileName: 'shortcuts.json',
   },
 };

@@ -22,6 +22,10 @@ import { SpeechPlayback, TurnState } from './speechPlayback.js';
 import { handleBrowserSelfieModal } from './browserSelfieModal.js';
 
 const isOverlay = new URLSearchParams(window.location.search).get('mode') === 'overlay';
+// Wait for the main-process mute snapshot before opening the desktop microphone.
+let isMicMutedByDesktop = Boolean(window.desktopBridge);
+let micMuteRevision = -1;
+let activeMuteShortcut = null;
 let overlaySubtitleHideDelayMs = 6500;
 let overlaySubtitleTimer = null;
 
@@ -61,6 +65,11 @@ function log(text, cls = '') {
 }
 
 function setMicStatus(live, label, stateClass = '') {
+  if (isMicMutedByDesktop) {
+    live = false;
+    label = '🔇 Mikrofon di-mute';
+    stateClass = '';
+  }
   micStatusEl.classList.remove('live', 'processing', 'speaking', 'recording');
   if (stateClass) {
     micStatusEl.classList.add(stateClass);
@@ -571,6 +580,9 @@ function connectWS() {
   const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
   ws.addEventListener('open', () => {
+    if (window.desktopBridge) {
+      ws.send(JSON.stringify({ type: 'mic_mute', muted: isMicMutedByDesktop }));
+    }
     if (window.desktopBridge?.notifySelfieEvent) {
       sendSelfieMessage({ type: 'selfie_feature', enabled: desktopSelfieEnabled });
     }
@@ -743,21 +755,21 @@ async function startPttRecording() {
     console.log('[ptt] Diabaikan: status percakapan saat ini adalah', currentConversationState);
     return;
   }
-  if (isPttRecording) return;
+  if (isPttRecording || isMicMutedByDesktop) return;
 
   try {
     ensureAudio();
     if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
     if (!micStream) {
-      micStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
+      await startListening();
     }
   } catch (err) {
     log(`Mic gagal: ${err.message}`, 'error');
     return;
   }
 
+  if (isMicMutedByDesktop || !micStream || isPttRecording || playbackState() !== 'idle') return;
+  const revision = micMuteRevision;
   isPttRecording = true;
   pttChunks = [];
   pttStartAt = performance.now();
@@ -774,6 +786,7 @@ async function startPttRecording() {
       const blob = new Blob(pttChunks, { type });
       pttChunks = [];
       pttRecorder = null;
+      if (isMicMutedByDesktop || revision !== micMuteRevision) return;
 
       if (dur < 400 || blob.size < 512) {
         console.log('[ptt] Audio terlalu pendek / noise, dibatalkan:', dur);
@@ -789,6 +802,10 @@ async function startPttRecording() {
         r.onloadend = () => res(String(r.result).split(',')[1]);
         r.readAsDataURL(blob);
       });
+      if (isMicMutedByDesktop || revision !== micMuteRevision) {
+        updateUiForState(playbackState());
+        return;
+      }
       const image = captureWebcamFrame();
       const screenImage = captureScreenFrame();
 
@@ -827,11 +844,12 @@ function stopPttRecording() {
 }
 
 function abortPttRecording() {
-  if (!isPttRecording) return;
+  if (!isPttRecording && !pttRecorder) return;
   isPttRecording = false;
-  if (pttRecorder && pttRecorder.state === 'recording') {
+  if (pttRecorder) {
+    pttRecorder.ondataavailable = null;
     pttRecorder.onstop = null;
-    pttRecorder.stop();
+    if (pttRecorder.state === 'recording') pttRecorder.stop();
   }
   pttRecorder = null;
   pttChunks = [];
@@ -904,47 +922,76 @@ let segStartAt = 0;
 let speaking = false; // user sedang bicara (segmen berjalan)
 let silenceStart = 0; // timestamp mulai hening
 let listening = false;
-let isMicMutedByDesktop = false;
+let micStartPromise = null;
+let vadFrame = null;
 
-function applyDesktopMicMute(muted, notifySubtitle = false) {
+function reportDesktopMicState() {
+  if (micMuteRevision < 0) return;
+  window.desktopBridge?.reportMicState?.({
+    revision: micMuteRevision,
+    muted: isMicMutedByDesktop,
+    captureActive: Boolean(micStream?.getAudioTracks().some(track => track.readyState !== 'ended' && track.enabled)),
+    recording: [segRecorder, pttRecorder].some(recorder => recorder?.state === 'recording'),
+    indicatorMuted: micLabelEl.textContent === '🔇 Mikrofon di-mute'
+      && !micStatusEl.classList.contains('live') && !micStatusEl.classList.contains('recording'),
+  });
+}
+
+function applyDesktopMicMute(muted, notifySubtitle = false, details = {}) {
+  if (!Number.isInteger(details.revision) || details.revision < micMuteRevision) return;
+  micMuteRevision = details.revision;
+  activeMuteShortcut = details.shortcut || null;
   const nextMuted = Boolean(muted);
   const changed = isMicMutedByDesktop !== nextMuted;
   isMicMutedByDesktop = nextMuted;
 
-  if (micStream) {
-    micStream.getAudioTracks().forEach((track) => {
-      track.enabled = !nextMuted;
-    });
+  if (changed && ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: 'mic_mute', muted: nextMuted }));
+    } catch (err) {
+      console.warn('[mic] Could not synchronize microphone state:', err.message);
+    }
   }
 
   if (nextMuted) {
-    if (segRecorder) abortSegment();
+    abortSegment();
+    abortPttRecording();
+    micStream?.getTracks().forEach(track => track.stop());
+    micStream = null;
+    vadAnalyser = null;
+    vadData = null;
+    if (vadFrame !== null) cancelAnimationFrame(vadFrame);
+    vadFrame = null;
     setMicStatus(false, '🔇 Mikrofon di-mute');
     if (notifySubtitle && changed) {
-      showOverlaySubtitle('🔇 Mikrofon di-mute (Ctrl+Alt+M)');
+      showOverlaySubtitle(`🔇 Mikrofon di-mute (${activeMuteShortcut || 'shortcut tidak tersedia'})`);
     }
   } else {
-    if (listening && playbackState() === 'idle') {
-      setMicStatus(true, 'Mendengarkan…');
-    }
+    if (listening) startListening();
     if (notifySubtitle && changed) {
       showOverlaySubtitle('🎙️ Mikrofon aktif kembali');
     }
   }
+  updateUiForState(playbackState());
+  reportDesktopMicState();
 }
 
 if (window.desktopBridge) {
+  const applySnapshot = (state) => {
+    if (typeof state?.muteMic !== 'boolean') return;
+    applyDesktopMicMute(state.muteMic, false, {
+      revision: state.muteRevision,
+      shortcut: state.shortcuts?.toggleMuteMic?.activeLabel,
+    });
+  };
   window.desktopBridge
     .getOverlayState?.()
-    .then((state) => {
-      if (state && typeof state.muteMic === 'boolean') {
-        applyDesktopMicMute(state.muteMic, false);
-      }
-    })
+    .then(applySnapshot)
     .catch(() => {});
 
-  window.desktopBridge.onMuteMicChanged?.((muted) => {
-    applyDesktopMicMute(muted, true);
+  window.desktopBridge.onOverlayStateChanged?.(applySnapshot);
+  window.desktopBridge.onMuteMicChanged?.((muted, details) => {
+    applyDesktopMicMute(muted, true, details);
   });
 }
 
@@ -981,9 +1028,10 @@ function endSegment() {
 
 // Batalkan segmen berjalan tanpa kirim (mis. amika keburu mulai bicara atau turn berganti).
 function abortSegment() {
-  if (segRecorder && segRecorder.state === 'recording') {
+  if (segRecorder) {
+    segRecorder.ondataavailable = null;
     segRecorder.onstop = null;
-    segRecorder.stop();
+    if (segRecorder.state === 'recording') segRecorder.stop();
   }
   segRecorder = null;
   segChunks = [];
@@ -992,6 +1040,7 @@ function abortSegment() {
 }
 
 async function flushSegment() {
+  const revision = micMuteRevision;
   const dur = performance.now() - segStartAt;
   const type = (segRecorder && segRecorder.mimeType) || 'audio/webm';
   const blob = new Blob(segChunks, { type });
@@ -1008,6 +1057,10 @@ async function flushSegment() {
     r.onloadend = () => res(String(r.result).split(',')[1]); // buang prefix data URL
     r.readAsDataURL(blob);
   });
+  if (isMicMutedByDesktop || revision !== micMuteRevision) {
+    updateUiForState(playbackState());
+    return;
+  }
   const image = captureWebcamFrame();
   const screenImage = captureScreenFrame();
 
@@ -1027,13 +1080,13 @@ async function flushSegment() {
 }
 
 function vadLoop() {
-  requestAnimationFrame(vadLoop);
+  vadFrame = requestAnimationFrame(vadLoop);
   if (!vadAnalyser) return;
 
   // Layout mobile tidak memakai VAD (menggunakan Push-to-Talk)
   if (isMobile()) return;
 
-  // Jika mikrofon di-mute lewat tray atau shortcut (Ctrl+Alt+M), hentikan VAD
+  // Stop VAD while the desktop microphone is muted.
   if (isMicMutedByDesktop) {
     if (segRecorder) abortSegment();
     setMicStatus(false, '🔇 Mikrofon di-mute');
@@ -1082,36 +1135,43 @@ function vadLoop() {
 }
 
 async function startListening() {
-  if (listening) return;
+  if (micStartPromise) return micStartPromise;
+  if (listening && micStream) return;
   listening = true;
-  try {
-    ensureAudio();
-    if (audioCtx.state === 'suspended') await audioCtx.resume();
-    if (!micStream) {
-      micStream = await navigator.mediaDevices.getUserMedia({
+  if (isMicMutedByDesktop) return;
+  micStartPromise = (async () => {
+    try {
+      ensureAudio();
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+      if (isMicMutedByDesktop) return;
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
-    }
-    micStream.getAudioTracks().forEach((track) => {
-      track.enabled = !isMicMutedByDesktop;
-    });
+      if (isMicMutedByDesktop) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      micStream = stream;
 
-    if (!isMobile()) {
-      vadAnalyser = audioCtx.createAnalyser();
-      vadAnalyser.fftSize = 512;
-      vadData = new Uint8Array(vadAnalyser.fftSize);
-      // Sambung mic -> analyser SAJA (jangan ke destination, nanti feedback).
-      audioCtx.createMediaStreamSource(micStream).connect(vadAnalyser);
-      setMicStatus(!isMicMutedByDesktop, isMicMutedByDesktop ? '🔇 Mikrofon di-mute' : 'Mendengarkan…');
-      requestAnimationFrame(vadLoop);
-    } else {
+      if (!isMobile()) {
+        vadAnalyser = audioCtx.createAnalyser();
+        vadAnalyser.fftSize = 512;
+        vadData = new Uint8Array(vadAnalyser.fftSize);
+        // Connect only to the analyser to avoid microphone feedback.
+        audioCtx.createMediaStreamSource(micStream).connect(vadAnalyser);
+        vadFrame = requestAnimationFrame(vadLoop);
+      }
       updateUiForState(playbackState());
+    } catch (err) {
+      listening = false;
+      setMicStatus(false, 'Mic gagal');
+      log(`Mic gagal: ${err.message}`, 'error');
     }
-  } catch (err) {
-    listening = false;
-    setMicStatus(false, 'Mic gagal');
-    log(`Mic gagal: ${err.message}`, 'error');
-  }
+  })().finally(() => {
+    micStartPromise = null;
+    reportDesktopMicState();
+  });
+  return micStartPromise;
 }
 
 // ---------------------------------------------------------------------------
@@ -1171,7 +1231,7 @@ window.addEventListener('resize', () => {
     vadAnalyser.fftSize = 512;
     vadData = new Uint8Array(vadAnalyser.fftSize);
     audioCtx.createMediaStreamSource(micStream).connect(vadAnalyser);
-    requestAnimationFrame(vadLoop);
+    vadFrame = requestAnimationFrame(vadLoop);
   }
 });
 
