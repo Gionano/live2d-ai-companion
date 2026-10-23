@@ -5,8 +5,13 @@
 let modalContainer = null;
 let currentJobId = null;
 let autoCloseTimer = null;
+let copyFeedbackTimer = null;
 let currentState = null;
 let cancelCallback = null;
+let modalRevision = 0;
+let modalVisible = false;
+let previousFocus = null;
+const backgroundInertStates = new Map();
 const retiredJobs = new Set();
 
 function ensureModalContainer() {
@@ -147,14 +152,60 @@ function ensureModalContainer() {
         .b-img, .b-progress-fill { transition: none; }
       }
     </style>
-    <div class="b-selfie-card" id="b-card" role="region" aria-label="Foto Amika"></div>
+    <div class="b-selfie-card" id="b-card" role="dialog" aria-modal="true" aria-label="Foto Amika" tabindex="-1"></div>
   `;
 
   document.body.appendChild(modalContainer);
-  modalContainer.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && currentState === 'ready') hideBrowserModal();
+  document.addEventListener('keydown', handleModalKeydown, true);
+  document.addEventListener('focusin', () => {
+    if (modalVisible && !modalContainer.contains(document.activeElement)) focusModal();
   });
   return modalContainer;
+}
+
+function modalFocusTargets() {
+  const card = document.getElementById('b-card');
+  return card ? [...card.querySelectorAll('button, a[href], [tabindex]')]
+    .filter((element) => !element.disabled && !element.hidden && element.tabIndex >= 0) : [];
+}
+
+function focusModal() {
+  const target = modalFocusTargets()[0] || document.getElementById('b-card');
+  target?.focus();
+}
+
+function showBrowserModal() {
+  if (!modalVisible) {
+    previousFocus = document.activeElement;
+    for (const element of document.body.children) {
+      if (element === modalContainer) continue;
+      backgroundInertStates.set(element, element.inert);
+      element.inert = true;
+    }
+  }
+  modalVisible = true;
+  modalContainer.style.display = 'block';
+  focusModal();
+}
+
+function handleModalKeydown(event) {
+  if (!modalVisible) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    hideBrowserModal();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const targets = modalFocusTargets();
+  const first = targets[0];
+  const last = targets[targets.length - 1];
+  const active = document.activeElement;
+  if (!first || !targets.includes(active) || event.shiftKey && active === first || !event.shiftKey && active === last) {
+    event.preventDefault();
+    (event.shiftKey ? last : first)?.focus();
+    if (!first) document.getElementById('b-card')?.focus();
+  }
 }
 
 function retireJob(jobId) {
@@ -163,9 +214,11 @@ function retireJob(jobId) {
   if (retiredJobs.size > 32) retiredJobs.delete(retiredJobs.values().next().value);
 }
 
-function clearAutoClose() {
+function clearModalTimers() {
   if (autoCloseTimer !== null) clearTimeout(autoCloseTimer);
+  if (copyFeedbackTimer !== null) clearTimeout(copyFeedbackTimer);
   autoCloseTimer = null;
+  copyFeedbackTimer = null;
 }
 
 function resolveImageUrl(value) {
@@ -188,11 +241,34 @@ function updateEta(value) {
 }
 
 export function handleBrowserSelfieModal(msg, onCancel = null) {
+  if (msg?.type === 'selfie_snapshot') {
+    if (!Array.isArray(msg.events) || msg.activeJobId !== null &&
+        (typeof msg.activeJobId !== 'string' || !msg.activeJobId)) return;
+    const first = msg.events[0];
+    const snapshotJobId = msg.activeJobId ?? first?.jobId;
+    if (msg.events.length) {
+      if (typeof snapshotJobId !== 'string' || !snapshotJobId ||
+          msg.events.some((event) => !event || event.jobId !== snapshotJobId)) return;
+      if (first.type === 'selfie_ready') {
+        if (msg.events.length !== 1 || !resolveImageUrl(first.imageUrl)) return;
+      } else if (!msg.activeJobId || first.type !== 'selfie_started' || first.status === 'queued' ||
+          msg.events.length > 2 || msg.events[1] && msg.events[1].type !== 'selfie_progress') return;
+    }
+    hideBrowserModal();
+    retiredJobs.clear();
+    currentJobId = null;
+    cancelCallback = null;
+    for (const event of msg.events) {
+      handleBrowserSelfieModal(event, onCancel);
+    }
+    return;
+  }
   if (!msg || !['selfie_started', 'selfie_progress', 'selfie_ready', 'selfie_failed', 'selfie_cancelled'].includes(msg.type) ||
       typeof msg.jobId !== 'string' || !msg.jobId || retiredJobs.has(msg.jobId)) return;
   if (msg.type === 'selfie_started' && msg.status === 'queued') return;
   if (msg.type === 'selfie_progress' || msg.type === 'selfie_failed' || msg.type === 'selfie_cancelled') {
-    if (msg.jobId !== currentJobId || currentState !== 'progress') return;
+    if (msg.jobId !== currentJobId || !['progress', 'cancelling'].includes(currentState) ||
+        msg.type === 'selfie_progress' && currentState === 'cancelling') return;
   }
   if (msg.type === 'selfie_started' && msg.jobId === currentJobId) {
     if (currentState === 'progress') {
@@ -203,7 +279,7 @@ export function handleBrowserSelfieModal(msg, onCancel = null) {
   }
   if (msg.type === 'selfie_ready' && msg.jobId === currentJobId && currentState === 'ready') return;
   const readyImageUrl = msg.type === 'selfie_ready' ? resolveImageUrl(msg.imageUrl) : null;
-  if (msg.type === 'selfie_ready' && (!readyImageUrl || currentState === 'progress' && msg.jobId !== currentJobId)) return;
+  if (msg.type === 'selfie_ready' && (!readyImageUrl || ['progress', 'cancelling'].includes(currentState) && msg.jobId !== currentJobId)) return;
   ensureModalContainer();
   const card = document.getElementById('b-card');
   if (!card) return;
@@ -211,11 +287,11 @@ export function handleBrowserSelfieModal(msg, onCancel = null) {
   switch (msg.type) {
     case 'selfie_started': {
       retireJob(currentJobId);
-      clearAutoClose();
+      clearModalTimers();
+      modalRevision += 1;
       currentJobId = msg.jobId;
       currentState = 'progress';
       cancelCallback = onCancel;
-      modalContainer.style.display = 'block';
       card.innerHTML = `
         <div class="b-header">
           <span>Amika lagi berfoto...</span>
@@ -232,20 +308,27 @@ export function handleBrowserSelfieModal(msg, onCancel = null) {
       updateEta(msg.etaSeconds);
       const button = document.getElementById('b-btn-cancel-job');
       button?.addEventListener('click', async () => {
+        if (currentState !== 'progress' || button !== document.getElementById('b-btn-cancel-job')) return;
         const jobId = currentJobId;
+        const revision = modalRevision;
+        currentState = 'cancelling';
         button.disabled = true;
+        document.getElementById('b-step').textContent = 'Membatalkan...';
+        focusModal();
         try {
           if (typeof cancelCallback !== 'function' || await cancelCallback(jobId) === false) {
             throw new Error('Cancellation unavailable');
           }
-          if (currentJobId === jobId && currentState === 'progress') hideBrowserModal();
         } catch (_) {
-          if (currentJobId === jobId && currentState === 'progress') {
+          if (modalRevision === revision && currentJobId === jobId && currentState === 'cancelling') {
+            currentState = 'progress';
             button.disabled = false;
             document.getElementById('b-step').textContent = 'Belum terhubung. Coba batal lagi.';
+            focusModal();
           }
         }
       });
+      showBrowserModal();
       break;
     }
 
@@ -266,10 +349,11 @@ export function handleBrowserSelfieModal(msg, onCancel = null) {
     case 'selfie_ready': {
       const imageUrl = readyImageUrl;
       if (msg.jobId !== currentJobId) retireJob(currentJobId);
-      clearAutoClose();
+      clearModalTimers();
+      modalRevision += 1;
+      const revision = modalRevision;
       currentJobId = msg.jobId;
       currentState = 'ready';
-      modalContainer.style.display = 'block';
       const caption = typeof msg.caption === 'string' && msg.caption ? msg.caption : 'Ini fotonya buat kamu sayang~';
 
       card.innerHTML = `
@@ -296,7 +380,7 @@ export function handleBrowserSelfieModal(msg, onCancel = null) {
       if (img) {
         img.onload = () => img.classList.add('loaded');
         img.onerror = () => {
-          if (currentJobId === msg.jobId && currentState === 'ready') {
+          if (modalRevision === revision && currentJobId === msg.jobId && currentState === 'ready') {
             img.alt = 'Foto gagal dimuat';
             img.classList.add('loaded');
             document.getElementById('b-caption').textContent = 'Foto gagal dimuat. Coba buka lagi nanti.';
@@ -316,16 +400,26 @@ export function handleBrowserSelfieModal(msg, onCancel = null) {
         const button = e.currentTarget;
         try {
           await navigator.clipboard.writeText(imageUrl);
+          if (modalRevision !== revision || currentState !== 'ready') return;
           button.textContent = 'Disalin';
-          setTimeout(() => { button.textContent = 'Salin Link'; }, 2000);
+          if (copyFeedbackTimer !== null) clearTimeout(copyFeedbackTimer);
+          copyFeedbackTimer = setTimeout(() => {
+            if (modalRevision === revision && currentState === 'ready') {
+              button.textContent = 'Salin Link';
+              copyFeedbackTimer = null;
+            }
+          }, 2000);
         } catch (_) {
-          button.textContent = 'Gagal menyalin';
+          if (modalRevision === revision && currentState === 'ready') button.textContent = 'Gagal menyalin';
         }
       });
 
       const autoCloseSeconds = typeof msg.autoCloseSeconds === 'number' && Number.isFinite(msg.autoCloseSeconds) && msg.autoCloseSeconds >= 0
         ? msg.autoCloseSeconds : 30;
-      if (autoCloseSeconds > 0) autoCloseTimer = setTimeout(hideBrowserModal, Math.min(autoCloseSeconds * 1000, 2147483647));
+      if (autoCloseSeconds > 0) autoCloseTimer = setTimeout(() => {
+        if (modalRevision === revision && currentState === 'ready') hideBrowserModal();
+      }, Math.min(autoCloseSeconds * 1000, 2147483647));
+      showBrowserModal();
       break;
     }
 
@@ -338,10 +432,17 @@ export function handleBrowserSelfieModal(msg, onCancel = null) {
 }
 
 function hideBrowserModal() {
-  clearAutoClose();
+  clearModalTimers();
+  modalRevision += 1;
   retireJob(currentJobId);
   currentState = 'closed';
+  modalVisible = false;
   if (modalContainer) {
     modalContainer.style.display = 'none';
   }
+  for (const [element, inert] of backgroundInertStates) element.inert = inert;
+  backgroundInertStates.clear();
+  const focus = previousFocus;
+  previousFocus = null;
+  if (focus?.isConnected && typeof focus.focus === 'function') focus.focus();
 }

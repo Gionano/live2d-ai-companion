@@ -590,7 +590,7 @@ function connectWS() {
       window.desktopBridge?.notifySelfieSettings?.(msg);
       return;
     }
-    if (['selfie_started', 'selfie_progress', 'selfie_ready', 'selfie_failed', 'selfie_cancelled'].includes(msg.type)) {
+    if (['selfie_started', 'selfie_progress', 'selfie_ready', 'selfie_failed', 'selfie_cancelled', 'selfie_snapshot'].includes(msg.type)) {
       if (window.desktopBridge?.notifySelfieEvent) {
         window.desktopBridge.notifySelfieEvent(msg);
       } else {

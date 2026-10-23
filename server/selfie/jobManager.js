@@ -10,7 +10,7 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
-import { loadSelfieConfig } from './config.js';
+import { loadSelfieConfig, normalizeAutoCloseSeconds } from './config.js';
 import { createImageProvider } from './imageProvider.js';
 import { etaStore } from './etaStore.js';
 import { logSelfie } from './log.js';
@@ -460,6 +460,7 @@ export class JobManager {
         caption: plan.caption,
         emotion: plan.emotion,
         durationMs,
+        autoCloseSeconds: normalizeAutoCloseSeconds(this.config.autoCloseSeconds),
       };
       this._readyEvent = jobData.readyEvent;
       this.broadcast(jobData.readyEvent);
@@ -524,14 +525,19 @@ export class JobManager {
 
   sendSnapshot(send) {
     const job = this.activeJob;
-    const ready = job?.readyEvent || (!job?.startedEvent && this._readyEvent);
+    const events = [];
+    const activeJobId = job && !job.readyEvent && !job.cancelledEvent
+      && !job.abortController.signal.aborted ? job.jobId : null;
+    const ready = job?.readyEvent || (!job && this._readyEvent);
     if (ready) {
       const token = ready.imageUrl.slice('/api/selfies/'.length);
-      if (this.getFileByToken(token)) send({ ...ready });
-    } else if (job?.startedEvent) {
-      send({ ...job.startedEvent });
-      if (job.lastProgress) send({ ...job.lastProgress });
+      if (this.getFileByToken(token)) events.push({ ...ready });
+    } else if (activeJobId && job.startedEvent) {
+      events.push({ ...job.startedEvent });
+      if (job.lastProgress) events.push({ ...job.lastProgress });
     }
+    // Reconnection also needs an explicit empty snapshot to clear stale client state.
+    send({ type: 'selfie_snapshot', activeJobId, events });
   }
 
   shutdown() {

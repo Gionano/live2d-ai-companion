@@ -416,6 +416,7 @@
     let currentJobId = null;
     let currentImageUrl = null;
     let currentState = null;
+    let jobRevision = 0;
     let autoCloseTimer = null;
     let autoCloseSeconds = 30;
     let configuredAutoCloseSeconds = 30;
@@ -425,6 +426,13 @@
     // Subscribe before the handshake so queued lifecycle events cannot be lost.
     if (window.selfieApi?.onSelfieEvent) {
       window.selfieApi.onSelfieEvent((payload) => {
+        if (payload?.type === 'selfie_reset') {
+          resetJob({ jobId: null });
+          currentState = null;
+          stateGen.style.display = 'none';
+          stateReady.style.display = 'none';
+          return;
+        }
         if (!payload || typeof payload.jobId !== 'string' || !payload.type) return;
         if (payload.type !== 'selfie_started' && currentJobId && payload.jobId !== currentJobId
           && !(payload.type === 'selfie_ready' && payload.replaceJob === true)) return;
@@ -456,6 +464,7 @@
     }
 
     function resetJob(data) {
+      jobRevision += 1;
       clearAutoClose();
       for (const timer of buttonTimers) clearTimeout(timer);
       buttonTimers.clear();
@@ -509,14 +518,15 @@
       stateReady.style.display = 'flex';
 
       const jobId = currentJobId;
+      const revision = jobRevision;
       selfieImg.onload = () => {
-        if (currentJobId !== jobId || currentState !== 'ready') return;
+        if (jobRevision !== revision || currentJobId !== jobId || currentState !== 'ready') return;
         selfieImg.classList.add('loaded');
         imageStatus.style.display = 'none';
         for (const button of actionButtons) button.disabled = false;
       };
       selfieImg.onerror = () => {
-        if (currentJobId !== jobId || currentState !== 'ready') return;
+        if (jobRevision !== revision || currentJobId !== jobId || currentState !== 'ready') return;
         imageStatus.textContent = 'Foto gagal dimuat. Buka Folder untuk melihat hasilnya.';
         folderButton.disabled = false;
       };
@@ -558,10 +568,11 @@
       }
       autoCloseSeconds = seconds;
       const jobId = currentJobId;
+      const revision = jobRevision;
       autoCloseHint.textContent = `Menutup otomatis dalam ${autoCloseSeconds}s`;
 
       autoCloseTimer = setInterval(() => {
-        if (currentJobId !== jobId || currentState !== 'ready') return clearAutoClose();
+        if (jobRevision !== revision || currentJobId !== jobId || currentState !== 'ready') return;
         autoCloseSeconds -= 1;
         if (autoCloseSeconds <= 0) {
           clearAutoClose();
@@ -591,18 +602,19 @@
     cancelButton.addEventListener('click', async () => {
       if (!currentJobId || currentState !== 'generating' || cancelButton.disabled) return;
       const jobId = currentJobId;
+      const revision = jobRevision;
       cancelButton.disabled = true;
       cancelButton.textContent = 'Membatalkan...';
       try {
         const result = await window.selfieApi?.cancelJob(jobId);
-        if (currentJobId !== jobId || currentState !== 'generating') return;
+        if (jobRevision !== revision || currentJobId !== jobId || currentState !== 'generating') return;
         if (result === true || result?.cancelled === true || result?.ok === true) {
           progressText.textContent = 'Menunggu pembatalan...';
           return;
         }
         throw new Error('Cancellation was not accepted');
       } catch {
-        if (currentJobId !== jobId || currentState !== 'generating') return;
+        if (jobRevision !== revision || currentJobId !== jobId || currentState !== 'generating') return;
         progressText.textContent = 'Gagal membatalkan. Coba lagi.';
         cancelButton.disabled = false;
         cancelButton.textContent = 'Coba batal';
@@ -647,11 +659,12 @@
 
     function showActionSuccess(button, label, duration) {
       const jobId = currentJobId;
+      const revision = jobRevision;
       button.classList.add('success');
       button.textContent = label;
       const timer = setTimeout(() => {
         buttonTimers.delete(timer);
-        if (currentJobId !== jobId) return;
+        if (jobRevision !== revision || currentJobId !== jobId) return;
         button.classList.remove('success');
         button.innerHTML = originalButtonContent.get(button);
       }, duration);
@@ -662,16 +675,17 @@
       if (!currentImageUrl || saveButton.disabled) return;
       clearAutoClose();
       const jobId = currentJobId;
+      const revision = jobRevision;
       saveButton.disabled = true;
       try {
         const res = await window.selfieApi?.saveImage(currentImageUrl);
-        if (currentJobId !== jobId) return;
+        if (jobRevision !== revision || currentJobId !== jobId) return;
         if (res?.saved) showActionSuccess(saveButton, 'Tersimpan', 2500);
         else if (!res?.cancelled) autoCloseHint.textContent = 'Foto gagal disimpan. Coba lagi.';
       } catch {
-        if (currentJobId === jobId) autoCloseHint.textContent = 'Foto gagal disimpan. Coba lagi.';
+        if (jobRevision === revision && currentJobId === jobId) autoCloseHint.textContent = 'Foto gagal disimpan. Coba lagi.';
       } finally {
-        if (currentJobId === jobId && currentState === 'ready') saveButton.disabled = false;
+        if (jobRevision === revision && currentJobId === jobId && currentState === 'ready') saveButton.disabled = false;
       }
     });
 
@@ -679,16 +693,17 @@
       if (!currentImageUrl || copyButton.disabled) return;
       clearAutoClose();
       const jobId = currentJobId;
+      const revision = jobRevision;
       copyButton.disabled = true;
       try {
         const result = await window.selfieApi?.copyImage(currentImageUrl);
-        if (currentJobId !== jobId) return;
+        if (jobRevision !== revision || currentJobId !== jobId) return;
         if (result === true || result?.copied === true || result?.ok === true) showActionSuccess(copyButton, 'Tersalin', 2000);
         else autoCloseHint.textContent = 'Foto gagal disalin. Coba lagi.';
       } catch {
-        if (currentJobId === jobId) autoCloseHint.textContent = 'Foto gagal disalin. Coba lagi.';
+        if (jobRevision === revision && currentJobId === jobId) autoCloseHint.textContent = 'Foto gagal disalin. Coba lagi.';
       } finally {
-        if (currentJobId === jobId && currentState === 'ready') copyButton.disabled = false;
+        if (jobRevision === revision && currentJobId === jobId && currentState === 'ready') copyButton.disabled = false;
       }
     });
 
@@ -696,12 +711,13 @@
       if (folderButton.disabled) return;
       clearAutoClose();
       const jobId = currentJobId;
+      const revision = jobRevision;
       try {
         const result = await window.selfieApi?.openFolder();
-        if (currentJobId !== jobId) return;
+        if (jobRevision !== revision || currentJobId !== jobId) return;
         if (result === false || result?.ok === false) autoCloseHint.textContent = 'Folder gagal dibuka. Coba lagi.';
       } catch {
-        if (currentJobId === jobId) autoCloseHint.textContent = 'Folder gagal dibuka. Coba lagi.';
+        if (jobRevision === revision && currentJobId === jobId) autoCloseHint.textContent = 'Folder gagal dibuka. Coba lagi.';
       }
     });
   </script>

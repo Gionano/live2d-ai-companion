@@ -14,6 +14,7 @@ const DEFAULTS = {
   provider: 'comfyui',
   comfyUrl: 'http://127.0.0.1:8000',
   outputDir: '',
+  autoCloseSeconds: 30,
   allowLan: false,
   filenamePrefix: 'waifu_selfie',
   jobTimeoutMs: 600000,
@@ -54,6 +55,10 @@ const DEFAULTS = {
 
 export const PROVIDERS = ['comfyui', 'sdcpp', 'cloud'];
 
+export function normalizeAutoCloseSeconds(value) {
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULTS.autoCloseSeconds;
+}
+
 function resolveDir(value, fallback) {
   const v = (value || '').trim();
   if (!v) return fallback;
@@ -85,6 +90,7 @@ export function loadSelfieConfig(overrides = {}) {
   cfg.phrases = { ...DEFAULTS.phrases, ...(fileCfg.phrases || {}) };
   cfg.sdcpp = { ...(fileCfg.sdcpp || {}) };
   cfg.comfyUrl = String(cfg.comfyUrl).replace(/\/+$/, '');
+  cfg.autoCloseSeconds = normalizeAutoCloseSeconds(cfg.autoCloseSeconds);
 
   if (!PROVIDERS.includes(cfg.provider)) {
     throw new Error(`selfie.config.json: provider "${cfg.provider}" tidak dikenal. Pilihan: ${PROVIDERS.join(', ')}`);

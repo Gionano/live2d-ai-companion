@@ -32,6 +32,7 @@ export class SelfieWindowManager {
     this._eventSnapshot = new Map();
     this._hideTimer = null;
     this._jobState = null;
+    this._jobRevision = 0;
     this._previousJobs = new Set();
     this._ipcHandlers = new Map();
     this._destroyed = false;
@@ -236,6 +237,28 @@ export class SelfieWindowManager {
    * Tangani event WebSocket selfie_* dan sinkronkan dengan UI popup.
    */
   handleSelfieEvent(event) {
+    if (!this._destroyed && this.selfieEnabled && event?.type === 'selfie_snapshot') {
+      const validId = (id) => typeof id === 'string' && id.length > 0 && id.length <= 128;
+      if ((event.activeJobId !== null && !validId(event.activeJobId)) || !Array.isArray(event.events)
+        || event.events.length > 2) return false;
+      const snapshotJobId = event.events[0]?.jobId;
+      if (event.events.some(item => !item || !validId(item.jobId) || item.jobId !== snapshotJobId
+        || !['selfie_started', 'selfie_progress', 'selfie_ready'].includes(item.type))
+        || (event.activeJobId && snapshotJobId && event.activeJobId !== snapshotJobId)
+        || event.events.some(item => item.type === 'selfie_ready' && !this._resolveImageUrl(item.imageUrl))) return false;
+      this._hidePopup();
+      this._pendingEvents = [];
+      this._eventSnapshot.clear();
+      this._previousJobs.clear();
+      this._jobRevision += 1;
+      this.currentJobId = null;
+      this.currentImageUrl = null;
+      this._jobState = null;
+      // Reset renderer timers/state even when the authoritative snapshot is empty.
+      if (this.popupWindow && !this.popupWindow.isDestroyed()) this._sendPopupEvent({ type: 'selfie_reset' });
+      for (const item of event.events) this.handleSelfieEvent(item);
+      return true;
+    }
     const types = ['selfie_started', 'selfie_progress', 'selfie_ready', 'selfie_failed', 'selfie_cancelled'];
     if (this._destroyed || !event || !types.includes(event.type)
       || typeof event.jobId !== 'string' || !event.jobId || event.jobId.length > 128) return false;
@@ -259,6 +282,7 @@ export class SelfieWindowManager {
       if (this.currentJobId) this._previousJobs.add(this.currentJobId);
       if (this._previousJobs.size > 100) this._previousJobs.delete(this._previousJobs.values().next().value);
       this.currentJobId = event.jobId;
+      this._jobRevision += 1;
       this._jobState = null;
       this.currentImageUrl = null;
       this._pendingEvents = [];
@@ -308,7 +332,7 @@ export class SelfieWindowManager {
           imageUrl,
           replaceJob: true,
           cardSize: { width: bounds.width, height: bounds.height },
-          autoCloseSeconds: config?.autoCloseSeconds ?? 30,
+          autoCloseSeconds: Number.isFinite(event.autoCloseSeconds) ? event.autoCloseSeconds : config?.autoCloseSeconds ?? 30,
         });
         break;
       }
@@ -332,10 +356,11 @@ export class SelfieWindowManager {
       if (['selfie_failed', 'selfie_cancelled'].includes(event.type)) {
         const win = this.popupWindow;
         const jobId = event.jobId;
+        const revision = this._jobRevision;
         this._clearHideTimer();
         this._hideTimer = setTimeout(() => {
           this._hideTimer = null;
-          if (this.currentJobId === jobId && this.popupWindow === win && !win.isDestroyed()) win.hide();
+          if (this._jobRevision === revision && this.currentJobId === jobId && this.popupWindow === win && !win.isDestroyed()) win.hide();
         }, 1200);
         this._hideTimer.unref?.();
       }
