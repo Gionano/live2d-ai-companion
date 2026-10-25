@@ -1,6 +1,6 @@
 # Vision Monitor
 
-Dashboard observer untuk backend companion (`my waipu`). Menampilkan frame, deskripsi vision, hasil filter, dan statistik secara real-time. Tidak memanggil API AI sendiri: semua vision (Qwen 3.8 27B via Groq) dan filter (DeepSeek V4 Flash via 9inference) dijalankan di backend utama.
+Dashboard observer untuk backend companion (`amika-live2d-companion`). Menampilkan frame, deskripsi vision, hasil filter, dan statistik secara real-time. Tidak memanggil API AI sendiri: semua vision (Qwen 3.8 27B via Groq) dan filter (DeepSeek V4 Flash via 9inference) dijalankan di backend utama.
 
 ## Arsitektur
 

@@ -1,120 +1,250 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1340 380" width="100%" height="100%" style="background:#0f1117;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 1472" width="1440" height="1472" role="img" aria-labelledby="architecture-title architecture-description" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+  <title id="architecture-title">Amika AI Companion system architecture</title>
+  <desc id="architecture-description">Browser and Electron clients use WebSocket and HTTP proxies to the Node.js backend. Cloud services provide transcription, vision, chat and planning, spontaneous filtering, and speech. PAP branches before ordinary chat and runs asynchronous local jobs through existing ComfyUI, managed ComfyUI, or sd.cpp. Results use WebSocket events and token HTTP images. The optional Vision Monitor connects through its own bridge and enables continuous vision.</desc>
   <defs>
-    <!-- Arrowhead markers -->
-    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#38bdf8"/>
-    </marker>
-    <marker id="arrow-dotted" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#94a3b8"/>
-    </marker>
-    <marker id="arrow-pink" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#f472b6"/>
-    </marker>
-    
-    <!-- Gradients -->
-    <linearGradient id="card-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#1e2230" />
-      <stop offset="100%" stop-color="#131620" />
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#202638"/>
+      <stop offset="100%" stop-color="#171c2a"/>
     </linearGradient>
-    <linearGradient id="card-grad-active" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#242b3d" />
-      <stop offset="100%" stop-color="#151a27" />
+    <linearGradient id="photo-card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#302036"/>
+      <stop offset="100%" stop-color="#201925"/>
     </linearGradient>
-    <linearGradient id="card-grad-wip" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#2d1b2d" />
-      <stop offset="100%" stop-color="#19121f" />
-    </linearGradient>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 1 1 L 9 5 L 1 9 z" fill="#38bdf8"/>
+    </marker>
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 1 1 L 9 5 L 1 9 z" fill="#a5b4c8"/>
+    </marker>
+    <marker id="arrow-pink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 1 1 L 9 5 L 1 9 z" fill="#f472b6"/>
+    </marker>
+    <style>
+      .boundary { fill: #111622; stroke: #344158; stroke-width: 1.5; }
+      .node { fill: url(#card); stroke: #40516c; stroke-width: 1.3; }
+      .active { stroke: #38bdf8; }
+      .photo { fill: url(#photo-card); stroke: #f472b6; stroke-width: 1.3; }
+      .heading { fill: #f1f5f9; font-size: 21px; font-weight: 700; }
+      .label { fill: #e2e8f0; font-size: 18px; font-weight: 600; }
+      .detail { fill: #b8c5d8; font-size: 16px; }
+      .small { fill: #a5b4c8; font-size: 14px; }
+      .mono { font-family: Consolas,'Liberation Mono',monospace; font-size: 14px; fill: #cbd5e1; }
+      .main-flow { fill: none; stroke: #38bdf8; stroke-width: 2; }
+      .optional-flow { fill: none; stroke: #a5b4c8; stroke-width: 2; stroke-dasharray: 6 5; }
+      .photo-flow { fill: none; stroke: #f472b6; stroke-width: 2; }
+    </style>
   </defs>
 
-  <!-- Title & Subtitle -->
-  <text x="30" y="32" fill="#f8fafc" font-size="16" font-weight="700" letter-spacing="0.5">AMIKA AI COMPANION — MULTIMODAL PIPELINE &amp; ECOSYSTEM ARCHITECTURE</text>
-  <text x="30" y="50" fill="#64748b" font-size="12">STT Whisper • Groq Vision • 9inference Filter • Uncensored Brain &amp; Memory • Fish Audio TTS • ComfyUI PAP</text>
+  <rect width="1440" height="1472" rx="16" fill="#0f1117"/>
+  <text x="32" y="46" fill="#f8fafc" font-size="28" font-weight="700">AMIKA AI COMPANION</text>
+  <text x="32" y="76" fill="#b8c5d8" font-size="18">System architecture &#183; voice, vision, memory, local PAP generation, and desktop integration</text>
 
-  <!-- ==================== NODES ==================== -->
+  <!-- Runtime boundaries. Cloud integrations and local providers are called by the backend. -->
+  <rect class="boundary" x="32" y="108" width="304" height="890" rx="14"/>
+  <rect class="boundary" x="426" y="108" width="550" height="890" rx="14"/>
+  <rect class="boundary" x="1078" y="108" width="330" height="890" rx="14"/>
+  <rect class="boundary" x="32" y="1040" width="304" height="346" rx="14"/>
+  <rect x="426" y="1040" width="982" height="346" rx="14" fill="#17131e" stroke="#80506d" stroke-width="1.5"/>
+  <text class="heading" x="56" y="143">COMPANION CLIENTS</text>
+  <text class="heading" x="452" y="143">NODE.JS BACKEND &#183; :8787</text>
+  <text class="heading" x="1102" y="143">CLOUD SERVICES</text>
+  <text class="heading" x="56" y="1075">VISION MONITOR</text>
+  <text class="heading" x="452" y="1075">LOCAL IMAGE GENERATION</text>
+  <text class="small" x="452" y="1100">Automatic failover only before generation starts &#183; references and image models stay local</text>
 
-  <!-- 1. Input: Suara User (x=240, y=90, w=110, h=44) -->
-  <rect x="240" y="90" width="110" height="44" rx="6" fill="url(#card-grad)" stroke="#334155" stroke-width="1.2"/>
-  <text x="295" y="117" fill="#f1f5f9" font-size="13" font-weight="600" text-anchor="middle">🎙️ Suara User</text>
+  <!-- Connectors sit behind cards. -->
+  <g aria-label="Client and backend connections">
+    <path class="main-flow" d="M 312 458 H 392 V 215 H 452" marker-end="url(#arrow-blue)"/>
+    <text class="small" x="350" y="203">voice / text</text>
+    <path class="main-flow" d="M 312 504 H 370 V 366 H 452" marker-end="url(#arrow-blue)"/>
+    <text class="small" x="374" y="352">frames</text>
+    <path class="main-flow" d="M 452 782 H 392 V 653 H 312" marker-end="url(#arrow-blue)"/>
+    <text class="small" x="345" y="639">audio / cues</text>
+    <path class="photo-flow" d="M 312 922 H 452" marker-start="url(#arrow-pink)" marker-end="url(#arrow-pink)"/>
+    <text class="small" x="342" y="907">events / HTTP</text>
+  </g>
+  <g aria-label="Backend data flow">
+    <!-- PAP is routed before normal conversation; vision is optional. -->
+    <path class="photo-flow" d="M 510 272 V 292 H 440 V 912 H 452" marker-end="url(#arrow-pink)"/>
+    <path class="main-flow" d="M 780 272 H 964 V 509 H 950" marker-end="url(#arrow-blue)"/>
+    <path class="optional-flow" d="M 702 272 V 318" marker-end="url(#arrow-gray)"/>
+    <text class="small" x="718" y="301">optional vision context</text>
+    <path class="main-flow" d="M 702 414 V 462" marker-end="url(#arrow-blue)"/>
+    <text class="small" x="718" y="445">frame description</text>
+    <path class="optional-flow" d="M 510 414 V 436 H 448 V 650 H 452" marker-end="url(#arrow-gray)"/>
+    <path class="main-flow" d="M 780 556 H 958 V 762 H 950" marker-end="url(#arrow-blue)"/>
+    <path class="optional-flow" d="M 702 694 V 740" marker-end="url(#arrow-gray)"/>
+    <text class="small" x="718" y="725">COMMENT &#8594; speech</text>
+    <path class="photo-flow" d="M 576 862 V 824" marker-end="url(#arrow-pink)"/>
+    <text class="small" x="590" y="846">start / caption / failure</text>
+    <path class="photo-flow" d="M 702 972 V 1030 H 438 V 1145 H 452" marker-start="url(#arrow-pink)" marker-end="url(#arrow-pink)"/>
+    <text class="small" x="716" y="1021">jobs / results</text>
+  </g>
+  <g aria-label="Cloud API connections">
+    <path class="main-flow" d="M 950 215 H 1102" marker-start="url(#arrow-blue)" marker-end="url(#arrow-blue)"/>
+    <text class="small" x="992" y="201">audio / text</text>
+    <path class="main-flow" d="M 950 366 H 1102" marker-start="url(#arrow-blue)" marker-end="url(#arrow-blue)"/>
+    <text class="small" x="992" y="352">frame / text</text>
+    <path class="main-flow" d="M 950 509 H 1102" marker-start="url(#arrow-blue)" marker-end="url(#arrow-blue)"/>
+    <text class="small" x="992" y="495">chat stream</text>
+    <path class="photo-flow" d="M 950 890 H 982 V 534 H 1102" marker-start="url(#arrow-pink)" marker-end="url(#arrow-pink)"/>
+    <text class="small" x="993" y="880">scene plan</text>
+    <path class="optional-flow" d="M 950 650 H 1102" marker-start="url(#arrow-gray)" marker-end="url(#arrow-gray)"/>
+    <text class="small" x="992" y="636">buffer / JSON</text>
+    <path class="main-flow" d="M 950 782 H 1102" marker-start="url(#arrow-blue)" marker-end="url(#arrow-blue)"/>
+    <text class="small" x="992" y="768">text / MP3</text>
+  </g>
+  <g aria-label="Optional monitor connection and local provider execution">
+    <path class="optional-flow" d="M 184 1212 V 1240" marker-start="url(#arrow-gray)" marker-end="url(#arrow-gray)"/>
+    <path class="optional-flow" d="M 312 1284 H 380 V 986 H 426" marker-start="url(#arrow-gray)" marker-end="url(#arrow-gray)"/>
+    <path class="photo-flow" d="M 593 1170 V 1188" marker-end="url(#arrow-pink)"/>
+    <path class="photo-flow" d="M 909 1170 V 1188" marker-end="url(#arrow-pink)"/>
+    <path class="photo-flow" d="M 1225 1170 V 1188" marker-end="url(#arrow-pink)"/>
+    <path class="photo-flow" d="M 593 1284 V 1310" marker-end="url(#arrow-pink)"/>
+    <path class="photo-flow" d="M 909 1284 V 1310" marker-end="url(#arrow-pink)"/>
+    <path class="photo-flow" d="M 1225 1284 V 1310" marker-end="url(#arrow-pink)"/>
+  </g>
 
-  <!-- 2. STT: Groq Whisper Large v3 (x=380, y=80, w=160, h=64) -->
-  <rect x="380" y="80" width="160" height="64" rx="8" fill="url(#card-grad-active)" stroke="#38bdf8" stroke-width="1.4"/>
-  <text x="460" y="106" fill="#38bdf8" font-size="12" font-weight="700" text-anchor="middle">Groq: Whisper Large v3</text>
-  <text x="460" y="126" fill="#94a3b8" font-size="11" text-anchor="middle">Speech-to-Text (STT)</text>
+  <!-- The same renderer runs in a browser or in the isolated Electron overlay. -->
+  <g aria-label="Companion clients">
+    <rect class="node" x="56" y="162" width="256" height="104" rx="8"/>
+    <text class="label" x="72" y="190">Browser / Vite &#183; :5173</text>
+    <text class="detail" x="72" y="216">Shared Live2D renderer</text>
+    <text class="mono" x="72" y="242">/ws + /api &#8594; backend</text>
 
-  <!-- 3. Input: Layar / Kamera (x=30, y=210, w=130, h=50) -->
-  <rect x="30" y="210" width="130" height="50" rx="6" fill="url(#card-grad)" stroke="#334155" stroke-width="1.2"/>
-  <text x="95" y="240" fill="#f1f5f9" font-size="13" font-weight="600" text-anchor="middle">🖥️ Layar / Kamera</text>
+    <rect class="node" x="56" y="290" width="256" height="112" rx="8"/>
+    <text class="label" x="72" y="318">Electron overlay</text>
+    <text class="detail" x="72" y="344">Dev: Vite; packaged: local</text>
+    <text class="detail" x="72" y="367">static server + API/WS proxy</text>
+    <text class="small" x="72" y="390">Isolated, sandboxed preload IPC</text>
 
-  <!-- 4. Vision: Groq Qwen 3.8 27B (x=190, y=200, w=160, h=70) -->
-  <rect x="190" y="200" width="160" height="70" rx="8" fill="url(#card-grad-active)" stroke="#38bdf8" stroke-width="1.4"/>
-  <text x="270" y="228" fill="#38bdf8" font-size="12" font-weight="700" text-anchor="middle">Groq: Qwen 3.8 27B</text>
-  <text x="270" y="246" fill="#cbd5e1" font-size="11" text-anchor="middle">Vision Perception</text>
-  <text x="270" y="260" fill="#64748b" font-size="9" text-anchor="middle">(Webcam / Direct Capture)</text>
+    <rect class="node" x="56" y="426" width="256" height="144" rx="8"/>
+    <text class="label" x="72" y="453">Input and capture</text>
+    <text class="detail" x="72" y="479">Mic: VAD / mobile PTT</text>
+    <text class="detail" x="72" y="502">Desktop typed text</text>
+    <text class="detail" x="72" y="525">Webcam / browser screen share</text>
+    <text class="small" x="72" y="551">Electron: protected direct capture</text>
 
-  <!-- 5. Filter: 9inference DeepSeek V4 Flash (x=380, y=190, w=160, h=70) -->
-  <rect x="380" y="190" width="160" height="70" rx="8" fill="url(#card-grad)" stroke="#475569" stroke-dasharray="4,3" stroke-width="1.2"/>
-  <text x="460" y="218" fill="#cbd5e1" font-size="11" font-weight="600" text-anchor="middle">9inference: DeepSeek V4</text>
-  <text x="460" y="236" fill="#94a3b8" font-size="11" text-anchor="middle">Filter Momen Spontan</text>
-  <text x="460" y="250" fill="#64748b" font-size="9" text-anchor="middle">(Continuous Capture Buffer)</text>
+    <rect x="56" y="608" width="256" height="126" rx="8" fill="url(#card)" stroke="#4ade80" stroke-width="1.3"/>
+    <text class="label" x="72" y="637" style="fill:#4ade80">Live2D and playback</text>
+    <text class="detail" x="72" y="663">Sentence audio + captions</text>
+    <text class="detail" x="72" y="686">Mouth envelope lip sync</text>
+    <text class="detail" x="72" y="710">12 emotion cues + turn state</text>
 
-  <!-- 6. Brain & Memory: Experiential Labs (x=580, y=140, w=200, h=96) -->
-  <rect x="580" y="140" width="200" height="96" rx="10" fill="url(#card-grad-active)" stroke="#38bdf8" stroke-width="2"/>
-  <text x="680" y="168" fill="#38bdf8" font-size="13" font-weight="700" text-anchor="middle">Experiential Labs</text>
-  <text x="680" y="188" fill="#f8fafc" font-size="11" font-weight="600" text-anchor="middle">DeepSeek / Qwen Uncensored</text>
-  <text x="680" y="206" fill="#cbd5e1" font-size="11" text-anchor="middle">Otak Utama &amp; Persona</text>
-  <text x="680" y="222" fill="#a78bfa" font-size="10" font-weight="600" text-anchor="middle">🧠 Long-Term Memory (JSON)</text>
+    <rect class="photo" x="56" y="862" width="256" height="110" rx="8"/>
+    <text class="label" x="72" y="889" style="fill:#f472b6">PAP photo display</text>
+    <text class="detail" x="72" y="912">Browser dialog / Electron popup</text>
+    <text class="detail" x="72" y="935">Progress, cancel, reconnect</text>
+    <text class="small" x="72" y="958">Token HTTP images &#183; save / copy</text>
+    <text class="small" x="56" y="782">Electron tray gates Screen Vision.</text>
+    <text class="small" x="56" y="805">Overlay and popup are excluded</text>
+    <text class="small" x="56" y="828">from desktop screen capture.</text>
+  </g>
 
-  <!-- 7. TTS: Fish Audio S2.1 Pro (x=820, y=155, w=170, h=66) -->
-  <rect x="820" y="155" width="170" height="66" rx="8" fill="url(#card-grad-active)" stroke="#38bdf8" stroke-width="1.4"/>
-  <text x="905" y="183" fill="#38bdf8" font-size="12" font-weight="700" text-anchor="middle">Fish Audio: S2.1 Pro</text>
-  <text x="905" y="203" fill="#cbd5e1" font-size="11" text-anchor="middle">Text-to-Speech Emosional</text>
+  <!-- Orchestration owns routing, local state, job admission, and shared speech. -->
+  <g aria-label="Node.js orchestration">
+    <rect class="node active" x="452" y="162" width="498" height="110" rx="8"/>
+    <text class="label" x="470" y="190">Voice / text ingress and turn routing</text>
+    <text class="detail" x="470" y="216">Speech &#8594; STT; typed text bypasses transcription</text>
+    <text class="detail" x="470" y="240">PAP intent branches before ordinary conversation</text>
+    <text class="small" x="470" y="261">Per-client turn cancellation and busy-input handling</text>
 
-  <!-- 8. Output Avatar: Live2D (x=1030, y=155, w=180, h=66) -->
-  <rect x="1030" y="155" width="180" height="66" rx="8" fill="url(#card-grad)" stroke="#22c55e" stroke-width="1.5"/>
-  <text x="1120" y="184" fill="#4ade80" font-size="13" font-weight="700" text-anchor="middle">👧 Suara &amp; Bibir Live2D</text>
-  <text x="1120" y="204" fill="#94a3b8" font-size="11" text-anchor="middle">Lip-Sync &amp; 12 Emosi Wajah</text>
+    <rect class="node active" x="452" y="318" width="498" height="96" rx="8"/>
+    <text class="label" x="470" y="346">Vision routing and continuous frame descriptions</text>
+    <text class="detail" x="470" y="372">On demand: webcam / screen; context can use recent buffer</text>
+    <text class="small" x="470" y="398">Continuous processing requires an active source + monitor</text>
 
-  <!-- 9. WIP Feature: ComfyUI PAP Image Generation (x=820, y=260, w=230, h=80) -->
-  <rect x="820" y="260" width="230" height="80" rx="8" fill="url(#card-grad-wip)" stroke="#f472b6" stroke-width="1.5" stroke-dasharray="6,3"/>
-  <rect x="830" y="270" width="94" height="18" rx="4" fill="#be185d"/>
-  <text x="877" y="283" fill="#fdf2f8" font-size="9" font-weight="700" text-anchor="middle">TAHAP PENGERJAAN</text>
-  <text x="935" y="306" fill="#f472b6" font-size="12" font-weight="700" text-anchor="middle">🎨 ComfyUI PAP Generator</text>
-  <text x="935" y="324" fill="#cbd5e1" font-size="10" text-anchor="middle">Kirim Foto / PAP Waifu on Demand</text>
+    <rect class="node active" x="452" y="462" width="498" height="94" rx="8"/>
+    <text class="label" x="470" y="490">Chat, persona, and conversation history</text>
+    <text class="detail" x="470" y="515">Stream replies; extract facts and episodes in background</text>
+    <text x="470" y="540" fill="#c4b5fd" font-size="16">Local recall / persistence: data/memory.json</text>
 
-  <!-- ==================== CONNECTORS / ARROWS ==================== -->
+    <rect class="node" x="452" y="608" width="498" height="86" rx="8"/>
+    <text class="label" x="470" y="636">Continuous buffer and spontaneous filter</text>
+    <text class="detail" x="470" y="661">COMMENT &#8594; shared speech queue; SKIP &#8594; no speech</text>
+    <text class="small" x="470" y="683">Comment text goes directly to speech; history is updated</text>
 
-  <!-- Suara User -> Groq Whisper -->
-  <path d="M 350 112 L 380 112" fill="none" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+    <rect class="node active" x="452" y="740" width="498" height="84" rx="8"/>
+    <text class="label" x="470" y="768">Shared speech controller and streaming TTS</text>
+    <text class="detail" x="470" y="793">Chat, spontaneous comments, and deferred PAP captions</text>
+    <text class="small" x="470" y="814">Serialized playback &#183; completion acknowledgments / timeout</text>
 
-  <!-- Groq Whisper -> Experiential Labs -->
-  <path d="M 540 112 L 560 112 L 560 170 L 580 170" fill="none" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+    <rect class="photo" x="452" y="862" width="498" height="110" rx="8"/>
+    <text class="label" x="470" y="889" style="fill:#f472b6">PAP admission, scene planning, and async jobs</text>
+    <text class="detail" x="470" y="913">Readiness &#8594; cloud planner &#8594; whitelist / moderation / prompt</text>
+    <text class="detail" x="470" y="936">One active job + queue &#183; limits &#183; progress / ETA &#183; cancellation</text>
+    <text class="mono" x="470" y="959">selfie_* /ws events + /api/selfies/:token HTTP images</text>
+  </g>
 
-  <!-- Layar / Kamera -> Groq Vision -->
-  <path d="M 160 235 L 190 235" fill="none" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <g aria-label="Backend-only cloud integrations">
+    <rect class="node active" x="1102" y="162" width="282" height="110" rx="8"/>
+    <text class="label" x="1120" y="192">Groq &#183; Whisper</text>
+    <text class="mono" x="1120" y="219">whisper-large-v3</text>
+    <text class="detail" x="1120" y="248">Indonesian speech-to-text</text>
 
-  <!-- Groq Vision -> Direct to Brain (Solid) -->
-  <path d="M 350 250 L 560 250 L 560 205 L 580 205" fill="none" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+    <rect class="node active" x="1102" y="318" width="282" height="96" rx="8"/>
+    <text class="label" x="1120" y="347">Groq &#183; Qwen vision</text>
+    <text class="mono" x="1120" y="373">qwen/qwen3.8-27b</text>
+    <text class="detail" x="1120" y="397">Frame perception</text>
 
-  <!-- Groq Vision -> 9inference Filter (Dotted) -->
-  <path d="M 350 225 L 380 225" fill="none" stroke="#94a3b8" stroke-dasharray="4,3" stroke-width="1.5" marker-end="url(#arrow-dotted)"/>
+    <rect class="node active" x="1102" y="462" width="282" height="94" rx="8"/>
+    <text class="label" x="1120" y="489">Experiential Labs</text>
+    <text class="mono" x="1120" y="514">deepseek-v4.1-flash-uncensored</text>
+    <text class="small" x="1120" y="540">Override: EXPLABS_MODEL</text>
 
-  <!-- 9inference Filter -> Experiential Labs (Dotted) -->
-  <path d="M 540 225 L 580 188" fill="none" stroke="#94a3b8" stroke-dasharray="4,3" stroke-width="1.5" marker-end="url(#arrow-dotted)"/>
+    <rect class="node" x="1102" y="608" width="282" height="86" rx="8"/>
+    <text class="label" x="1120" y="636">9inference &#183; moment filter</text>
+    <text class="mono" x="1120" y="661">deepseek-v4.1-flash</text>
+    <text class="small" x="1120" y="683">Returns COMMENT or SKIP JSON</text>
 
-  <!-- Experiential Labs -> Fish Audio TTS -->
-  <path d="M 780 188 L 820 188" fill="none" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+    <rect class="node active" x="1102" y="740" width="282" height="84" rx="8"/>
+    <text class="label" x="1120" y="768">Fish Audio &#183; live TTS</text>
+    <text class="mono" x="1120" y="793">s2.1-pro-free</text>
+    <text class="small" x="1120" y="814">WebSocket &#183; streaming MP3</text>
 
-  <!-- Fish Audio TTS -> Live2D Avatar -->
-  <path d="M 990 188 L 1030 188" fill="none" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+    <text class="detail" x="1102" y="893">API keys stay in the backend.</text>
+    <text class="small" x="1102" y="920">Model labels show source defaults;</text>
+    <text class="small" x="1102" y="943">chat / planner can be configured.</text>
+  </g>
 
-  <!-- Experiential Labs -> ComfyUI PAP Branch (Pink arrow) -->
-  <path d="M 730 236 L 730 300 L 820 300" fill="none" stroke="#f472b6" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-pink)"/>
+  <g aria-label="Optional Vision Monitor dashboard and bridge">
+    <rect class="node" x="56" y="1120" width="256" height="92" rx="8"/>
+    <text class="label" x="72" y="1149">Dashboard &#183; :5174</text>
+    <text class="detail" x="72" y="1175">Previews, logs, costs, settings</text>
+    <text class="small" x="72" y="1198">Capture interval / buffer / tokens</text>
+    <rect class="node" x="56" y="1240" width="256" height="88" rx="8"/>
+    <text class="label" x="72" y="1269">Node bridge &#183; :3001</text>
+    <text class="mono" x="72" y="1294">/ws-monitor</text>
+    <text class="small" x="72" y="1317">Telemetry / settings relay</text>
+    <text class="mono" x="56" y="1356">Backend: /ws?role=monitor</text>
+    <text class="small" x="56" y="1377">Observer connection; no selfie snapshots</text>
+  </g>
 
-  <!-- Legend / Note bottom left -->
-  <circle cx="40" cy="350" r="4" fill="#38bdf8"/>
-  <text x="52" y="354" fill="#94a3b8" font-size="10">Alur Utama (Real-Time Audio / Vision / Chat / TTS)</text>
-  <line x1="330" y1="350" x2="360" y2="350" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3"/>
-  <text x="370" y="354" fill="#94a3b8" font-size="10">Filter Momen Spontan (Continuous Vision)</text>
-  <line x1="610" y1="350" x2="640" y2="350" stroke="#f472b6" stroke-width="1.5" stroke-dasharray="4,3"/>
-  <text x="650" y="354" fill="#f472b6" font-size="10">Permintaan Foto / PAP via ComfyUI (Dalam Pengembangan)</text>
+  <g aria-label="Implemented local image providers">
+    <rect class="photo" x="452" y="1118" width="914" height="52" rx="8"/>
+    <text x="909" y="1150" fill="#f9a8d4" font-size="19" font-weight="600" text-anchor="middle">AUTO ORDER: 1. ComfyUI &#8594; 2. managed ComfyUI &#8594; 3. sd.cpp</text>
+    <rect class="photo" x="452" y="1188" width="282" height="96" rx="8"/>
+    <text class="label" x="470" y="1217">Existing ComfyUI</text>
+    <text class="mono" x="470" y="1243">127.0.0.1:8188 &#183; HTTP + WS</text>
+    <text class="small" x="470" y="1268">Workflow / reference / progress</text>
+    <rect class="photo" x="768" y="1188" width="282" height="96" rx="8"/>
+    <text class="label" x="786" y="1217">Managed ComfyUI</text>
+    <text class="detail" x="786" y="1243">Owned Python &#183; auto local port</text>
+    <text class="small" x="786" y="1268">Unload + 90 s idle shutdown</text>
+    <rect class="photo" x="1084" y="1188" width="282" height="96" rx="8"/>
+    <text class="label" x="1102" y="1217">sd.cpp</text>
+    <text class="detail" x="1102" y="1243">sd-cli &#183; CUDA / Vulkan</text>
+    <text class="small" x="1102" y="1268">Memory preflight + telemetry</text>
+    <rect class="photo" x="452" y="1310" width="914" height="50" rx="8"/>
+    <text class="detail" x="470" y="1341">Local photo files &#8594; backend token delivery &#183; ETA, limits, and telemetry persist in data/</text>
+  </g>
+
+  <!-- Path styles identify behavior, rather than implementation status. -->
+  <line class="main-flow" x1="48" y1="1426" x2="86" y2="1426" marker-end="url(#arrow-blue)"/>
+  <text class="detail" x="99" y="1432">Conversation / API calls</text>
+  <line class="optional-flow" x1="382" y1="1426" x2="420" y2="1426" marker-end="url(#arrow-gray)"/>
+  <text class="detail" x="433" y="1432">Optional / continuous vision</text>
+  <line class="photo-flow" x1="764" y1="1426" x2="802" y2="1426" marker-end="url(#arrow-pink)"/>
+  <text class="detail" x="815" y="1432">Implemented PAP flow</text>
+  <text class="small" x="1102" y="1432">Bidirectional = request / result</text>
 </svg>

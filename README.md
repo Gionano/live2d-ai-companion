@@ -74,41 +74,45 @@ Aplikasi AI companion interaktif berbasis browser dan desktop yang menghadirkan 
 ## 🏛️ Arsitektur Sistem
 
 <p align="center">
-  <img src="docs/architecture-pipeline.svg" alt="Amika AI Companion Multimodal Pipeline" width="100%">
+  <img src="docs/architecture-pipeline.svg" alt="Amika AI Companion architecture: browser and Electron clients, Node.js backend, cloud AI services, local PAP providers, and Vision Monitor" width="100%">
 </p>
 
-Diagram SVG masih memuat label pengembangan PAP lama. Diagram teks dan bagian Status & Roadmap di bawah menjelaskan implementasi terbaru.
+The SVG shows the current implementation and source model defaults, including automatic local image-provider selection.
 
-```
-┌────────────────────────────────────────────────────────────┐
-│         Browser / Desktop Companion (Electron)             │
-│  - Live2D Canvas (IceGirl) & Web Audio Analyser            │
-│  - Hands-Free VAD / Mobile PTT + Desktop Text Chat Input   │
-│  - Camera & Direct Desktop Capture (WDA_EXCLUDEFROMCAPTURE)│
-│  - Popup PAP Electron / Dialog PAP Browser               │
-└─────────────────────────────▲──────────────────────────────┘
-                              │ WebSocket (/ws)
-┌─────────────────────────────▼──────────────────────────────┐
-│                Node.js Server Orchestrator                 │
-│  - Brain LLM: Qwen3.8 / DeepSeek Uncensored (xplabs.ai)    │
-│  - STT Proxy: Whisper Large v3 (Groq)                      │
-│  - Vision Perception: Qwen 3.8 27B (Groq)                  │
-│  - Spontaneous Filter: DeepSeek V4 Flash (9inference)      │
-│  - TTS Streamer: Fish Audio S2.1 Pro                       │
-│  - Long-Term Memory & Episodic Recall (data/memory.json)   │
-│  - Planner PAP, Moderasi & Generator ComfyUI Lokal         │
-│  - Antrean Job, Progress/ETA & Snapshot Sambung Ulang       │
-└─────────────────────────────▲──────────────────────────────┘
-                              │ WebSocket (/ws?role=monitor)
-┌─────────────────────────────▼──────────────────────────────┐
-│            Vision Monitor App (Port 3001/5174)             │
-│  - Live Stream Push Preview & Sync Countdown               │
-│  - Realtime Vision Log Feed & Cost Tracker                 │
-│  - Remote Config Slider (Interval Capture, Buffer, Tokens) │
-└────────────────────────────────────────────────────────────┘
+```text
+┌────────────────────────────────────────────────────────────────────────────────┐
+│ Browser / Vite (:5173) or Desktop Companion (Electron)                         │
+│ - Shared Live2D renderer, playback, captions, lip sync, and emotion cues       │
+│ - Voice: VAD / mobile PTT; desktop typed text bypasses STT                     │
+│ - Webcam / browser screen share / protected Electron direct capture            │
+│ - PAP: browser dialog / Electron popup; progress, cancel, reconnect            │
+└────────────────────────────────────────────────────────────────────────────────┘
+                                    ↕ /ws + HTTP proxies
+                                    │ /api/selfies/:token
+┌────────────────────────────────────────────────────────────────────────────────┐
+│ Node.js Orchestrator (127.0.0.1:8787)                                          │
+│ - Chat + PAP planner: Experiential Labs deepseek-v4.1-flash-uncensored         │
+│   Source default; EXPLABS_MODEL can override chat/planner                      │
+│ - STT: Groq whisper-large-v3; vision: Groq qwen/qwen3.8-27b                    │
+│ - Spontaneous filter: 9inference deepseek-v4.1-flash -> shared speech queue    │
+│ - Streaming TTS: Fish Audio s2.1-pro-free                                      │
+│ - Local memory: facts + episodic recall in data/memory.json                    │
+│ - PAP branches before chat: admission/readiness, planner, whitelist/moderation │
+│ - Async jobs: queue, limits, progress/ETA, cancellation, reconnect snapshots   │
+│ - Local provider auto order: ComfyUI -> managed ComfyUI -> sd.cpp              │
+│   Existing ComfyUI: :8188; managed: owned Python/auto port; sd.cpp: sd-cli     │
+│   Provider failover only before generation starts                              │
+└────────────────────────────────────────────────────────────────────────────────┘
+                                    ↕ /ws?role=monitor
+┌────────────────────────────────────────────────────────────────────────────────┐
+│ Optional Vision Monitor: dashboard (:5174) <-> bridge (:3001 /ws-monitor)      │
+│ - Previews, vision/filter logs, cost statistics, and remote capture settings   │
+│ - Continuous vision requires an active source and connected monitor            │
+│ - Selected spontaneous comments go directly to the shared speech queue         │
+└────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Perkembangan PAP dikirim lewat WebSocket; gambar diambil melalui HTTP lokal dengan URL token `/api/selfies/:token`. Caption hasil menunggu giliran avatar selesai berbicara sebelum dibacakan.
+PAP events and reconnect snapshots travel over WebSocket; images are fetched through local HTTP token URLs at `/api/selfies/:token`. Result captions wait for the avatar's speech queue before playback.
 
 ---
 
@@ -129,7 +133,7 @@ Perkembangan PAP dikirim lewat WebSocket; gambar diambil melalui HTTP lokal deng
 ## 📦 Struktur Folder
 
 ```
-my waipu/
+amika-live2d-companion/
 ├── index.html                   # Halaman utama companion (Live2D avatar + chat panel + desktop text input)
 ├── package.json                 # Dependencies companion utama
 ├── vite.config.js               # Konfigurasi Vite (Port 5173)

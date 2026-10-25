@@ -18,5 +18,5 @@ Rules: do NOT touch config/selfieModeration.json or server/personality.js. Do NO
 6. Presets "cepat"/"kualitas" provider-agnostic (resolution multiple of 32, steps, cfg) with optional per-provider overrides; both providers apply them.
 7. References: sdcpp uses the file path directly; ComfyUI keeps its upload flow; same whitelist.
 8. npm run selfie:test --provider=auto|comfyui|sdcpp prints provider reasons and timings.
-9. Tests with a fake ComfyUI server and a fake sd-cli (small Node script mimicking progress lines and writing a PNG): auto picks ComfyUI when ready; ComfyUI up but missing a node -> sdcpp; both down -> disabled; failover only before generation; cancel kills the child tree; invalid output rejected; prompt with quotes/&&/newlines/leading "-" is safe; paths with spaces ("All Projects"); cache expiry.
+9. Tests with a fake ComfyUI server and a fake sd-cli (small Node script mimicking progress lines and writing a PNG): auto picks ComfyUI when ready; ComfyUI up but missing a node -> sdcpp; both down -> disabled; failover only before generation; cancel kills the child tree; invalid output rejected; prompt with quotes/&&/newlines/leading "-" is safe; paths with spaces ("Path With Spaces"); cache expiry.
 10. Update docs/selfie.md and docs/STATUS.md. Terse report. STOP.
