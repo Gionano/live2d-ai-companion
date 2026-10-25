@@ -1,7 +1,7 @@
 {
   "name": "vision-monitor",
   "version": "1.0.0",
-  "description": "Vision Monitor UI + bridge untuk backend companion (my waipu) - observer via ws ?role=monitor",
+  "description": "Vision Monitor UI + bridge untuk backend companion (amika-live2d-companion) - observer via ws ?role=monitor",
   "private": true,
   "type": "module",
   "scripts": {

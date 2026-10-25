@@ -10,10 +10,17 @@
     "preview": "vite preview",
     "server": "node server/index.js",
     "test": "node --test server/tests/*.test.js",
+    "check:privacy": "node scripts/checkPrivacy.js",
     "selfie:test": "node server/selfie/selfieTest.js",
     "selfie:test-b": "node --test server/tests/planner.test.js",
     "selfie:test-c": "node --test server/tests/jobManager.test.js",
     "selfie:plan": "node server/selfie/selfiePlanTest.js",
+    "setup:plan": "node setup/cli.js plan",
+    "setup:models": "node setup/cli.js models",
+    "setup:sdcli": "node setup/cli.js sdcli",
+    "setup:comfyui": "node setup/cli.js comfyui",
+    "setup:hash": "node setup/cli.js hash",
+    "doctor": "node setup/cli.js doctor",
     "dev:all": "concurrently -k -n server,vite -c yellow,cyan \"npm run server\" \"npm run dev\""
   },
   "dependencies": {

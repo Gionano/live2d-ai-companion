@@ -42,6 +42,14 @@ public/models/README.md
 src/legacy-vrm/
 src/visionMonitor.js
 
-# Selfie (pap): foto referensi pribadi tidak ikut repo
-assets/references/*
-!assets/references/README.md
+# Local engines, models, personal references, and machine configuration
+local/
+selfie.config.local.json
+assets/references/
+
+sd-cli/
+.commit-test-move-*/
+.test-move-*/
+.test-*/
+.commit-test-*/
+docs/selfie-runs.md
