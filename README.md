@@ -1,353 +1,240 @@
-# Amika — Live2D AI Companion (Unrestricted / Uncensored Edition)
+# Amika ? Live2D AI Companion
 
-> **[UNRESTRICTED / UNCENSORED EDITION]**
-> Edisi ini menggunakan profil kepribadian **Unrestricted** dan ditenagai oleh model LLM **Uncensored (`Qwen3.8 Flash Next Uncensored`)** yang disediakan oleh **xplabs.ai (Experiential Labs)**, sehingga percakapan bersama Amika berjalan bebas tanpa batasan sensor standar.
->
-> Fitur PAP memiliki moderasi tersendiri untuk permintaan foto dan prompt gambar, serta pengujian regresi untuk memastikan persona menyebut usia dewasa.
+Amika is a browser and Windows desktop companion with an official Live2D Cubism avatar, voice and typed chat, webcam/screen perception, persistent memory, and local PAP/selfie generation.
 
-Aplikasi AI companion interaktif berbasis browser dan desktop yang menghadirkan karakter **Amika** dalam bentuk avatar **Live2D Cubism** resmi. Dilengkapi percakapan suara hands-free berlatensi rendah (*Voice-to-Voice*) maupun input teks desktop, animasi natural multi-layer (*synthetic face tracking*, *audio-reactive body sway*, *sentence-break clips*), 12 ekspresi emosi kontekstual, persepsi visual cerdas kamera/webcam & layar, pemantauan layar (*continuous screen vision*) dengan filter spontan berkala, serta permintaan foto **PAP / Selfie** melalui ComfyUI lokal.
+> **Unrestricted / Uncensored Edition.** The chat persona uses an uncensored model through Experiential Labs. PAP requests and image prompts have separate moderation, and regression checks verify an adult character persona.
 
----
+## Features
 
-## 🌟 Fitur Utama
+- **Live2D Cubism 5 / IceGirl:** WebGL rendering, physics, blinking, breathing, procedural face/eye tracking, audio-reactive body motion, and sentence-break animations.
+- **Contextual expressions:** twelve Indonesian emotion labels, including `sayang`, `jahil`, `penasaran`, and `netral`, drive the avatar expressions.
+- **Voice and text chat:** browser VAD, mobile push-to-talk, desktop typed input, streaming chat/TTS, synchronized captions, and turn ownership that rejects stale replies and prevents overlapping audio.
+- **Visual perception:** requests such as "lihat di kamera" or "coba lihat layar" select webcam or screen input. The Vision Monitor supplies recent screen descriptions when available; one-shot vision handles other requests.
+- **Continuous screen vision:** capture runs while screen sharing and the Vision Monitor are active. A separate filter selects moments for spontaneous spoken commentary.
+- **Persistent memory:** background extraction stores user facts and episodic recall in the ignored `data/` directory.
+- **Windows desktop overlay:** transparent avatar, click-through/edit modes, saved display presets, tray controls, configurable global shortcuts, and protected direct screen capture.
+- **PAP / selfies:** voice or typed requests such as "pap dong" use a character whitelist, prompt planning, local reference images, and automatic selection of external ComfyUI, managed ComfyUI, or sd.cpp.
+- **Selfie lifecycle:** one active job, a bounded queue, persistent cooldown/daily limits, progress, history-based ETA, cancellation, reconnect snapshots, and shared result auto-close settings.
+- **Selfie interfaces:** the protected Electron popup provides **Simpan**, **Salin**, and **Folder**. The browser dialog provides **Simpan** and **Salin Link**, keyboard focus control, and Escape dismissal. Tray **Pap feature (Fitur Pap)** and **Pap gallery (Galeri Pap)** settings persist.
+- **Portable local engines:** one local path resolver, ignored machine overrides, manifest-driven setup tools, offline diagnostics, GPU/memory readiness checks, and a privacy guard for committable text.
 
-1. **Unrestricted Persona & Uncensored Brain LLM (via xplabs.ai)**:
-   - Otak percakapan utama menggunakan model **`Qwen3.8 Flash Next Uncensored` (`qwen3.8-flash-next-uncensored`)** dari penyedia API **xplabs.ai (Experiential Labs)**.
-   - Kepribadian Amika dikonfigurasi secara *unrestricted* & intim sebagai istri virtual yang ekspresif, manja, playful, dan responsif tanpa filter penolakan kaku.
-   - Streaming JSON terurut (`{"emotion":"...","text":"..."}`) dengan `reasoning_effort: "none"` untuk mengirim emosi ke avatar sebelum kalimat pertama selesai di-generate.
+## Current AI services
 
-2. **Avatar Live2D Cubism 5.0 (Model IceGirl)**:
-   - Rendering WebGL resmi dengan physics controller dinamis (gerakan rambut, aksesoris, dan gaun).
-   - Animasi pernapasan (*breathing*) dan kedipan mata (*auto-blink*) kontinu.
-   - **Synthetic Face Tracking**: Simulasi gerakan kepala (*yaw/pitch/roll*), *eye gaze saccade & fixation*, dan mikro-gerakan alis menggunakan *Simplex Noise* prosedural ala VTube Studio.
-   - **Multi-Layer Talking Animation**:
-     - *Layer 1 (Audio-Reactive)*: Asymmetric EMA smoothing menggerakkan badan dan kepala mengikuti irama suara TTS secara organik.
-     - *Layer 2 (Sentence-Break Clips)*: Memicu gerakan transisi halus di jeda kalimat berdasarkan intensitas emosi.
+| Role | Provider | Source default |
+| --- | --- | --- |
+| Chat and PAP planner | Experiential Labs | `deepseek-v4.1-flash-uncensored` |
+| Speech recognition | Groq | `whisper-large-v3` |
+| Webcam and screen vision | Groq | `qwen/qwen3.8-27b` |
+| Spontaneous commentary filter | 9inference | `deepseek-v4.1-flash` |
+| Streaming speech | Fish Audio | `s2.1-pro-free` |
+| Image generation | Local providers | ComfyUI ? managed ComfyUI ? sd.cpp |
 
-3. **Sistem Emosi Terstruktur (12 Emosi)**:
-   - LLM secara terstruktur menentukan ekspresi emosi bahasa Indonesia: `terkejut`, `marah`, `bingung`, `jengkel`, `malu`, `kesal`, `sedih`, `kagum`, `sayang`, `jahil`, `penasaran`, dan `netral`.
-   - Mengubah file ekspresi `.exp3.json` Live2D secara otomatis saat berbicara.
+`EXPLABS_MODEL` overrides the chat/planner model. API keys remain in the backend environment.
 
-4. **Percakapan Real-Time Hands-Free (STT → LLM → TTS) & Input Ketik Desktop**:
-   - **STT (Groq Whisper Large v3 Turbo)**: Deteksi suara otomatis via Web Audio VAD di browser (serta *Press-and-Hold* di mobile), dilengkapi prompt kontekstual dan penyaringan noise non-suara.
-   - **Desktop Text Chat Input**: Kolom input teks khusus tampilan desktop di bawah log percakapan yang terhubung langsung ke pipeline LLM + Vision + TTS yang sama.
-   - **LLM Streaming (`qwen3.8-flash-next-uncensored` via xplabs.ai)**: Menghasilkan respons uncensored secara streaming per kalimat.
-   - **TTS Streaming (Fish Audio)**: Streaming chunk MP3 per kalimat langsung ke Web Audio API untuk meminimalkan delay ke audio pertama (*Time-to-First-Audio*).
-   - **Pemulihan percakapan**: Kegagalan sebagian TTS tetap menunggu audio sebelumnya selesai diputar; respons atau error dari giliran lama diabaikan. Status sibuk mengikuti penerima suara, dan penolakan input mengembalikan status UI sesuai keadaan server.
-
-5. **Persepsi Visual Cerdas (Smart Webcam vs Screen Routing)**:
-   - Mendeteksi intent permintaan lihat visual dan otomatis memilih tepat satu sumber:
-     - **Webcam**: Saat user meminta melihat kamera/wajah atau menunjukkan benda fisik (*"lihat di kamera"*, *"ini benda apa?"*).
-     - **Screen/Layar**: Saat user membahas layar/game/monitor (*"coba lihat layar/game aku"*).
-   - **Smart Routing dengan Vision Monitor**:
-     - Jika **Vision Monitor menyala**, permintaan melihat layar langsung menggunakan buffer deskripsi terbaru (instan tanpa API call ganda).
-     - Jika **Vision Monitor mati**, vision dieksekusi secara *one-shot* langsung di tempat menggunakan **Qwen 3.8 27B** (Groq).
-
-6. **Conditional Streaming Vision & Spontaneous Commentary**:
-   - Pemantauan layar kontinu (1 FPS) hanya aktif ketika *Share Screen* dan **Vision Monitor** sama-sama menyala (otomatis berhenti saat Vision Monitor ditutup untuk menghemat resource).
-   - Buffer in-memory dievaluasi secara periodik oleh **DeepSeek V4 Flash**: jika ada momen menarik, Amika langsung berceletuk secara spontan (*spontaneous commentary*) lengkap dengan suara TTS dan animasi avatar.
-
-7. **Mobile Responsive & Camera Toggle**:
-   - Layout Picture-in-Picture (PiP) adaptif untuk tampilan mobile dengan video kamera full-screen sebagai background, interaksi *press-and-hold* di area UI, dan tombol toggle kamera depan/belakang (*user* vs *environment*).
-
-8. **Vision Monitor (Standalone Observer Panel)**:
-   - Aplikasi dashboard terpisah bergaya StreamingVLM untuk memantau feed layar, membaca log deskripsi visual secara live, melihat kartu evaluasi filter, memantau running cost, serta mengatur interval capture secara remote.
-
-9. **Personalisasi Long-Term Memory & Episodic Conversation Recall**:
-   - Sistem memori jangka panjang persisten (`data/memory.json`) yang mencatat fakta, kebiasaan, panggilan, dan topik obrolan sebelumnya secara otomatis di latar belakang tanpa menghambat latensi respons.
-
-10. **Native Desktop Companion (Electron Floating Overlay)**:
-    - Aplikasi desktop Windows pendamping dengan avatar Live2D transparan melayang tanpa border/kotak hitam.
-    - Dilengkapi *System Tray*, dua preset tampilan (*Dengan Sayap* vs *Tanpa Sayap*), *Click-Through & Mode Edit* (`Ctrl+Alt+E`), *Mute Mic* (`Ctrl+Alt+M`), dan *Direct Screen Capture* tanpa popup izin browser dengan proteksi DWM `WDA_EXCLUDEFROMCAPTURE` (avatar tidak ikut terfoto).
-
-11. **PAP / Selfie Sesuai Permintaan (ComfyUI Lokal)**:
-    - **Permintaan suara atau teks**: Ucapkan atau ketik *"pap dong"*, *"minta foto"*, atau *"selfie"*. LLM menyusun adegan dari whitelist karakter, lalu ComfyUI menghasilkan gambar berdasarkan referensi lokal. Permintaan dan prompt akhir diperiksa oleh moderasi.
-    - **Job asinkron**: Satu job aktif dengan antrean terbatas, progress, ETA dari riwayat durasi, cooldown, dan batas harian persisten. ETA ditampilkan sebagai belum diketahui ketika riwayat belum tersedia.
-    - **Popup desktop**: Satu jendela terlindungi dari tangkapan layar mengikuti posisi avatar dan perubahan monitor. Kartu menyesuaikan ruang yang tersedia, memulihkan ukuran setelah diperbesar/diperkecil, serta menjaga caption dan tombol tetap dapat dijangkau dengan scroll.
-    - **Aksi desktop**: **Simpan** membuka dialog Save As, **Salin** menyalin gambar ke clipboard native, dan **Folder** membuka direktori foto. System Tray menyediakan **Pap feature (Fitur Pap)** dengan pilihan tersimpan per companion serta **Pap gallery (Galeri Pap)**.
-    - **Dialog browser**: Menampilkan progress dan hasil dengan **Simpan** untuk mengunduh gambar serta **Salin Link** untuk menyalin URL. Fokus keyboard tetap berada dalam dialog; Escape menutupnya dan mengembalikan fokus ke kontrol sebelumnya.
-    - **Sambung ulang dan pembatalan**: Snapshot server memulihkan job/hasil atau membersihkan tampilan yang sudah tidak berlaku. Tombol **Batal** menunggu hasil pembatalan dari server; foto tetap ditampilkan jika proses selesai lebih dahulu.
-    - **Tutup otomatis**: `autoCloseSeconds` dari backend berlaku untuk popup desktop dan dialog browser; nilai bawaan 30 detik, sedangkan `0` mempertahankan hasil tetap terbuka.
-
----
-
-## 🏛️ Arsitektur Sistem
+## Architecture
 
 <p align="center">
-  <img src="docs/architecture-pipeline.svg" alt="Amika AI Companion architecture: browser and Electron clients, Node.js backend, cloud AI services, local PAP providers, and Vision Monitor" width="100%">
+  <img src="docs/architecture-pipeline.svg" alt="Amika architecture: browser and Electron clients, Node.js backend, cloud AI services, local PAP providers, and Vision Monitor" width="100%">
 </p>
 
-The SVG shows the current implementation and source model defaults, including automatic local image-provider selection.
+Vite serves the browser frontend on port `5173`. The Express/WebSocket backend binds to `127.0.0.1:8787`, routes chat and PAP requests, and owns provider jobs and speech playback coordination. The separate Vision Monitor dashboard uses port `5174` and a WebSocket bridge to the backend. Electron shares the frontend and adds native windows, tray controls, capture, and narrow preload bridges.
+
+## Repository layout
 
 ```text
-┌────────────────────────────────────────────────────────────────────────────────┐
-│ Browser / Vite (:5173) or Desktop Companion (Electron)                         │
-│ - Shared Live2D renderer, playback, captions, lip sync, and emotion cues       │
-│ - Voice: VAD / mobile PTT; desktop typed text bypasses STT                     │
-│ - Webcam / browser screen share / protected Electron direct capture            │
-│ - PAP: browser dialog / Electron popup; progress, cancel, reconnect            │
-└────────────────────────────────────────────────────────────────────────────────┘
-                                    ↕ /ws + HTTP proxies
-                                    │ /api/selfies/:token
-┌────────────────────────────────────────────────────────────────────────────────┐
-│ Node.js Orchestrator (127.0.0.1:8787)                                          │
-│ - Chat + PAP planner: Experiential Labs deepseek-v4.1-flash-uncensored         │
-│   Source default; EXPLABS_MODEL can override chat/planner                      │
-│ - STT: Groq whisper-large-v3; vision: Groq qwen/qwen3.8-27b                    │
-│ - Spontaneous filter: 9inference deepseek-v4.1-flash -> shared speech queue    │
-│ - Streaming TTS: Fish Audio s2.1-pro-free                                      │
-│ - Local memory: facts + episodic recall in data/memory.json                    │
-│ - PAP branches before chat: admission/readiness, planner, whitelist/moderation │
-│ - Async jobs: queue, limits, progress/ETA, cancellation, reconnect snapshots   │
-│ - Local provider auto order: ComfyUI -> managed ComfyUI -> sd.cpp              │
-│   Existing ComfyUI: :8188; managed: owned Python/auto port; sd.cpp: sd-cli     │
-│   Provider failover only before generation starts                              │
-└────────────────────────────────────────────────────────────────────────────────┘
-                                    ↕ /ws?role=monitor
-┌────────────────────────────────────────────────────────────────────────────────┐
-│ Optional Vision Monitor: dashboard (:5174) <-> bridge (:3001 /ws-monitor)      │
-│ - Previews, vision/filter logs, cost statistics, and remote capture settings   │
-│ - Continuous vision requires an active source and connected monitor            │
-│ - Selected spontaneous comments go directly to the shared speech queue         │
-└────────────────────────────────────────────────────────────────────────────────┘
+<repo>/
+  index.html                       Browser entry page
+  src/                             Live2D, voice/text chat, capture, and browser PAP dialog
+  server/
+    index.js                       Express/WebSocket orchestration
+    modelConfig.js                 Chat/planner and commentary model defaults
+    selfie/                        Planning, providers, local paths, jobs, and telemetry
+    tests/                         node:test regression tests and synthetic fixtures
+  desktop-companion/               Electron package, native capture, and popup
+  vision-monitor/                  Separate Vite dashboard and WebSocket bridge
+  public/models/live2d/            Live2D assets
+  vendor/live2d/                   Cubism framework
+  config/                         Character, intent, moderation, and animation settings
+  workflows/                      ComfyUI API workflows
+  setup/                          Manifest schema, setup CLI, hash, and doctor tools
+  scripts/checkPrivacy.js          Privacy guard
+  docs/                           Setup, providers, packaging, and implementation status
+  selfie.config.json              Shared portable selfie settings
+  selfie.config.local.json        Ignored machine-specific overrides
+  local/                          Ignored runtimes, models, outputs, logs, and provenance
+  assets/references/               Ignored private reference images
 ```
 
-PAP events and reconnect snapshots travel over WebSocket; images are fetched through local HTTP token URLs at `/api/selfies/:token`. Result captions wait for the avatar's speech queue before playback.
+## Install and run
 
----
+Use **Node.js 18 or newer**. Install dependencies in the root and in each optional package you use.
 
-## 🛠️ Tech Stack & Powered By
+### Main companion
 
-- **Frontend Avatar**: Vanilla JavaScript, Vite, HTML5 Canvas, WebGL, Web Audio API, Official Live2D Cubism Core & Framework 5.0.
-- **Backend Server**: Node.js, Express, `ws` (WebSocket Server).
-- **Desktop**: Electron dengan electron-builder untuk installer Windows x64 (NSIS).
-- **Generator Gambar**: ComfyUI lokal melalui backend, dengan workflow API dan gambar referensi.
-- **AI Services & API Providers**:
-  - **[xplabs.ai (Experiential Labs)](https://experientiallabs.ai)**: Penyedia API utama untuk **Brain LLM Uncensored** (`qwen3.8-flash-next-uncensored`).
-  - **[Groq](https://groq.com)**: Speech-to-Text inference ultra-cepat (`whisper-large-v3-turbo`) dan Multimodal Vision (`qwen/qwen3.8-27b`).
-  - **[Fish Audio](https://fish.audio)**: Neural Speech Synthesis & real-time streaming TTS.
-  - **[9inference](https://9inference.cloud)**: Evaluasi filter berkala untuk komentar spontan (`deepseek-v4-flash-0731`).
-
----
-
-## 📦 Struktur Folder
-
-```
-amika-live2d-companion/
-├── index.html                   # Halaman utama companion (Live2D avatar + chat panel + desktop text input)
-├── package.json                 # Dependencies companion utama
-├── vite.config.js               # Konfigurasi Vite (Port 5173)
-├── .env.example                 # Template environment variables
-├── selfie.config.json           # Provider, folder foto, antrean, cooldown, preset, tutup otomatis
-├── selfie.mapping.json          # Pemetaan node dan field workflow ComfyUI
-├── config/                      # Kata kunci PAP, whitelist karakter, dan moderasi
-├── workflows/selfie.api.json    # Workflow ComfyUI hasil ekspor API
-├── server/                      # Backend Orchestrator
-│   ├── index.js                 # Entry point Express & WebSocket server (/ws)
-│   ├── experientialClient.js    # OpenAI-compatible client ke xplabs.ai (Experiential Labs)
-│   ├── llmChat.js               # Streaming chat Uncensored & structured JSON parser
-│   ├── personality.js           # System prompt Amika (Unrestricted Edition, 12 emosi)
-│   ├── modelConfig.js           # Konfigurasi model ID (Qwen3.8 Flash Next Uncensored & Filter)
-│   ├── streamingVisionManager.js# Pipeline vision kontinu & filter spontan
-│   ├── visionCapture.js         # Smart routing intent vision (screen vs webcam)
-│   ├── sttTranscribe.js         # STT Groq Whisper + noise filter
-│   ├── ttsGenerate.js           # TTS Fish Audio streaming
-│   ├── speechController.js      # Kepemilikan giliran dan sinkronisasi pemutaran suara
-│   ├── selfie/                  # Planner, provider, antrean job, rute gambar, dan kontrol fitur
-│   │   └── tests/               # Uji regresi selfie, desktop/browser, HTTP/WS, dan suara
-│   ├── groqClient.js            # Groq SDK instance (STT & Vision)
-│   ├── nineInferenceClient.js   # OpenAI client ke 9inference.cloud (Vision Filter)
-│   └── voiceConfig.js           # Konfigurasi referensi suara TTS
-├── src/                         # Frontend Avatar & Logika Browser
-│   ├── main.js                  # Setup Live2D, resize canvas, lip-sync loop
-│   ├── live2dCompanion.js       # Live2D model controller, layers, & motion manager
-│   ├── syntheticTracking.js     # Simplex noise procedural face & eye tracking
-│   ├── expressionMap.js         # Mapping 12 emosi ke file .exp3.json & intensitas
-│   ├── speechPlayback.js        # Antrean audio dan status giliran percakapan
-│   ├── browserSelfieModal.js     # Dialog PAP dengan kontrol fokus dan pemulihan job
-│   └── companion.js             # VAD/PTT audio, desktop text chat, screen share, & WS client
-├── public/                      # Static Assets
-│   └── models/live2d/           # Asset model Live2D IceGirl (.moc3, textures, .exp3, .motion3)
-├── desktop-companion/           # [Native App] Windows Companion (Electron + Tray + Direct Capture)
-│   ├── package.json             # Electron & electron-builder packaging config
-│   ├── src/main/                # Main process (Tray, Window, Capture Service, Security)
-│   ├── src/preload/             # Context isolation preload bridge
-│   ├── src/popup/selfiePopup.html # UI popup PAP desktop
-│   └── scripts/packageSelfieConfig.js # Hook snapshot folder foto saat packaging
-├── docs/                        # Dokumentasi & Diagram Arsitektur SVG
-│   ├── architecture-pipeline.svg# Diagram alur visual multimodal & ecosystem
-│   ├── selfie.md                # Setup workflow dan perilaku PAP
-│   ├── desktopSelfiePackaging.md # Konfigurasi galeri pada aplikasi terpasang
-│   └── STATUS.md                # Status implementasi dan batas verifikasi
-└── vision-monitor/              # [Standalone App] Observer & Remote Config Panel
-    ├── index.html               # UI dashboard StreamingVLM
-    ├── package.json             # Dependencies terpisah
-    ├── vite.config.js           # Port 5174
-    ├── src/                     # UI scripts & sinkronisasi state
-    └── server/                  # WebSocket bridge (?role=monitor) ke companion utama
-```
-
----
-
-## 🚀 Panduan Setup & Menjalankan
-
-### 1. Prasyarat
-
-- **Node.js**: Versi 18 atau lebih baru.
-- **API Keys**:
-  - `EXPLABS_API_KEY`: API key dari **[xplabs.ai (Experiential Labs)](https://experientiallabs.ai)** untuk model `qwen3.8-flash-next-uncensored`.
-  - `GROQ_API_KEY`: Dapatkan di [console.groq.com](https://console.groq.com/keys) untuk STT & Vision.
-  - `FISH_API_KEY`: Dapatkan di [fish.audio](https://fish.audio) untuk TTS.
-  - `NINEINFERENCE_API_KEY`: Dapatkan di [9inference.cloud](https://9inference.cloud) untuk filter komentar spontan.
-
-### 2. Setup Project Utama
-
-1. Clone repositori dan install dependencies:
-   ```bash
-   npm install
-   ```
-
-2. Buat file `.env` dari template:
-   ```bash
-   cp .env.example .env
-   ```
-   Pastikan konfigurasi `.env` Anda berisi:
-   ```env
-   EXPLABS_API_KEY=xpl_your_api_key_here
-
-   GROQ_API_KEY=your_groq_key_here
-   FISH_API_KEY=your_fish_key_here
-   NINEINFERENCE_API_KEY=your_9inference_key_here
-   ```
-
-3. Jalankan server backend dan Vite frontend secara bersamaan:
-   ```bash
-   npm run dev:all
-   ```
-   Aplikasi utama akan berjalan di:
-   - **Frontend Companion**: `http://localhost:5173`
-   - **Backend Server**: `http://localhost:8787`
-
-### 3. Menjalankan Vision Monitor (Opsional / Terpisah)
-
-Jika ingin membuka panel observer & mengaktifkan fitur *Continuous Interval Capture* (1 FPS):
-```bash
-cd vision-monitor
+```sh
 npm install
-npm run start
 ```
-Buka Vision Monitor di: **`http://localhost:5174`**
 
-### 4. Menjalankan Desktop Companion (Windows)
+Copy `.env.example` to `.env`, then configure the backend credentials:
 
-Biarkan backend dan frontend dari `npm run dev:all` berjalan, lalu buka terminal lain di root proyek:
+```env
+EXPLABS_API_KEY=your_key_here
+GROQ_API_KEY=your_key_here
+FISH_API_KEY=your_key_here
+NINEINFERENCE_API_KEY=your_key_here
+```
 
-```bash
+```sh
+npm run dev:all
+```
+
+Open the companion at [http://localhost:5173](http://localhost:5173). Use `npm run server` or `npm run dev` to start either service independently.
+
+### Optional Vision Monitor
+
+```sh
+npm --prefix vision-monitor install
+npm --prefix vision-monitor run start
+```
+
+Open [http://localhost:5174](http://localhost:5174), then enable screen sharing in the companion for continuous screen vision. See the [Vision Monitor README](vision-monitor/README.md).
+
+### Windows desktop companion
+
+Keep the root services running, then launch Electron from another terminal:
+
+```sh
 npm --prefix desktop-companion install
 npm --prefix desktop-companion run dev
 ```
 
-Avatar tampil sebagai overlay desktop. Klik ikon System Tray untuk mengatur **Pap feature (Fitur Pap)** atau membuka **Pap gallery (Galeri Pap)**. Pilihan fitur tersimpan dan diterapkan kembali saat koneksi tersambung ulang. Panduan kontrol lengkap tersedia di [README Desktop Companion](desktop-companion/README.md).
+| Control | Preferred shortcut |
+| --- | --- |
+| Mute microphone | `Ctrl+Alt+Shift+M` |
+| Toggle edit / click-through mode | `Ctrl+Alt+E` |
+| Show / hide avatar | `Ctrl+Alt+H` |
 
-### 5. Menyiapkan PAP / Selfie
+Mute falls back to `Ctrl+Alt+Shift+F9`, then `Ctrl+Alt+Shift+F10`, when registration fails. The tray and startup log show the active binding. Customize the generated `userData/shortcuts.json`, or use `SHORTCUT_MUTE_MIC`, `SHORTCUT_EDIT_MODE`, and `SHORTCUT_HIDE_AVATAR`. Restart Electron after changing bindings. See the [Desktop Companion README](desktop-companion/README.md).
 
-1. Jalankan ComfyUI beserta model yang dibutuhkan workflow. Atur `comfyUrl` dalam `selfie.config.json`: konfigurasi repo memakai `http://127.0.0.1:8188`; ComfyUI Desktop biasanya memakai port `8000`.
-2. Ekspor workflow dengan **Workflow > Export (API)** ke `workflows/selfie.api.json`, lalu sesuaikan node dan field di `selfie.mapping.json`.
-3. Tambahkan gambar referensi PNG/JPG/WebP ke `assets/references/` dan isi `defaultReference` sesuai nama file. Simpan gambar pribadi secara lokal.
-4. Jalankan ulang backend setelah mengubah konfigurasi. Ucapkan atau ketik **"pap dong"**; progress muncul di popup Electron atau dialog browser. Jika provider tidak terjangkau, permintaan ditolak dengan pesan yang menjelaskan penyebabnya.
+## Local PAP / selfie setup
 
-Pengaturan utama pada `selfie.config.json`:
+### Portable paths and machine overrides
 
-| Pengaturan | Nilai bawaan / perilaku |
-|---|---|
-| `provider` | `comfyui`, generator gambar lokal |
-| `outputDir` | Kosong memakai `~/Pictures/WaifuSelfies`; menerima path absolut, relatif terhadap root proyek, atau diawali `~` |
-| `autoCloseSeconds` | `30` detik; `0` menonaktifkan tutup otomatis hasil |
-| `maxQueue` | `1` job menunggu selain satu job aktif; `0` menonaktifkan antrean |
-| `cooldownMs` | `60000` milidetik setelah foto selesai |
-| `dailyLimit` | `20` foto; penghitung disimpan agar tidak hilang saat backend dimulai ulang |
-| `preset` | `cepat`; tersedia juga `kualitas` |
-| `allowLan` | `false`; akses gambar dibatasi ke localhost |
+`${LOCAL}` expands to `WAIFU_LOCAL_DIR`, or `<repo>/local` when unset. Relative values of `WAIFU_LOCAL_DIR` resolve from the repository root. `server/selfie/localPaths.js` resolves provider models, runtimes, reference/output directories, logs, and Electron gallery configuration.
 
-**Folder** dan **Pap gallery** membuka direktori foto dari konfigurasi lokal yang sudah ada. File biasa, direktori yang belum ada, serta symlink/junction yang mengalihkan lokasi akan ditolak. Proses utama Electron membaca konfigurasi folder secara lokal. Endpoint `/api/selfies/settings` hanya mengirim `enabled` dan `autoCloseSeconds` serta memerlukan permintaan lokal dengan metadata origin yang sesuai. `enabled` menyatakan kemampuan server; toggle fitur berlaku per koneksi companion.
+Configuration merges in this order:
 
-Rincian workflow, mapping, referensi, dan perilaku pembatalan tersedia di [Panduan Selfie](docs/selfie.md).
+1. Backend defaults.
+2. Shared `selfie.config.json`.
+3. Ignored sibling `selfie.config.local.json`.
+4. Explicit CLI or in-memory overrides.
 
-### 6. Build Frontend dan Installer Desktop
+Nested objects merge recursively; arrays, scalar values, and `null` replace earlier values. Keep machine-specific installation paths and tuning in `selfie.config.local.json`. Path expansion follows the merge. A valid installed local runtime takes precedence over a configured legacy installation; an incomplete runtime falls back with diagnostics.
 
-Setelah dependensi root dan desktop terpasang, jalankan dari root proyek:
+Canonical local directories:
 
-```bash
+```text
+local/
+  models/diffusion_models/
+  models/vae/
+  models/text_encoders/
+  runtime/comfyui/
+  runtime/sdcpp/cuda12/
+  runtime/sdcpp/vulkan/
+  outputs/
+  logs/
+```
+
+The older `local/runtime/sd-cli/` layout is supported only when the canonical `sdcpp` root is absent. CUDA12 and Vulkan builds stay in separate variant directories.
+
+### Setup tools and offline diagnostics
+
+Artifact metadata is not shipped in `setup/manifest.json`; that file is excluded from commits. Create an ignored `local/manifest.json` using `setup/manifest.schema.json` and independently verified upstream pins, sizes, checksums, and licenses.
+
+```sh
+npm run setup:plan -- --manifest local/manifest.json
+npm run doctor -- --manifest local/manifest.json
+```
+
+`setup:models`, `setup:sdcli`, and `setup:comfyui` are dry runs by default. Installation requires `--yes`, complete verified metadata, and per-license acceptance. Downloads support resume and verify size/SHA-256 before publication; extraction checks archive paths and prevents accidental replacement or variant mixing. Doctor runs offline and checks runtime/model files, provenance, resources, and bounded help/device probes. `setup:hash` fingerprints an existing artifact offline.
+
+See [Local setup](docs/setup.md) for engine selection, license flags, extractor requirements, embedded-Python constraints, and existing-installation overrides. See [Source metadata notes](docs/setup-sources.md) for previously investigated upstream sources; those notes do not replace local verification.
+
+### Providers and reference images
+
+`provider: "auto"` checks external ComfyUI, managed ComfyUI, then sd.cpp. Explicit provider modes never fall back; automatic failover happens only before generation is confirmed.
+
+- **External ComfyUI:** the shared `comfyUrl` is `http://127.0.0.1:8188`. Set a different local URL in the ignored config if your installation uses another port.
+- **Managed ComfyUI:** the backend owns the configured Python process, waits for health readiness, stops idle instances, and joins cancellation/shutdown cleanup. A portable local installation needs embedded Python and `ComfyUI/main.py`.
+- **sd.cpp:** readiness checks the selected sd-cli binary, required model files, supported arguments, GPU backend, and matching runtime libraries. Memory preflight is heuristic; telemetry records bounded per-job peaks. GPU/insufficient-memory overrides are explicit. Runtime CPU fallback terminates generation when CPU execution is disabled.
+
+Use an exported ComfyUI API workflow in `workflows/selfie.api.json` and configure roles in `selfie.mapping.json`. Add private PNG/JPG/WebP references under ignored `assets/references/`, then set `defaultReference` to an existing filename. Both image providers use the same reference whitelist. ComfyUI uploads references before validating workflow image choices.
+
+| Setting | Shared value / behavior |
+| --- | --- |
+| `provider` | `auto`; explicit `comfyui`, `comfyui-managed`, or `sdcpp` |
+| `outputDir` | `${LOCAL}/outputs`; an empty value uses the same local default |
+| `logFile` | `${LOCAL}/logs/selfie.log` |
+| `autoCloseSeconds` | `30`; `0` keeps the result open |
+| `maxQueue` | `1` waiting job; `0` disables queuing |
+| `cooldownMs` | `60000` after a completed image |
+| `dailyLimit` | `20`; counters survive backend restarts |
+| `preset` | `cepat`; also `kualitas` and `hemat` |
+| `allowLan` | `false`; selfie images require local requests |
+
+The backend watches both config files. Output and quota-store path changes require a restart. Request "pap dong" to open progress/results in the browser dialog or Electron popup. Missing providers/models produce readiness diagnostics before generation.
+
+Image URLs use `/api/selfies/:token` with no-store responses and local access checks. HTTP settings expose capability and auto-close values; gallery paths are resolved in the Electron main process. **Folder** and **Pap gallery** open only an existing valid configured directory.
+
+See [Selfie behavior and tuning](docs/selfie.md) for prompts, moderation, presets, cancellation, GPU checks, and experimental generation overrides.
+
+## Build and packaging
+
+```sh
+npm run build
+npm run preview
+```
+
+The frontend build writes `dist/`. To package the Windows x64 NSIS desktop installer:
+
+```sh
 npm --prefix desktop-companion run build:frontend
 npm --prefix desktop-companion run dist
 ```
 
-Frontend dikompilasi ke `dist/`; electron-builder menghasilkan installer Windows x64 NSIS di `desktop-companion/dist-electron/`. Backend dan ComfyUI tetap dijalankan terpisah; kredensial API berada di backend.
+The installer output is `desktop-companion/dist-electron/`. Run the backend separately; engine runtimes and model weights are configured locally. The packaging hook snapshots the resolved output directory in `resources/selfie.config.json` and includes the shared path resolver. `SELFIE_CONFIG_PATH` lets the Electron main process use a different backend config file. See [Desktop selfie packaging](docs/desktopSelfiePackaging.md).
 
-Hook `afterPack` menyimpan snapshot konfigurasi lokal yang hanya berisi `outputDir` ke `resources/selfie.config.json`. Path relatif mempertahankan root backend saat packaging; path home/default diselesaikan untuk pengguna aplikasi terpasang. Jika aplikasi terpasang perlu membaca konfigurasi backend terbaru, tetapkan **`SELFIE_CONFIG_PATH`** ke path absolut file konfigurasi sebelum meluncurkan Electron. Pengaturan ini dibaca oleh proses utama Electron. Lihat [Packaging Selfie Desktop](docs/desktopSelfiePackaging.md).
+## Tests and privacy checks
 
-### 7. Pengujian dan Validasi
-
-Jalankan pengujian otomatis dengan provider AI/gambar tiruan dan build frontend dari root proyek:
-
-```bash
+```sh
+npm run check:privacy
 npm test
 npm run build
 ```
 
-Pengujian mencakup planner, antrean dan pembatalan job, HTTP/WebSocket, popup desktop, dialog browser, sambung ulang, settings tanpa path filesystem, packaging konfigurasi galeri, serta pemulihan giliran dan audio. Guard moderasi mensyaratkan minimal **80 frasa terlarang unik** dan menolak contoh permintaan/prompt terblokir; guard persona mensyaratkan usia karakter **minimal 18 tahun** dan menolak penyebutan usia di bawah 18.
+`check:privacy` scans tracked and untracked non-ignored text case-insensitively for absolute Windows paths, user-profile segments, runtime OS identities, email addresses, and credential-like strings. Only neutral documentation path prefixes are allowed. Diagnostics contain file/count pairs. The guard also runs in `npm test`.
 
-Verifikasi terakhir pada `7ebfdec`: **213/213 pengujian lulus**, tanpa gagal atau skip; `npm run build` berhasil dengan **57 modul**. Pengujian memakai provider tiruan; generasi AI/ComfyUI langsung, alur aplikasi langsung, dan installer masih memerlukan verifikasi.
+Tests use `node:test`, synthetic fixtures, temporary directories, injected hardware/process probes, and fake HTTP/WebSocket providers. They cover provider selection, managed lifecycle, cancellation, memory/telemetry, config migration, setup safety, desktop/browser state, image routing, speech ownership, and moderation/persona regressions. Setup tests do not require the excluded manifest or real machine config.
 
-Untuk menguji satu generasi gambar langsung setelah ComfyUI, workflow, model, dan referensi siap:
+Latest automated validation on **2026-10-25**, through `c36bea4`: **545/545 tests passed**, zero failures/skips; the frontend build passed with **57 modules**. A temporary checkout containing only eligible files also passed **545/545** without private config, setup metadata, runtimes, or reference assets.
 
-```bash
+For live generation after the chosen provider, models, and references are ready:
+
+```sh
 npm run selfie:test -- --provider=comfyui --preset=cepat
+npm run selfie:test -- --provider=sdcpp --preset=hemat
 ```
 
-Uji langsung mencetak durasi dan lokasi hasil. Untuk menguji planner atau job manager secara terpisah, gunakan `npm run selfie:test-b` atau `npm run selfie:test-c`. Di PowerShell, gunakan `npm.cmd` jika eksekusi `npm.ps1` diblokir oleh kebijakan shell.
+Use `npm run selfie:test-b` or `npm run selfie:test-c` for focused planner/job-manager tests. On PowerShell, use `npm.cmd` if shell policy blocks `npm.ps1`.
 
----
+## Verification limits
 
-## 🙏 Credits & Attribution
+Managed ComfyUI, sd.cpp hardening, setup tools, and browser/Electron flows have automated regression coverage. Live image quality, native capture behavior, real engine installation, and the Windows installer still need manual verification. The cloud image provider remains an unavailable stub. Detailed implementation evidence and remaining work are in [docs/STATUS.md](docs/STATUS.md).
 
-1. **Model Live2D — IceGirl**:
-   - Dibuat oleh **tianyelulu** dan tersedia secara gratis di [BOOTH (IceGirl Model)](https://tianyelulu.booth.pm/items/5975192).
-   - Model ini digunakan sebagai aset visual avatar dalam proyek companion ini sesuai dengan lisensi penggunaan yang diberikan oleh kreator di halaman BOOTH tersebut. Seluruh hak cipta, desain karakter, dan hak kekayaan intelektual model Live2D tetap menjadi milik kreator aslinya (**tianyelulu**). Proyek ini tidak mengklaim kepemilikan atas model tersebut.
+## Credits and licenses
 
-2. **Live2D Cubism SDK for Web**:
-   - Teknologi rendering Live2D ditenagai oleh [Live2D Cubism SDK for Web](https://www.live2d.com/en/sdk/about/) resmi dari **Live2D Inc.**
-   - Penggunaan Live2D Cubism Core dan Framework tunduk pada [Live2D Open Software License Agreement](https://www.live2d.com/eula/live2d-open-software-license-agreement_en.html) dan Live2D Proprietary License.
-   - *Catatan bagi pengembang yang meng-clone proyek ini:* Pastikan untuk mengunduh pustaka Live2D Cubism Core resmi secara langsung dari situs [Live2D Cubism SDK for Web](https://www.live2d.com/en/sdk/download/web/) untuk kepatuhan lisensi.
+- **IceGirl Live2D model:** created by **tianyelulu**, available on [BOOTH](https://tianyelulu.booth.pm/items/5975192). Model art and intellectual property remain with the creator; use the assets according to the published license.
+- **Live2D Cubism SDK for Web:** by [Live2D Inc.](https://www.live2d.com/en/sdk/about/). Core/framework use is governed by the [Live2D Open Software License Agreement](https://www.live2d.com/eula/live2d-open-software-license-agreement_en.html) and applicable proprietary terms. Obtain Cubism Core from the [official SDK download](https://www.live2d.com/en/sdk/download/web/).
+- **AI services:** [Experiential Labs](https://experientiallabs.ai), [Groq](https://groq.com), [Fish Audio](https://fish.audio), and [9inference](https://9inference.cloud).
 
-3. **Layanan Pihak Ketiga & Infrastruktur**:
-   - **[xplabs.ai (Experiential Labs)](https://experientiallabs.ai)** untuk penyediaan API model bahasa uncensored (`Qwen3.8 Flash Next Uncensored`).
-   - **[Groq](https://groq.com)** untuk inferensi LPU Speech-to-Text & Vision berkecepatan tinggi.
-   - **[Fish Audio](https://fish.audio)** untuk sintesis suara waifu yang ekspresif.
-   - **[9inference](https://9inference.cloud)** untuk evaluasi filter momen spontan.
-
----
-
-## 📌 Status & Roadmap
-
-- [x] Official Live2D Cubism 5.0 integration dengan physics & expressions.
-- [x] Synthetic procedural face tracking (Simplex noise).
-- [x] Multi-layer talking animations (procedural sway + sentence break clips).
-- [x] 12 Indonesian emotion classification system.
-- [x] Ultra low-latency STT (Groq Whisper) dengan anti-hallucination filtering.
-- [x] **Unrestricted / Uncensored LLM Chat** via **xplabs.ai** (`Qwen3.8 Flash Next Uncensored` / `DeepSeek V4.1 Flash Uncensored`).
-- [x] Desktop text chat input box terintegrasi dengan pipeline suara & vision.
-- [x] Streaming TTS audio playback & synchronized lip-sync (Fish Audio).
-- [x] Smart vision routing (Webcam vs Screen Share + Vision Monitor buffer integration).
-- [x] Conditional 1 FPS screen monitoring & periodic spontaneous commentary.
-- [x] Standalone Vision Monitor observation panel with live remote configuration.
-- [x] **Personalisasi long-term memory & episodic conversation recall** (`data/memory.json`, background auto-extract worker, time-aware greetings).
-- [x] **Direct desktop capture integration via native tray companion** (Electron transparent floating overlay, click-through & mode edit, system tray controls, global shortcuts, DWM content protection `WDA_EXCLUDEFROMCAPTURE`, tanpa browser share screen prompt).
-- [x] **PAP / Selfie sesuai permintaan** — Planner dengan whitelist dan moderasi, provider ComfyUI lokal, antrean terbatas, progress/ETA, pembatalan, cooldown, dan batas harian persisten telah diimplementasikan dan diuji dengan provider tiruan.
-- [x] **UI PAP desktop dan browser** — Popup terlindungi dengan Simpan/Salin/Folder, toggle tray tersimpan, pemulihan layout dan sambung ulang, tutup otomatis, serta dialog browser dengan kontrol fokus keyboard.
-- [x] **Keamanan dan regresi PAP** — URL gambar bertoken, respons no-store, konfigurasi folder lokal, validasi pengirim IPC/navigasi, dan guard moderasi/persona.
-- [x] **Konfigurasi packaging selfie** — Hook `afterPack` untuk snapshot `outputDir` dan override lokal `SELFIE_CONFIG_PATH`.
-- [ ] **Verifikasi langsung** — AI/ComfyUI, alur browser/Electron dan tangkapan layar, serta instalasi Windows x64 masih perlu diuji langsung.
-- [ ] **Provider alternatif** — sd.cpp belum diverifikasi dari awal hingga akhir; provider cloud belum diimplementasikan.
-
-Status terperinci dan batas verifikasi tersedia di [docs/STATUS.md](docs/STATUS.md).
+Keep API keys, personal reference images, generated data, machine overrides, and local engine/model files out of Git. Review each engine/model license before accepting it or installing artifacts.
