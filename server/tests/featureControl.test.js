@@ -5,6 +5,9 @@ import { installSelfieFeatureControl, disabledSelfieResult } from '../selfie/fea
 import { prepareSelfieJob } from '../selfie/backendLifecycle.js';
 import { SpeechController } from '../speechController.js';
 
+const PROVIDER_STATUS = { active: 'sdcpp', reasons: { comfyui: 'Missing node: KSampler', sdcpp: null } };
+const featureEvent = enabled => ({ type: 'selfie_feature', enabled, status: PROVIDER_STATUS });
+
 function harness(socket = {}) {
   const events = [];
   let snapshots = 0;
@@ -12,16 +15,17 @@ function harness(socket = {}) {
     events: [{ type: 'selfie_started', jobId: 'active-job', etaSeconds: null }] };
   const manager = {
     config: { outputDir: 'configured/selfies' },
+    getProviderStatus: () => structuredClone(PROVIDER_STATUS),
     sendSnapshot(send) { snapshots++; send(snapshot); },
   };
   const handle = installSelfieFeatureControl({ socket, manager, send: event => events.push(event) });
   return { socket, manager, handle, events, get snapshots() { return snapshots; } };
 }
 
-test('feature control defaults enabled without sending or accepting malformed settings', () => {
+test('feature control publishes provider status and rejects malformed settings', () => {
   const h = harness();
   assert.equal(h.socket.selfieEnabled, true);
-  assert.deepEqual(h.events, []);
+  assert.deepEqual(h.events, [featureEvent(true)]);
   for (const message of [null, {}, { type: 'text_input', enabled: false },
     { type: 'selfie_feature' }, { type: 'selfie_feature', enabled: 'false' },
     { type: 'selfie_feature', enabled: 0 }]) {
@@ -29,7 +33,7 @@ test('feature control defaults enabled without sending or accepting malformed se
   }
   assert.equal(h.socket.selfieEnabled, true);
   assert.equal(h.snapshots, 0);
-  assert.deepEqual(h.events, []);
+  assert.deepEqual(h.events, [featureEvent(true)]);
 });
 
 test('disabling confirms feature state without output paths and re-enabling restores the snapshot', () => {
@@ -37,14 +41,14 @@ test('disabling confirms feature state without output paths and re-enabling rest
   assert.equal(h.handle({ type: 'selfie_feature', enabled: false }), true);
   assert.equal(h.socket.selfieEnabled, false);
   assert.equal(h.snapshots, 0);
-  assert.deepEqual(h.events, [{ type: 'selfie_feature', enabled: false }]);
+  assert.deepEqual(h.events, [featureEvent(true), featureEvent(false)]);
   assert.equal(disabledSelfieResult(h.socket).reason, 'FEATURE_DISABLED');
 
   assert.equal(h.handle({ type: 'selfie_feature', enabled: true }), true);
   assert.equal(h.snapshots, 1);
   assert.equal(disabledSelfieResult(h.socket), null);
-  assert.deepEqual(h.events.slice(1), [
-    { type: 'selfie_feature', enabled: true },
+  assert.deepEqual(h.events.slice(2), [
+    featureEvent(true),
     { type: 'selfie_snapshot', activeJobId: 'active-job',
       events: [{ type: 'selfie_started', jobId: 'active-job', etaSeconds: null }] },
   ]);

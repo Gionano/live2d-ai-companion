@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import vm from 'node:vm';
+import { execFileSync } from 'node:child_process';
+import { loadSelfieConfig } from '../selfie/config.js';
 import packageSelfieConfig from '../../desktop-companion/scripts/packageSelfieConfig.js';
 import { resolveLocalSelfieOutputDir } from '../../desktop-companion/src/main/selfieOutputDir.js';
 
@@ -18,15 +19,8 @@ function fixture(t) {
     write: value => fs.writeFileSync(configPath, JSON.stringify(value)) };
 }
 
-// Exercise the backend loader with a fixture root while retaining its actual resolution rules.
 function serverOutputDir(serverRoot) {
-  const source = fs.readFileSync(new URL('../selfie/config.js', import.meta.url), 'utf8')
-    .replace(/^import .*;\r?\n/gm, '')
-    .replace(/^export const ROOT_DIR = .*;$/m, '')
-    .replace(/^export /gm, '');
-  const context = vm.createContext({ fs, os, path, ROOT_DIR: serverRoot });
-  vm.runInContext(source, context, { filename: 'server-selfie-config.js' });
-  return context.loadSelfieConfig().outputDir;
+  return loadSelfieConfig({}, { repoRoot: serverRoot }).outputDir;
 }
 
 test('development and installed gallery folders match backend default, absolute, relative, and home paths', (t) => {
@@ -40,8 +34,7 @@ test('development and installed gallery folders match backend default, absolute,
     assert.equal(resolveLocalSelfieOutputDir({ isPackaged: true, resourcesPath: f.resourcesPath }), expected, `installed: ${outputDir}`);
     const bundled = JSON.parse(fs.readFileSync(path.join(f.resourcesPath, 'selfie.config.json'), 'utf8'));
     assert.deepEqual(Object.keys(bundled), ['outputDir']);
-    if (outputDir.startsWith('~')) assert.equal(bundled.outputDir, outputDir);
-    if (!outputDir.trim()) assert.equal(bundled.outputDir, '');
+    assert.equal(bundled.outputDir, expected);
     if (outputDir === 'photos') assert.equal(bundled.outputDir, path.join(f.serverRoot, 'photos'));
   }
 });
@@ -51,7 +44,7 @@ test('missing development config follows backend defaults and gets a default ins
   const expected = serverOutputDir(f.serverRoot);
   assert.equal(resolveLocalSelfieOutputDir({ serverRoot: f.serverRoot }), expected);
   packageSelfieConfig({ appOutDir: f.appOutDir, packager: { projectDir: f.projectDir } });
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.resourcesPath, 'selfie.config.json'), 'utf8')), { outputDir: '' });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.resourcesPath, 'selfie.config.json'), 'utf8')), { outputDir: expected });
   assert.equal(resolveLocalSelfieOutputDir({ isPackaged: true, resourcesPath: f.resourcesPath }), expected);
 });
 
@@ -85,4 +78,40 @@ test('electron-builder selects the ESM packaging hook that writes the narrow loc
   assert.equal(manifest.build.afterPack, './scripts/packageSelfieConfig.js');
   assert.equal(typeof packageSelfieConfig, 'function');
   assert.equal(manifest.build.files.includes('src/**/*'), true);
+  assert.ok(manifest.build.extraResources.some(resource => resource.from === '../server/selfie/localPaths.js'
+    && resource.to === 'selfie/localPaths.js'));
+});
+
+test('gallery merges machine output paths and LOCAL consistently with the backend', (t) => {
+  const f = fixture(t);
+  f.write({ outputDir: 'base-photos' });
+  fs.writeFileSync(path.join(f.serverRoot, 'selfie.config.local.json'), JSON.stringify({ outputDir: '${LOCAL}/outputs/machine' }));
+  const expected = serverOutputDir(f.serverRoot);
+  assert.equal(resolveLocalSelfieOutputDir({ serverRoot: f.serverRoot }), expected);
+  packageSelfieConfig({ appOutDir: f.appOutDir, packager: { projectDir: f.projectDir } });
+  assert.equal(resolveLocalSelfieOutputDir({ isPackaged: true, resourcesPath: f.resourcesPath }), expected);
+});
+
+test('gallery reads machine output override when shared development config is absent', (t) => {
+  const f = fixture(t);
+  fs.writeFileSync(path.join(f.serverRoot, 'selfie.config.local.json'), JSON.stringify({ outputDir: 'machine-only' }));
+  assert.equal(resolveLocalSelfieOutputDir({ serverRoot: f.serverRoot }), serverOutputDir(f.serverRoot));
+});
+
+test('packaged gallery loads the bundled single-source resolver without a server checkout', (t) => {
+  const f = fixture(t);
+  const appDir = path.join(f.serverRoot, 'application');
+  const mainDir = path.join(appDir, 'src', 'main');
+  fs.mkdirSync(mainDir, { recursive: true });
+  fs.mkdirSync(path.join(f.resourcesPath, 'selfie'), { recursive: true });
+  fs.copyFileSync(new URL('../../desktop-companion/src/main/selfieOutputDir.js', import.meta.url), path.join(mainDir, 'selfieOutputDir.js'));
+  fs.copyFileSync(new URL('../selfie/localPaths.js', import.meta.url), path.join(f.resourcesPath, 'selfie', 'localPaths.js'));
+  fs.writeFileSync(path.join(f.serverRoot, 'package.json'), '{"type":"module"}');
+  fs.writeFileSync(path.join(f.resourcesPath, 'selfie.config.json'), '{"outputDir":"${LOCAL}/outputs"}');
+  const probe = path.join(appDir, 'probe.mjs');
+  fs.writeFileSync(probe, `process.resourcesPath = ${JSON.stringify(f.resourcesPath)};\n`
+    + `const { resolveLocalSelfieOutputDir } = await import('./src/main/selfieOutputDir.js');\n`
+    + `console.log(resolveLocalSelfieOutputDir({ isPackaged: true, resourcesPath: process.resourcesPath }));\n`);
+  const output = execFileSync(process.execPath, [probe], { encoding: 'utf8', windowsHide: true, timeout: 5000 });
+  assert.equal(output.trim(), path.join(f.resourcesPath, 'local', 'outputs'));
 });

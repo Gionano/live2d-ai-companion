@@ -51,7 +51,7 @@ function createMockProvider({ available = true, delayMs = 10, fail = false, canc
         await new Promise((r) => setTimeout(r, delayMs));
       }
       return {
-        imagePath: 'C:\\Users\\Lenovo\\Pictures\\WaifuSelfies\\mock_test.png',
+        imagePath: path.join(os.tmpdir(), 'WaifuSelfies', 'mock_test.png'),
         seed: 12345,
         timings: { totalMs: 50 },
       };
@@ -177,7 +177,7 @@ test('2. Siklus Hidup Job, Event WebSocket, dan Token HTTP (Success Flow)', asyn
   const token = readyEv.imageUrl.replace('/api/selfies/', '');
   const fileData = jm.getFileByToken(token);
   assert.ok(fileData, 'Token harus terdaftar di tokenMap');
-  assert.equal(fileData.filePath, 'C:\\Users\\Lenovo\\Pictures\\WaifuSelfies\\mock_test.png');
+  assert.equal(fileData.filePath, path.join(os.tmpdir(), 'WaifuSelfies', 'mock_test.png'));
 
   // Suara avatar membacakan caption setelah selesai
   assert.equal(spokenMessages.length, 2);

@@ -251,9 +251,10 @@ for (const stage of ['/system_stats', '/view', '/upload/image']) {
       limitsStorePath: null, etaStorePath: null, maxQueue: 0, cooldownMs: 0,
       dailyLimit: 2, freeVramAfter: false,
     });
+    let availabilityChecks = 0;
     fake.provider.isAvailable = async signal => {
-      // JobManager checks availability without a signal before generate().
-      if (!signal) return true;
+      // Hold the provider's preparation check after JobManager's admission check.
+      if (++availabilityChecks === 1) return true;
       return ComfyUiProvider.prototype.isAvailable.call(fake.provider, signal);
     };
     manager.provider = fake.provider;

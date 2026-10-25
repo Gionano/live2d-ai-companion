@@ -223,6 +223,7 @@ test('backend SIGINT, SIGTERM, and server close await one interrupt and release 
     order.push('release');
     await released.promise;
   };
+  provider.shutdown = async () => { order.push('provider shutdown'); };
   server.close = () => { order.push('close'); server.emit('close'); };
   wss.clients = new Set([{ terminate() { order.push('terminate'); } }]);
   wss.close = () => order.push('ws close');
@@ -244,5 +245,7 @@ test('backend SIGINT, SIGTERM, and server close await one interrupt and release 
   assert.deepEqual(exits, [0]);
   assert.equal(provider.releases, 1);
   assert.ok(order.indexOf('release') < order.indexOf('exit'));
+  assert.ok(order.indexOf('release') < order.indexOf('provider shutdown'));
+  assert.ok(order.indexOf('provider shutdown') < order.indexOf('exit'));
   assert.equal(manager.activeJob, null);
 });

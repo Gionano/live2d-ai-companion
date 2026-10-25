@@ -193,7 +193,7 @@ test('a late startup snapshot cannot overwrite a newer tray toggle', async () =>
 
 test('renderer never forwards a gallery path and malformed messages are ignored', () => {
   const h = companionHarness();
-  const event = { type: 'selfie_feature', enabled: true, outputDir: 'C:\\Pictures\\Selfies' };
+  const event = { type: 'selfie_feature', enabled: true, outputDir: path.win32.join('X:', '/', 'Path With Spaces', 'Selfies') };
   h.sockets[0].receive(event);
   h.sockets[0].receive(null);
   h.sockets[0].receive(1);
