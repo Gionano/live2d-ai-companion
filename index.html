@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Amika Live2D Companion</title>
     <script>
+      if (window.desktopBridge) {
+        document.documentElement.classList.add('electron-mode');
+      }
       if (new URLSearchParams(window.location.search).get('mode') === 'overlay') {
         document.documentElement.classList.add('overlay-mode');
       }
@@ -17,6 +20,9 @@
       }
       * { margin: 0; padding: 0; box-sizing: border-box; }
       html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; }
+      html:not(.overlay-mode):not(.electron-mode) body {
+        background: #1a1a2e url('/images/background.jpg') center / cover no-repeat;
+      }
       html.overlay-mode, html.overlay-mode body { background: transparent !important; }
       #app { width: 100vw; height: 100vh; display: block; position: relative; z-index: 2; }
       #webcam { display: none; }
