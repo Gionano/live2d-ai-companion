@@ -7,6 +7,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const DEFAULT_HISTORY_SIZE = 5;
+const PEAK_FIELDS = ['vramUsedGB', 'privateBytesGB', 'peakWorkingSetGB', 'commitUsedGB', 'commitLimitGB', 'sharedGpuUsedGB'];
+
+export function normalizeMemoryPeaks(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return Object.fromEntries(PEAK_FIELDS.map(field => [field,
+    Number.isFinite(value[field]) && value[field] >= 0 ? value[field] : null,
+  ]));
+}
 
 /**
  * Singleton ETA store. Menyimpan durasi job ke file JSON,
@@ -63,6 +71,37 @@ export const etaStore = {
       fs.writeFileSync(target, JSON.stringify(data, null, 2), 'utf-8');
     } catch (err) {
       console.warn('[selfie] [etaStore] Gagal menyimpan durasi ETA:', err.message);
+    }
+  },
+
+  getLastPeaks(preset, filePath = null) {
+    try {
+      const data = JSON.parse(fs.readFileSync(resolveStorePath(filePath), 'utf-8'));
+      const history = data._peaks?.[preset];
+      return Array.isArray(history) ? normalizeMemoryPeaks(history.at(-1)) : null;
+    } catch {
+      return null;
+    }
+  },
+
+  recordPeaks(preset, peaks, filePath = null, historySize = DEFAULT_HISTORY_SIZE) {
+    const normalized = normalizeMemoryPeaks(peaks);
+    if (!normalized) return;
+    try {
+      const target = resolveStorePath(filePath);
+      let data = {};
+      try {
+        data = JSON.parse(fs.readFileSync(target, 'utf-8'));
+        if (!data || typeof data !== 'object' || Array.isArray(data)) data = {};
+      } catch {}
+      if (!data._peaks || typeof data._peaks !== 'object' || Array.isArray(data._peaks)) data._peaks = {};
+      const history = Array.isArray(data._peaks[preset]) ? data._peaks[preset] : [];
+      const limit = Number.isSafeInteger(historySize) && historySize > 0 ? historySize : DEFAULT_HISTORY_SIZE;
+      data._peaks[preset] = [...history, { timestamp: Date.now(), ...normalized }].slice(-limit);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (err) {
+      console.warn('[selfie] Could not persist memory peaks:', err.message);
     }
   },
 };
