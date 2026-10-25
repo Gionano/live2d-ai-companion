@@ -110,6 +110,7 @@ function maybeSpawnBackend() {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
+      SELFIE_USER_DATA_DIR: app.getPath('userData'),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,

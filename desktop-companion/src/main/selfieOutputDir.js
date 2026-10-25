@@ -1,39 +1,49 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const sourceResolver = new URL('../../../server/selfie/localPaths.js', import.meta.url);
+const resolverUrl = fs.existsSync(sourceResolver) ? sourceResolver
+  : pathToFileURL(path.join(process.resourcesPath, 'selfie', 'localPaths.js'));
+const { createLocalPaths } = await import(resolverUrl.href);
 
 export function readLocalSelfieOutputDir(configPath, { allowMissing = false } = {}) {
   let config;
   try {
     config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   } catch (error) {
-    if (allowMissing && error.code === 'ENOENT') return '';
-    throw new Error(`Cannot read local selfie configuration: ${error.message}`);
+    if (allowMissing && error.code === 'ENOENT') config = {};
+    else throw new Error(`Cannot read local selfie configuration: ${error.message}`);
   }
   if (!config || typeof config !== 'object' || Array.isArray(config)
     || config.outputDir !== undefined && typeof config.outputDir !== 'string') {
     throw new Error('Invalid local selfie output directory');
   }
-  return (config.outputDir || '').trim();
+  const localPath = path.join(path.dirname(configPath), 'selfie.config.local.json');
+  let localConfig = {};
+  try {
+    localConfig = JSON.parse(fs.readFileSync(localPath, 'utf8'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw new Error(`Cannot read local selfie configuration: ${error.message}`);
+  }
+  if (!localConfig || typeof localConfig !== 'object' || Array.isArray(localConfig)
+    || localConfig.outputDir !== undefined && typeof localConfig.outputDir !== 'string') {
+    throw new Error('Invalid local selfie output directory');
+  }
+  return (localConfig.outputDir ?? config.outputDir ?? '').trim();
 }
 
-function isHomeRelative(value) {
-  return value === '~' || value.startsWith('~/') || value.startsWith('~\\');
-}
-
-// A bundled relative path keeps the external server root used during packaging.
-// Leave home/default values unresolved until the installed user's main process reads them.
+// Capture the backend's resolved folder in the main-process-only packaged snapshot.
 export function createPackagedSelfieConfig(configPath) {
   const outputDir = readLocalSelfieOutputDir(configPath, { allowMissing: true });
-  return { outputDir: outputDir && !isHomeRelative(outputDir) && !path.isAbsolute(outputDir)
-    ? path.resolve(path.dirname(configPath), outputDir) : outputDir };
+  const paths = createLocalPaths({ repoRoot: path.dirname(configPath) });
+  return { outputDir: paths.resolvePath(outputDir, { fallback: paths.outputsDir() }) };
 }
 
 export function resolveLocalSelfieOutputDir({ isPackaged = false, resourcesPath, serverRoot, configPath } = {}) {
   if (configPath && !path.isAbsolute(configPath)) throw new Error('SELFIE_CONFIG_PATH must be absolute');
   const sourcePath = configPath || path.join(isPackaged ? resourcesPath : serverRoot, 'selfie.config.json');
   const outputDir = readLocalSelfieOutputDir(sourcePath, { allowMissing: !configPath && !isPackaged });
-  if (!outputDir) return path.join(os.homedir(), 'Pictures', 'WaifuSelfies');
-  if (isHomeRelative(outputDir)) return path.join(os.homedir(), outputDir.slice(1));
-  return path.isAbsolute(outputDir) ? outputDir : path.resolve(path.dirname(sourcePath), outputDir);
+  const paths = createLocalPaths({ repoRoot: path.dirname(sourcePath) });
+  return paths.resolvePath(outputDir, { fallback: paths.outputsDir() });
 }

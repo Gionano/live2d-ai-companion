@@ -29,6 +29,10 @@
     ],
     "extraResources": [
       {
+        "from": "../server/selfie/localPaths.js",
+        "to": "selfie/localPaths.js"
+      },
+      {
         "from": "../dist",
         "to": "frontend-dist",
         "filter": [

@@ -1,8 +1,15 @@
 {
-  "_comment": "Semua konstanta tuning modul selfie (pap). Hanya dibaca backend.",
-  "provider": "comfyui",
+  "_comment": "Selfie tuning constants. Read only by the backend.",
+  "provider": "auto",
+  "autoOrder": [
+    "comfyui",
+    "comfyui-managed",
+    "sdcpp"
+  ],
+  "availabilityCacheMs": 30000,
+  "healthTimeoutMs": 1500,
   "comfyUrl": "http://127.0.0.1:8188",
-  "outputDir": "",
+  "outputDir": "${LOCAL}/outputs",
   "autoCloseSeconds": 30,
   "allowLan": false,
   "filenamePrefix": "waifu_selfie",
@@ -13,8 +20,25 @@
   "dailyLimit": 20,
   "preset": "cepat",
   "presets": {
-    "cepat": { "resolution": 768, "steps": 12 },
-    "kualitas": { "resolution": 1024, "steps": 20 }
+    "cepat": {
+      "resolution": 768,
+      "steps": 12,
+      "cfg": 3
+    },
+    "kualitas": {
+      "resolution": 1024,
+      "steps": 20,
+      "cfg": 3
+    },
+    "hemat": {
+      "resolution": 768,
+      "steps": 12,
+      "cfg": 3,
+      "sdcpp": {
+        "args": [],
+        "modelArgs": []
+      }
+    }
   },
   "referenceDir": "assets/references",
   "defaultReference": "default.jpg",
@@ -24,12 +48,31 @@
   "characterCardFile": "config/characterCard.json",
   "moderationFile": "config/selfieModeration.json",
   "plannerTimeoutMs": 20000,
-  "healthCheckTimeoutMs": 3000,
   "pollIntervalMs": 1500,
   "cacheRetries": 1,
   "etaHistorySize": 5,
   "etaStoreFile": "data/selfie-durations.json",
   "limitsStoreFile": "data/selfie-limits.json",
+  "logFile": "${LOCAL}/logs/selfie.log",
+  "telemetry": {
+    "enabled": true,
+    "intervalMs": 2000,
+    "probeTimeoutMs": 1500
+  },
+  "comfyuiManaged": {
+    "installDir": "",
+    "pythonPath": "",
+    "mainScript": "",
+    "host": "127.0.0.1",
+    "port": "auto",
+    "args": [],
+    "env": {},
+    "startTimeoutMs": 120000,
+    "idleStopSeconds": 90,
+    "healthPath": "/system_stats",
+    "profiles": {},
+    "profile": ""
+  },
   "phrases": {
     "initial": [
       "Tunggu ya sayang, aku pose dulu sebentar...",
@@ -48,8 +91,8 @@
       "Kamera aku istirahat dulu ya sayang, kuota foto hari ini udah habis deh~"
     ],
     "providerUnavailable": [
-      "Aduh sayang, generator gambarku lagi mati nih. Coba nyalakan ComfyUI dulu yaa.",
-      "Studio fotoku belum aktif nih sayang. Nyalakan ComfyUI dulu yaa."
+      "Aduh sayang, sekarang aku belum bisa foto. Studio gambarku belum siap nih.",
+      "Maaf ya sayang, kamera digitalku belum bisa dipakai sekarang."
     ],
     "failed": [
       "Yah sayang, fotonya gagal diproses nih. Nanti kita coba lagi yaa.",
@@ -60,15 +103,23 @@
     ]
   },
   "sdcpp": {
-    "cliPath": "",
-    "diffusionModel": "",
-    "vae": "",
-    "llm": "",
-    "llmVision": "",
-    "cfgScale": 3,
-    "samplingMethod": "euler",
-    "flowShift": 3.1,
+    "binaryPath": "",
+    "diffusionModel": "${LOCAL}/models/diffusion_models/qwen-image-2.1-UC-Q5_K_M.gguf",
+    "vae": "${LOCAL}/models/vae/qwen_image_2.1_vae_bf16.safetensors",
+    "llm": "${LOCAL}/models/text_encoders/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+    "llmVision": "${LOCAL}/models/text_encoders/mmproj-Qwen3VL-8B-Instruct-F16.gguf",
     "offloadToCpu": true,
-    "extraArgs": []
+    "allowCpu": false,
+    "forceRun": false,
+    "args": [
+      "--sampling-method",
+      "euler",
+      "--offload-to-cpu"
+    ],
+    "modelArgs": [],
+    "extraArgs": [],
+    "helpTimeoutMs": 5000,
+    "deviceTimeoutMs": 5000,
+    "stderrTailBytes": 8192
   }
 }
