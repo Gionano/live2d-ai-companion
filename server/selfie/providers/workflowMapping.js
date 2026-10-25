@@ -69,7 +69,7 @@ export function resolveMapping(workflow, mapping) {
   const required = {
     prompt: ['positive', 'negative', 'resolution'],
     reference: ['image'],
-    sampler: ['seed', 'steps'],
+    sampler: ['seed', 'steps', 'cfg'],
     save: ['filenamePrefix'],
   };
   const resolved = {};

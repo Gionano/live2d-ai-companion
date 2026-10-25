@@ -36,6 +36,7 @@ export class JobManager {
     this._shutdownPromise = null;
     this._lastReleasePromise = null;
     this._readyEvent = null;
+    this._statusController = new AbortController();
     this.limitsStorePath = this.config.limitsStorePath === undefined
       ? path.resolve('data/selfie-limits.json') : this.config.limitsStorePath;
     this._loadLimits();
@@ -54,7 +55,10 @@ export class JobManager {
       if (!this._providerPromise) {
         if (this._shuttingDown) throw new Error('Selfie manager is shutting down');
         // The manager owns release, including shutdown; standalone providers still auto-release.
-        this._providerPromise = createImageProvider({ ...this.config, freeVramAfter: false });
+        this._providerPromise = createImageProvider(
+          { ...this.config, freeVramAfter: false },
+          { onStatus: (status, publicStatus) => this._handleProviderStatus(status, publicStatus) },
+        );
       }
       try {
         this.provider = await this._providerPromise;
@@ -64,6 +68,57 @@ export class JobManager {
       }
     }
     return this.provider;
+  }
+
+  _handleProviderStatus(status, publicStatus = this.getProviderStatus()) {
+    if (!status || typeof status !== 'object') return;
+    if (!status.active) {
+      logSelfie(
+        `[provider] No image provider is ready: comfyui=${status.reasons?.comfyui || 'unknown'}; `
+        + `comfyui-managed=${status.reasons?.['comfyui-managed'] || 'unknown'}; `
+        + `sdcpp=${status.reasons?.sdcpp || 'unknown'}`,
+        'warn',
+      );
+    }
+    this.broadcast({ type: 'selfie_feature', status: publicStatus });
+  }
+
+  getProviderStatus() {
+    return this.provider?.getPublicStatus?.() || {
+      active: null,
+      reasons: { comfyui: 'Not checked.', 'comfyui-managed': 'Not checked.', sdcpp: 'Not checked.' },
+    };
+  }
+
+  async refreshProviderStatus({ force = false } = {}) {
+    const provider = await this.getProvider();
+    if (typeof provider.resolveProvider === 'function') {
+      await provider.resolveProvider({ force, signal: this._statusController.signal });
+      return provider.getStatus();
+    }
+    const ready = typeof provider.checkReady === 'function'
+      ? await provider.checkReady() : { ready: await provider.isAvailable() };
+    return {
+      active: ready.ready ? provider.name || this.config.provider : null,
+      reasons: { comfyui: null, 'comfyui-managed': null, sdcpp: null },
+    };
+  }
+
+  async updateConfig(config) {
+    // Output tokens and quota persistence keep their authorized roots until restart.
+    this.config = {
+      ...config,
+      outputDir: this.config.outputDir,
+      limitsStoreFile: this.config.limitsStoreFile,
+      limitsStorePath: this.limitsStorePath,
+    };
+    const provider = this.provider || (this._providerPromise && await this._providerPromise.catch(() => null));
+    if (provider?.updateConfig) provider.updateConfig({ ...this.config, freeVramAfter: false });
+    else {
+      this.provider = null;
+      this._providerPromise = null;
+    }
+    return this.refreshProviderStatus({ force: true });
   }
 
   _loadLimits() {
@@ -211,6 +266,7 @@ export class JobManager {
     };
     if (this.activeJob || this.queue.length) this.queue.push(job);
     else this.activeJob = job;
+    this.provider?.onJobAdmitted?.();
     return { allowed: true, jobId: job.jobId };
   }
 
@@ -235,7 +291,7 @@ export class JobManager {
         return {
           allowed: false,
           reason: 'PROVIDER_UNAVAILABLE',
-          text: this.pickPhrase('providerUnavailable') || 'Aduh sayang, generator gambar lokal sedang mati. Coba nyalakan ComfyUI dulu yaa.',
+          text: this.pickPhrase('providerUnavailable') || 'Aduh sayang, sekarang aku belum bisa foto. Studio gambarku belum siap nih.',
           emotion: 'malu',
         };
       }
@@ -282,8 +338,10 @@ export class JobManager {
         presetCfg,
         etaSeconds,
         initialText,
+        etaStorePath: this.config.etaStorePath,
+        etaHistorySize: this.config.etaHistorySize,
         submitted: true,
-        startedEvent: { type: 'selfie_started', jobId, etaSeconds, preset: chosenPreset,
+        startedEvent: { type: 'selfie_started', jobId, etaSeconds, preset: chosenPreset, provider: null,
           caption: plan.caption, status: queued ? 'queued' : 'preparing' },
       });
       if (!skipInitialSpeech) {
@@ -326,7 +384,12 @@ export class JobManager {
   _pumpQueue() {
     if (this._shuttingDown) return;
     if (!this.activeJob) this.activeJob = this.queue.shift() || null;
-    if (this.activeJob) this._launchJob(this.activeJob);
+    if (this.activeJob) {
+      this.provider?.onJobAdmitted?.();
+      this._launchJob(this.activeJob);
+    } else {
+      this.provider?.onJobsIdle?.();
+    }
   }
 
   _throwIfCancelled(jobData) {
@@ -385,37 +448,66 @@ export class JobManager {
     const { jobId, plan, preset, presetCfg, etaSeconds } = jobData;
     let prov = null;
     let failed = false;
+    let markGenerationStarted = null;
     try {
       this._throwIfCancelled(jobData);
       prov = await this._untilCancelled(jobData, this.getProvider());
+      jobData.imageProvider = prov;
       this._throwIfCancelled(jobData);
-      if (!await this._untilCancelled(jobData, prov.isAvailable())) {
-        throw new Error('Generator gambar lokal belum aktif nih sayang.');
+      if (!await this._untilCancelled(jobData, prov.isAvailable(jobData.abortController.signal))) {
+        throw Object.assign(new Error('No image provider is ready.'), {
+          code: 'PROVIDER_UNAVAILABLE',
+          text: this.pickPhrase('providerUnavailable'),
+        });
       }
       await this._waitForStart(jobData);
       // Consume the quota only when generation starts; pending cancellations refund it.
       this._throwIfCancelled(jobData);
       const startCheck = this._checkLimits();
       if (!startCheck.allowed) throw Object.assign(new Error(startCheck.reason), startCheck, { code: startCheck.reason });
-      jobData.reserved = false;
-      jobData.started = true;
-      jobData.startTime = Date.now();
-      this.incrementDailyCount();
-      this._lastReleasePromise = null;
-      this._readyEvent = null;
-      jobData.startedEvent = { type: 'selfie_started', jobId, etaSeconds, preset, caption: plan.caption };
-      logSelfie(`[jobManager] Memulai job selfie [${jobId}] (preset: ${preset}, ETA: ${etaSeconds}s)`);
-      this.broadcast(jobData.startedEvent);
-      this._throwIfCancelled(jobData);
       const t0 = performance.now();
+      if (prov.getStatus?.()?.active === 'comfyui-managed' || prov.name === 'comfyui-managed') {
+        this._lastReleasePromise = null;
+      }
+
+      markGenerationStarted = (providerName = prov.name || this.config.provider || 'unknown', mayHaveStarted = false) => {
+        if (jobData.started) return;
+        if (!mayHaveStarted) this._throwIfCancelled(jobData);
+        jobData.reserved = false;
+        jobData.started = true;
+        jobData.startTime = Date.now();
+        jobData.provider = providerName;
+        this.incrementDailyCount();
+        this._lastReleasePromise = null;
+        this._readyEvent = null;
+        jobData.startedEvent = {
+          type: 'selfie_started',
+          jobId,
+          etaSeconds,
+          preset,
+          provider: providerName,
+          caption: plan.caption,
+        };
+        logSelfie(
+          `[jobManager] Started selfie job [${jobId}] using ${providerName} `
+          + `(preset: ${preset}, ETA: ${etaSeconds}s)`,
+        );
+        if (!jobData.abortController.signal.aborted) this.broadcast(jobData.startedEvent);
+      };
 
       const genParams = {
+        preset,
+        sdcpp: presetCfg.sdcpp,
         positivePrompt: plan.positivePrompt,
         negativePrompt: plan.negativePrompt,
         referenceImage: plan.referenceImage,
         resolution: presetCfg.resolution,
         steps: presetCfg.steps,
+        cfgScale: presetCfg.cfg,
+        providerOverrides: presetCfg.providers,
       };
+
+      if (!prov.managesGenerationStart) markGenerationStarted();
 
       const result = await prov.generate(
         genParams,
@@ -432,10 +524,16 @@ export class JobManager {
           this.broadcast(jobData.lastProgress);
         },
         jobData.abortController.signal,
+        markGenerationStarted,
       );
+      if (!jobData.started) markGenerationStarted(result.provider || prov.name);
+      jobData.peaks = result.peaks;
+      const timings = prov.getGenerationTimings?.();
       this._throwIfCancelled(jobData);
       const durationMs = Math.round(performance.now() - t0);
-      etaStore.recordDuration(preset, Math.round(durationMs / 1000), this.config.etaStorePath);
+      const generateMs = jobData.provider === 'comfyui-managed' && Number.isFinite(timings?.generateMs)
+        ? timings.generateMs : durationMs;
+      etaStore.recordDuration(preset, Math.round(generateMs / 1000), jobData.etaStorePath, jobData.etaHistorySize);
 
       // Buat token akses acak yang tidak bisa ditebak (Point 15)
       const token = crypto.randomBytes(16).toString('hex');
@@ -460,6 +558,12 @@ export class JobManager {
         caption: plan.caption,
         emotion: plan.emotion,
         durationMs,
+        ...(jobData.provider === 'comfyui-managed' && {
+          provider: jobData.provider,
+          profile: prov.getGenerationStatus?.()?.profile || '',
+          coldStartMs: timings?.coldStartMs ?? null,
+          generateMs: timings?.generateMs ?? null,
+        }),
         autoCloseSeconds: normalizeAutoCloseSeconds(this.config.autoCloseSeconds),
       };
       this._readyEvent = jobData.readyEvent;
@@ -470,6 +574,10 @@ export class JobManager {
 
     } catch (err) {
       failed = true;
+      // An unresolved accepted submission still owns quota and provider cleanup.
+      if (!jobData.started && err.generationStarted === true && markGenerationStarted) {
+        markGenerationStarted(prov.name || this.config.provider, true);
+      }
       const isCancelled = jobData.abortController.signal.aborted || err.code === 'CANCELLED';
       if (isCancelled) {
         logSelfie(`[jobManager] Job dibatalkan [${jobId}]`);
@@ -482,9 +590,15 @@ export class JobManager {
     } finally {
       jobData.reserved = false;
       if (jobData.cancelPromise) await jobData.cancelPromise;
-      if (prov && jobData.started && (failed || this.config.freeVramAfter)) {
+      if (jobData.started && ['sdcpp', 'comfyui-managed'].includes(jobData.provider)) {
+        etaStore.recordPeaks(preset, jobData.peaks || prov?.getGenerationPeaks?.(), jobData.etaStorePath, jobData.etaHistorySize);
+      }
+      const managedJob = jobData.provider === 'comfyui-managed'
+        || prov?.currentProviderName === 'comfyui-managed' || prov?.name === 'comfyui-managed';
+      if (prov && (managedJob || (jobData.started && (failed || this.config.freeVramAfter)))) {
         await this._releaseProvider(prov);
       }
+      if (this.queue.length) prov?.onJobAdmitted?.();
       if (this.activeJob === jobData) this.activeJob = null;
       this._pumpQueue();
     }
@@ -501,12 +615,15 @@ export class JobManager {
     job.abortController.abort();
     if (!job.started) {
       job.reserved = false;
-      if (this.activeJob === job) this.activeJob = null;
+      if (this.activeJob === job) {
+        // Preparation must finish cancellation before another job uses the provider.
+        if (!job.running) this.activeJob = null;
+      }
       else this.queue.splice(this.queue.indexOf(job), 1);
       this._notifyCancelled(job);
       this._pumpQueue();
     } else if (!job.cancelPromise) {
-      job.cancelPromise = Promise.resolve().then(() => this.provider?.cancel()).catch((err) => {
+      job.cancelPromise = Promise.resolve().then(() => job.imageProvider?.cancel()).catch((err) => {
         logSelfie(`[jobManager] Provider cancel failed: ${err.message}`, 'warn');
       });
     }
@@ -543,13 +660,20 @@ export class JobManager {
   shutdown() {
     if (this._shutdownPromise) return this._shutdownPromise;
     this._shuttingDown = true;
+    this._statusController.abort();
     this._shutdownPromise = Promise.resolve().then(async () => {
       for (const job of [...this.queue]) await this.cancelJob(job.jobId);
       if (this.activeJob && !this.activeJob.readyEvent) await this.cancelJob(this.activeJob.jobId);
       await Promise.all([...this._runTasks]);
       // Join an existing release if shutdown races successful or failed cleanup.
       const prov = this.provider || (this._providerPromise && await this._providerPromise.catch(() => null));
-      if (prov) await this._releaseProvider(prov);
+      if (prov) {
+        try {
+          await this._releaseProvider(prov);
+        } finally {
+          await prov.shutdown?.();
+        }
+      }
       this.activeJob = null;
       this.queue = [];
     });

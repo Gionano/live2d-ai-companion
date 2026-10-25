@@ -46,6 +46,7 @@ import { jobManager } from './selfie/jobManager.js';
 import { installSelfieLifecycle, prepareSelfieJob } from './selfie/backendLifecycle.js';
 import { installSelfieFeatureControl, disabledSelfieResult } from './selfie/featureControl.js';
 import { installSelfieImagePolicy, installSelfieImageRoutes } from './selfie/imageRoutes.js';
+import { watchSelfieConfig } from './selfie/config.js';
 
 const app = express();
 installSelfieImagePolicy(app, jobManager);
@@ -278,6 +279,15 @@ function broadcastToCompanions(obj) {
 
 // Hubungkan broadcaster JobManager ke semua socket companion
 jobManager.setBroadcaster(broadcastToCompanions);
+void jobManager.refreshProviderStatus({ force: true }).catch((err) => {
+  console.warn(`[selfie] Provider startup check failed: ${err.message}`);
+});
+const stopSelfieConfigWatch = watchSelfieConfig(
+  config => void jobManager.updateConfig(config).catch((err) => {
+    console.warn(`[selfie] Provider config refresh failed: ${err.message}`);
+  }),
+  { onError: err => console.warn(`[selfie] Config watch failed: ${err.message}`) },
+);
 
 // One controller owns turn state and speech IDs for every spoken output.
 const speechController = new SpeechController({ generateSpeech, isVoiceConfigured });
@@ -824,6 +834,7 @@ wss.on('connection', (socket, req) => {
 
 // Install after role assignment so monitor sockets do not receive selfie snapshots.
 installSelfieLifecycle({ manager: jobManager, server, wss });
+server.once('close', stopSelfieConfigWatch);
 
 const PORT = process.env.PORT || 8787;
 server.listen(PORT, '127.0.0.1', () => {

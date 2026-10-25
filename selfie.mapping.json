@@ -14,7 +14,7 @@
     "sampler": {
       "title": "KSampler",
       "classType": "KSampler",
-      "fields": { "seed": "seed", "steps": "steps" }
+      "fields": { "seed": "seed", "steps": "steps", "cfg": "cfg" }
     },
     "save": {
       "title": "Simpan Gambar",

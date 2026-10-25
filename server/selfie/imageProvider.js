@@ -36,6 +36,14 @@ export class ImageProvider {
   async isAvailable() {
     throw new Error('isAvailable() belum diimplementasikan');
   }
+  async checkReady(signal) {
+    const ready = await this.isAvailable(signal);
+    return {
+      ready,
+      code: ready ? 'READY' : IMAGE_ERROR.UNAVAILABLE,
+      message: ready ? `${this.name} is ready.` : `${this.name} is unavailable.`,
+    };
+  }
   // eslint-disable-next-line no-unused-vars
   async generate(params, onProgress, signal) {
     throw new Error('generate() belum diimplementasikan');
@@ -44,22 +52,8 @@ export class ImageProvider {
   async release() {}
 }
 
-/** Buat provider sesuai cfg.provider. */
-export async function createImageProvider(cfg) {
-  switch (cfg.provider) {
-    case 'comfyui': {
-      const { ComfyUiProvider } = await import('./providers/comfyuiProvider.js');
-      return new ComfyUiProvider(cfg);
-    }
-    case 'sdcpp': {
-      const { SdCppProvider } = await import('./providers/sdcppProvider.js');
-      return new SdCppProvider(cfg);
-    }
-    case 'cloud': {
-      const { CloudProvider } = await import('./providers/cloudProvider.js');
-      return new CloudProvider(cfg);
-    }
-    default:
-      throw new Error(`Provider selfie tidak dikenal: ${cfg.provider}`);
-  }
+/** Create a resolver for an explicit provider or the automatic fallback order. */
+export async function createImageProvider(cfg, options = {}) {
+  const { ProviderResolver } = await import('./providerResolver.js');
+  return new ProviderResolver(cfg, options);
 }

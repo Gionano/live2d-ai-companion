@@ -6,7 +6,7 @@ function providerUnavailable(manager, failed = false) {
     reason: 'PROVIDER_UNAVAILABLE',
     text: manager.pickPhrase('providerUnavailable') || (failed
       ? 'Generator gambar lokal belum aktif nih sayang.'
-      : 'Aduh sayang, generator gambar lokal sedang mati. Coba nyalakan ComfyUI dulu yaa.'),
+      : 'Aduh sayang, sekarang aku belum bisa foto. Studio gambarku belum siap nih.'),
     emotion: 'malu',
   };
 }
@@ -37,7 +37,7 @@ export async function prepareSelfieJob({ manager, planner, userText, history, si
       const provider = await manager.getProvider();
       signal?.throwIfAborted();
       if (!manager.isAdmitted(admission.jobId)) return cancelled(manager);
-      const available = await provider.isAvailable();
+      const available = await provider.isAvailable(signal);
       signal?.throwIfAborted();
       if (!manager.isAdmitted(admission.jobId)) return cancelled(manager);
       if (!available) return providerUnavailable(manager);

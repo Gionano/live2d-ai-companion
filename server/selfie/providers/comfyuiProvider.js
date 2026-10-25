@@ -15,8 +15,83 @@ import WebSocket from 'ws';
 import { ImageProvider, ImageProviderError, IMAGE_ERROR } from '../imageProvider.js';
 import { resolveMapping, describeDetection } from './workflowMapping.js';
 import { selfieLog as log, selfieWarn as warn } from '../log.js';
+import { resolveSelfiePaths } from '../localPaths.js';
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+const LOADER_FILE_INPUT = /^(?:unet_name|vae_name|clip_name\d*|clip_vision_name|ckpt_name|lora_name|control_net_name|style_model_name|gligen_name|model_name|audio_encoder_name|image)$/;
+
+function workflowShapeError(workflow) {
+  if (!workflow || Array.isArray(workflow) || typeof workflow !== 'object' || Array.isArray(workflow.nodes)) {
+    return 'expected a ComfyUI API workflow object';
+  }
+  const entries = Object.entries(workflow);
+  if (entries.length === 0) return 'workflow has no nodes';
+  const invalid = entries.find(([, node]) => !node || typeof node !== 'object'
+    || typeof node.class_type !== 'string' || !node.class_type.trim()
+    || !node.inputs || Array.isArray(node.inputs) || typeof node.inputs !== 'object');
+  return invalid ? `node "${invalid[0]}" has no valid class_type or inputs` : null;
+}
+
+function errorHasCode(error, code, seen = new Set()) {
+  if (!error || typeof error !== 'object' || seen.has(error)) return false;
+  seen.add(error);
+  if (error.code === code) return true;
+  if (errorHasCode(error.cause, code, seen)) return true;
+  return Array.isArray(error.errors) && error.errors.some((item) => errorHasCode(item, code, seen));
+}
+
+function objectInfoChoices(nodeInfo, inputName) {
+  const spec = nodeInfo?.input?.required?.[inputName] ?? nodeInfo?.input?.optional?.[inputName];
+  const choices = Array.isArray(spec) ? spec[0] : null;
+  return Array.isArray(choices) ? choices.map(String) : null;
+}
+
+export function validateComfyObjectInfo(workflow, objectInfo) {
+  const shapeError = workflowShapeError(workflow);
+  if (shapeError) {
+    return {
+      ready: false,
+      code: 'COMFYUI_WORKFLOW_INVALID',
+      message: `ComfyUI workflow is invalid: ${shapeError}.`,
+      publicMessage: 'ComfyUI workflow is invalid.',
+    };
+  }
+  const nodes = Object.values(workflow || {});
+  const classTypes = [...new Set(nodes.map((node) => node?.class_type).filter(Boolean))];
+  const missingNodes = classTypes.filter((classType) => !objectInfo?.[classType]);
+  const missingFiles = [];
+  const publicMissingFiles = [];
+
+  for (const node of nodes) {
+    const nodeInfo = objectInfo?.[node?.class_type];
+    if (!nodeInfo) continue;
+    for (const [inputName, configuredValue] of Object.entries(node.inputs || {})) {
+      if (!LOADER_FILE_INPUT.test(inputName) || typeof configuredValue !== 'string') continue;
+      const choices = objectInfoChoices(nodeInfo, inputName);
+      if (!choices || !choices.includes(configuredValue)) {
+        missingFiles.push(`${node.class_type}.${inputName}="${configuredValue}"`);
+        publicMissingFiles.push(`${path.win32.basename(node.class_type)}.${inputName}="${path.win32.basename(configuredValue)}"`);
+      }
+    }
+  }
+
+  if (missingNodes.length || missingFiles.length) {
+    const details = [];
+    if (missingNodes.length) details.push(`Missing ComfyUI nodes: ${missingNodes.join(', ')}`);
+    if (missingFiles.length) details.push(`Missing ComfyUI files: ${missingFiles.join(', ')}`);
+    const publicDetails = [];
+    if (missingNodes.length) publicDetails.push(`Missing ComfyUI nodes: ${missingNodes.map(name => path.win32.basename(name)).join(', ')}`);
+    if (publicMissingFiles.length) publicDetails.push(`Missing ComfyUI files: ${publicMissingFiles.join(', ')}`);
+    return {
+      ready: false,
+      code: missingNodes.length ? 'COMFYUI_NODES_MISSING' : 'COMFYUI_FILES_MISSING',
+      message: `${details.join('. ')}.`,
+      publicMessage: `${publicDetails.join('. ')}.`,
+    };
+  }
+
+  return { ready: true, code: 'READY', message: 'ComfyUI is ready.' };
+}
 
 export function randomSeed() {
   return randomBytes(6).readUIntBE(0, 6); // 0 .. 2^48-1 (aman sebagai Number)
@@ -34,6 +109,7 @@ function timestampName(ext) {
 export class ComfyUiProvider extends ImageProvider {
   constructor(cfg) {
     super();
+    Object.assign(cfg, resolveSelfiePaths(cfg));
     this.cfg = cfg;
     this.baseUrl = cfg.comfyUrl;
     this.wsBase = cfg.comfyUrl.replace(/^http/i, 'ws');
@@ -62,6 +138,7 @@ export class ComfyUiProvider extends ImageProvider {
       throw new ImageProviderError(
         IMAGE_ERROR.FAILED,
         `ComfyUI ${init?.method ?? 'GET'} ${pathname} -> HTTP ${res.status} ${body.slice(0, 400)}`,
+        { httpStatus: res.status },
       );
     }
     return res.json();
@@ -72,13 +149,105 @@ export class ComfyUiProvider extends ImageProvider {
   async isAvailable(signal) {
     signal?.throwIfAborted();
     try {
-      const res = await this._fetch('/system_stats', { signal }, this.cfg.healthCheckTimeoutMs);
+      const res = await this._fetch(
+        this.cfg.comfyHealthPath || '/system_stats',
+        { signal },
+        this.cfg.healthTimeoutMs ?? this.cfg.healthCheckTimeoutMs ?? 1500,
+      );
       signal?.throwIfAborted();
       return res.ok;
     } catch {
       signal?.throwIfAborted();
       return false;
     }
+  }
+
+  /** Verify the server, workflow nodes, and configured loader files without loading models. */
+  async checkReady(signal) {
+    signal?.throwIfAborted();
+    const timeoutMs = this.cfg.healthTimeoutMs ?? this.cfg.healthCheckTimeoutMs ?? 1500;
+    try {
+      const healthPath = this.cfg.comfyHealthPath || '/system_stats';
+      const stats = await this._fetch(healthPath, { signal }, timeoutMs);
+      signal?.throwIfAborted();
+      if (!stats.ok) {
+        return {
+          ready: false,
+          code: 'COMFYUI_UNREACHABLE',
+          message: `ComfyUI GET ${healthPath} returned HTTP ${stats.status}.`,
+          publicMessage: `ComfyUI GET ${healthPath} returned HTTP ${stats.status}.`,
+        };
+      }
+    } catch (err) {
+      signal?.throwIfAborted();
+      return {
+        ready: false,
+        code: 'COMFYUI_UNREACHABLE',
+        message: `ComfyUI is unreachable at ${this.baseUrl}: ${err.message}`,
+        publicMessage: 'ComfyUI is unreachable.',
+      };
+    }
+
+    let workflow;
+    try {
+      workflow = JSON.parse(await fs.promises.readFile(this.cfg.workflowPath, { encoding: 'utf-8', signal }));
+      signal?.throwIfAborted();
+      const shapeError = workflowShapeError(workflow);
+      if (shapeError) throw new Error(shapeError);
+    } catch (err) {
+      signal?.throwIfAborted();
+      return {
+        ready: false,
+        code: 'COMFYUI_WORKFLOW_INVALID',
+        message: `ComfyUI workflow is unavailable or invalid at ${this.cfg.workflowPath}: ${err.message}`,
+        publicMessage: `ComfyUI workflow is missing or invalid: ${path.win32.basename(this.cfg.workflowPath)}.`,
+      };
+    }
+
+    // A fresh portable install has no baked workflow reference in its input directory.
+    // Prepare the configured whitelisted reference before checking loader choices.
+    if (this.cfg.defaultReference) {
+      try {
+        await this.init(signal);
+        const name = await this.ensureReference(this.cfg.defaultReference, signal);
+        signal?.throwIfAborted();
+        workflow[this.map.reference.id].inputs[this.map.reference.fields.image] = name;
+      } catch (err) {
+        signal?.throwIfAborted();
+        return {
+          ready: false,
+          code: 'COMFYUI_REFERENCE_UNAVAILABLE',
+          message: `ComfyUI reference preparation failed: ${err.message}`,
+          publicMessage: `ComfyUI reference is unavailable: ${path.win32.basename(this.cfg.defaultReference)}.`,
+        };
+      }
+    }
+
+    let objectInfo;
+    try {
+      const response = await this._fetch('/object_info', { signal }, timeoutMs);
+      signal?.throwIfAborted();
+      if (!response.ok) {
+        return {
+          ready: false,
+          code: 'COMFYUI_OBJECT_INFO',
+          message: `ComfyUI GET /object_info returned HTTP ${response.status}.`,
+          publicMessage: `ComfyUI GET /object_info returned HTTP ${response.status}.`,
+        };
+      }
+      objectInfo = await response.json();
+      signal?.throwIfAborted();
+    } catch (err) {
+      signal?.throwIfAborted();
+      return {
+        ready: false,
+        code: 'COMFYUI_OBJECT_INFO',
+        message: `ComfyUI /object_info could not be read: ${err.message}`,
+        publicMessage: 'ComfyUI /object_info could not be read.',
+      };
+    }
+
+    return validateComfyObjectInfo(workflow, objectInfo);
   }
 
   /**
@@ -182,10 +351,10 @@ export class ComfyUiProvider extends ImageProvider {
     return name;
   }
 
-  async generate(params, onProgress = () => {}, signal) {
+  async generate(params, onProgress = () => {}, signal, onStarted = () => {}) {
     const t0 = Date.now();
     const ctl = new AbortController();
-    const job = { ctl, promptId: null, submitted: false };
+    const job = { ctl, promptId: null, submitted: false, generationStarted: false, onStarted };
     this.active = job;
     job.aborted = new Promise((_, reject) => {
       ctl.signal.addEventListener('abort', () => {
@@ -241,7 +410,11 @@ export class ComfyUiProvider extends ImageProvider {
       }
       throw lastErr;
     } catch (err) {
-      throw ctl.signal.aborted ? job.abortError : err;
+      const failure = ctl.signal.aborted ? job.abortError : err;
+      if (failure && failure.generationStarted === undefined) {
+        failure.generationStarted = job.generationStarted;
+      }
+      throw failure;
     } finally {
       clearTimeout(timeoutTimer);
       signal?.removeEventListener('abort', onAbortSignal);
@@ -277,7 +450,13 @@ export class ComfyUiProvider extends ImageProvider {
     const wf = JSON.parse(JSON.stringify(this.template));
     const m = this.map;
     const resolution = Number.isFinite(p.resolution) ? p.resolution : this.cfg.presets[this.cfg.preset].resolution;
+    if ((p.width ?? resolution) !== (p.height ?? resolution)) {
+      throw new ImageProviderError(IMAGE_ERROR.MAPPING,
+        'This ComfyUI workflow exposes only square resolution. Use sdcpp for rectangular --size experiments.',
+        { generationStarted: false });
+    }
     const steps = Number.isFinite(p.steps) ? p.steps : this.cfg.presets[this.cfg.preset].steps;
+    const cfgScale = Number.isFinite(p.cfgScale) ? p.cfgScale : this.cfg.presets[this.cfg.preset].cfg;
 
     wf[m.prompt.id].inputs[m.prompt.fields.positive] = p.positivePrompt ?? '';
     wf[m.prompt.id].inputs[m.prompt.fields.negative] = p.negativePrompt ?? '';
@@ -285,6 +464,7 @@ export class ComfyUiProvider extends ImageProvider {
     wf[m.reference.id].inputs[m.reference.fields.image] = p.referenceImage;
     wf[m.sampler.id].inputs[m.sampler.fields.seed] = p.seed;
     wf[m.sampler.id].inputs[m.sampler.fields.steps] = steps;
+    if (m.sampler.fields.cfg) wf[m.sampler.id].inputs[m.sampler.fields.cfg] = cfgScale;
     wf[m.save.id].inputs[m.save.fields.filenamePrefix] = this.cfg.filenamePrefix;
     return wf;
   }
@@ -298,7 +478,18 @@ export class ComfyUiProvider extends ImageProvider {
     let ws = null;
     let wsOpenTimer = null;
     let pollTimer = null;
+    let submissionPending = false;
     const timings = { queueMs: 0, generateMs: 0, downloadMs: 0, totalMs: 0 };
+    const markActualStart = () => {
+      if (job.generationStarted) return;
+      job.generationStarted = true;
+      job.onStarted();
+    };
+    const markUnknownSubmission = (error) => {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      failure.generationStarted = true;
+      return failure;
+    };
 
     try {
       throwIfAborted();
@@ -383,25 +574,56 @@ export class ComfyUiProvider extends ImageProvider {
       // 2) Submit job
       const tSubmit = Date.now();
       job.submitted = true;
-      const submit = await Promise.race([this._json(
-        '/prompt',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, client_id: this.clientId }),
-          signal: ctl.signal,
-        },
-        20000,
-      ), aborted]);
-      // Keep the submission response so an abort during POST can dequeue its prompt.
-      job.promptId = submit.prompt_id;
-      throwIfAborted();
-      if (submit.node_errors && Object.keys(submit.node_errors).length > 0) {
+      submissionPending = true;
+      let submit;
+      try {
+        submit = await Promise.race([this._json(
+          '/prompt',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, client_id: this.clientId }),
+            signal: ctl.signal,
+          },
+          20000,
+        ), aborted]);
+        submissionPending = false;
+      } catch (error) {
+        if (ctl.signal.aborted) throw error;
+        // HTTP rejection and connection refusal prove that ComfyUI did not accept this prompt.
+        if (error?.httpStatus || errorHasCode(error, 'ECONNREFUSED')) {
+          submissionPending = false;
+          throw error;
+        }
+        // A lost 2xx response or reset connection may hide an accepted prompt. Never fail over.
+        const failure = markUnknownSubmission(error);
+        await this._cancelRemote(null, true);
+        throw failure;
+      }
+      if (submit?.node_errors && Object.keys(submit.node_errors).length > 0) {
         throw new ImageProviderError(
           IMAGE_ERROR.FAILED,
           `ComfyUI menolak workflow: ${JSON.stringify(submit.node_errors).slice(0, 600)}`,
         );
       }
+      if (typeof submit?.prompt_id !== 'string' || !submit.prompt_id.trim()) {
+        const failure = new ImageProviderError(
+          IMAGE_ERROR.FAILED,
+          'ComfyUI accepted the prompt request but returned no valid prompt_id.',
+          { generationStarted: true },
+        );
+        await this._cancelRemote(null, true);
+        throw failure;
+      }
+      // Keep the submission response so cancellation can target the exact prompt.
+      job.promptId = submit.prompt_id;
+      try {
+        markActualStart();
+      } catch (error) {
+        if (!ctl.signal.aborted) await this._cancelRemote(job.promptId, true);
+        throw error;
+      }
+      throwIfAborted();
       log(`Job dikirim: prompt_id=${job.promptId} seed=${params.seed} ref=${params.referenceImage}`);
       for (const m of earlyMessages) handle(m.type, m.data);
       earlyMessages.length = 0;
@@ -449,6 +671,9 @@ export class ComfyUiProvider extends ImageProvider {
       return { imagePath, seed: params.seed, promptId: job.promptId, timings };
     } catch (err) {
       if (ctl.signal.aborted) err = job.abortError;
+      if (submissionPending && err && err.generationStarted === undefined) {
+        err.generationStarted = true;
+      }
       if (err.code === IMAGE_ERROR.CANCELLED || err.code === IMAGE_ERROR.TIMEOUT) {
         await this._cancelRemote(job.promptId, job.submitted);
       }
