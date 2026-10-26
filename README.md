@@ -1,5 +1,7 @@
 # Amika ? Live2D AI Companion
 
+![Amika Live2D AI companion with chat and selfie preview](docs/amikaHeader.png)
+
 Amika is a browser and Windows desktop companion with an official Live2D Cubism avatar, voice and typed chat, webcam/screen perception, persistent memory, and local PAP/selfie generation.
 
 > **Unrestricted / Uncensored Edition.** The chat persona uses an uncensored model through Experiential Labs. PAP requests and image prompts have separate moderation, and regression checks verify an adult character persona.
