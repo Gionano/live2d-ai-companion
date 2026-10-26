@@ -8,7 +8,7 @@ loopback HTTP fixtures and temporary directories; they never install engine depe
 ```text
 amika-live2d-companion/
   setup/
-    manifest.json                  # Optional private metadata; excluded from commits
+    manifest.json                  # Committed public download metadata
     manifest.schema.json
   selfie.config.json               # Shared settings
   selfie.config.local.json         # Ignored machine overrides
@@ -52,14 +52,14 @@ legacy config fallback; it does not silently switch to another local build.
 
 ## Prepare verified metadata
 
-1. Create an ignored `local/manifest.json` using `setup/manifest.schema.json`. The default
-   `setup/manifest.json` is excluded from commits; no artifact metadata is shipped.
-   Run `npm run setup:plan -- --manifest local/manifest.json`. It prints components, destination paths, download byte counts,
+1. Review the committed `setup/manifest.json`, which setup commands read by default.
+   Run `npm run setup:plan`. It prints components, destination paths, download byte counts,
    totals by engine and variant, licenses, detected GPU adapters, free disk space, missing
    required model roles, and every unresolved field. This is always a dry run.
-2. Fill the ignored manifest and pass `--manifest local/manifest.json` to each setup command.
+2. For custom metadata or unresolved fields, copy the manifest to ignored
+   `local/manifest.json` and pass `--manifest local/manifest.json` to each setup command.
    Use upstream metadata for the exact archive/model revision and independently verified
-   SHA-256 and byte count. No download URLs, hashes, versions, or licenses are assumed.
+   SHA-256 and byte count. Keep machine-specific or private URLs in that local copy.
 3. Define every engine entry and list each model in `components.models`. Each component
    needs `name`, `version` or full `commit`, `url`, `sha256`, `sizeBytes`, `licenseName`,
    `licenseUrl`, `kind`, `destination`, `required`, `engines`, `role`, and `when`.
@@ -71,7 +71,7 @@ legacy config fallback; it does not silently switch to another local build.
    diagnostics; its setup group still includes it, so supply verified metadata and
    consent if running that group. Use existing installations below to avoid downloads.
 
-The private metadata prepared in this workspace contains upstream pins, artifact URLs,
+The committed public manifest contains upstream pins, artifact URLs,
 published SHA-256 and exact byte counts. See [Pinned sources](setup-sources.md) for evidence,
 compatibility and license inheritance. Model filenames match the current shared config
 and ComfyUI workflow. The sd-cli CUDA12 build uses matching CUDA 12.8.1 libraries.
@@ -121,9 +121,9 @@ text encoder also requires the vision projector. Plan names any absent required 
 `setup:comfyui` defaults to ComfyUI. Each accepts `--engine comfyui` or `--engine sdcpp`:
 
 ```sh
-npm run setup:models -- --manifest local/manifest.json --engine sdcpp
-npm run setup:models -- --manifest local/manifest.json --engine comfyui
-npm run setup:plan -- --manifest local/manifest.json --engine sdcpp --variant vulkan
+npm run setup:models -- --engine sdcpp
+npm run setup:models -- --engine comfyui
+npm run setup:plan -- --engine sdcpp --variant vulkan
 ```
 
 NVIDIA adapters select CUDA12 by default; other or unknown adapters select Vulkan. Unknown
@@ -140,9 +140,9 @@ with an untyped runtime. Shared models remain in `local/models`.
 First inspect each command without flags:
 
 ```sh
-npm run setup:models -- --manifest local/manifest.json
-npm run setup:sdcli -- --manifest local/manifest.json
-npm run setup:comfyui -- --manifest local/manifest.json
+npm run setup:models
+npm run setup:sdcli
+npm run setup:comfyui
 ```
 
 After reviewing the plan, run the chosen group with explicit consent. Replace the quoted
@@ -150,8 +150,8 @@ license names with the exact verified `licenseName` values; repeat the flag for 
 licenses:
 
 ```sh
-npm run setup:models -- --manifest local/manifest.json --engine sdcpp --yes --accept-license "MODEL LICENSE NAME"
-npm run setup:sdcli -- --manifest local/manifest.json --engine sdcpp --variant cuda12 --yes --accept-license "ENGINE LICENSE NAME" --accept-license "RUNTIME LICENSE NAME"
+npm run setup:models -- --engine sdcpp --yes --accept-license "MODEL LICENSE NAME"
+npm run setup:sdcli -- --engine sdcpp --variant cuda12 --yes --accept-license "ENGINE LICENSE NAME" --accept-license "RUNTIME LICENSE NAME"
 npm run setup:comfyui -- --manifest local/manifest.json --engine comfyui --yes --accept-license "COMFYUI LICENSE NAME" --accept-license "GGUF NODE LICENSE NAME"
 ```
 
@@ -257,8 +257,8 @@ Illustrative placeholder for a different disk in PowerShell:
 
 ```powershell
 $env:WAIFU_LOCAL_DIR = 'X:/path/to/local'
-npm run setup:plan -- --manifest local/manifest.json
-npm run doctor -- --manifest local/manifest.json
+npm run setup:plan
+npm run doctor
 ```
 
 ## Verify offline
@@ -276,8 +276,8 @@ or generate an image.
 ```sh
 npm test
 npm run build
-npm run setup:plan -- --manifest local/manifest.json
-npm run doctor -- --manifest local/manifest.json
+npm run setup:plan
+npm run doctor
 ```
 
 Engine/GPU generation needs your verified installation and personal reference files.
@@ -291,5 +291,5 @@ Failures report filenames and pattern counts only. The current OS username, host
 and private profile/project folder names are read at runtime. Windows absolute paths,
 user-profile segments, email addresses and credential-like literals fail the check.
 Only neutral documentation prefixes are allowed; test paths must be built at runtime.
-Setup tests use synthetic metadata and do not read the excluded setup manifest or real
-machine configuration.
+Setup tests check the committed download manifest offline and use synthetic metadata for
+installation tests. They do not read real machine configuration or download upstream artifacts.

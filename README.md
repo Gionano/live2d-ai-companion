@@ -149,11 +149,11 @@ The older `local/runtime/sd-cli/` layout is supported only when the canonical `s
 
 ### Setup tools and offline diagnostics
 
-Artifact metadata is not shipped in `setup/manifest.json`; that file is excluded from commits. Create an ignored `local/manifest.json` using `setup/manifest.schema.json` and independently verified upstream pins, sizes, checksums, and licenses.
+The committed `setup/manifest.json` supplies public download URLs, pinned versions, sizes, checksums, and licenses. Setup commands use it by default. Review the plan and linked licenses before installing. The ComfyUI-GGUF node archive still needs a verified SHA-256 and byte count; `setup:comfyui --yes` refuses until both are supplied. For custom metadata, copy the manifest to ignored `local/manifest.json` and pass `--manifest local/manifest.json`.
 
 ```sh
-npm run setup:plan -- --manifest local/manifest.json
-npm run doctor -- --manifest local/manifest.json
+npm run setup:plan
+npm run doctor
 ```
 
 `setup:models`, `setup:sdcli`, and `setup:comfyui` are dry runs by default. Installation requires `--yes`, complete verified metadata, and per-license acceptance. Downloads support resume and verify size/SHA-256 before publication; extraction checks archive paths and prevents accidental replacement or variant mixing. Doctor runs offline and checks runtime/model files, provenance, resources, and bounded help/device probes. `setup:hash` fingerprints an existing artifact offline.
@@ -214,9 +214,9 @@ npm run build
 
 `check:privacy` scans tracked and untracked non-ignored text case-insensitively for absolute Windows paths, user-profile segments, runtime OS identities, email addresses, and credential-like strings. Only neutral documentation path prefixes are allowed. Diagnostics contain file/count pairs. The guard also runs in `npm test`.
 
-Tests use `node:test`, synthetic fixtures, temporary directories, injected hardware/process probes, and fake HTTP/WebSocket providers. They cover provider selection, managed lifecycle, cancellation, memory/telemetry, config migration, setup safety, desktop/browser state, image routing, speech ownership, and moderation/persona regressions. Setup tests do not require the excluded manifest or real machine config.
+Tests use `node:test`, synthetic fixtures, temporary directories, injected hardware/process probes, and fake HTTP/WebSocket providers. They cover provider selection, managed lifecycle, cancellation, memory/telemetry, config migration, setup safety, desktop/browser state, image routing, speech ownership, and moderation/persona regressions. Setup tests check the committed download manifest offline and use synthetic fixtures for installations; they do not require real machine config or download upstream artifacts.
 
-Latest automated validation on **2026-10-25**, through `c36bea4`: **545/545 tests passed**, zero failures/skips; the frontend build passed with **57 modules**. A temporary checkout containing only eligible files also passed **545/545** without private config, setup metadata, runtimes, or reference assets.
+Latest automated validation on **2026-10-26**: **546/546 tests passed**, zero failures/skips; the privacy check and frontend build passed with **57 modules**. The 2026-10-25 temporary checkout containing only eligible files passed **545/545** without private config, runtimes, or reference assets.
 
 For live generation after the chosen provider, models, and references are ready:
 

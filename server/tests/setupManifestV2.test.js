@@ -39,24 +39,6 @@ function manifest() {
   } };
 }
 
-function portableManifestFixture() {
-  const data = manifest();
-  for (const component of [...data.components['sd-cli'], data.components.cudart]) {
-    component.destination = component.destination.replace('runtime/sd-cli/', 'runtime/sdcpp/');
-  }
-  const destinations = [
-    'models/diffusion_models/qwen-image-2.1-UC-Q5_K_M.gguf',
-    'models/vae/qwen_image_2.1_vae_bf16.safetensors',
-    'models/text_encoders/Qwen3VL-8B-Instruct-Q4_K_M.gguf',
-    'models/text_encoders/mmproj-Qwen3VL-8B-Instruct-F16.gguf',
-    'models/text_encoders/qwen3vl_8b_int8_convrot.safetensors',
-  ];
-  data.components.models.forEach((component, index) => { component.destination = destinations[index]; });
-  data.components['comfyui-gguf-node'].sha256 = 'TODO verified SHA-256';
-  data.components['comfyui-gguf-node'].sizeBytes = null;
-  return data;
-}
-
 async function fixture(t, data = manifest(), routes = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'waifu-setup-v2-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
@@ -83,8 +65,8 @@ async function fixture(t, data = manifest(), routes = {}) {
   return { directory, data, manifestPath, requests, lines, options };
 }
 
-test('synthetic v2 metadata checks runtime isolation, roles, pins and unresolved node fields', () => {
-  const shipped = portableManifestFixture();
+test('committed v2 metadata checks runtime isolation, roles, pins and unresolved node fields', () => {
+  const shipped = readManifest(new URL('../../setup/manifest.json', import.meta.url));
   assert.equal(shipped.schemaVersion, 2);
   assert.deepEqual(shipped.components['sd-cli'].map((component) => component.variant), ['cuda12', 'vulkan']);
   assert.equal(shipped.components.models.length, 5);
@@ -104,6 +86,10 @@ test('synthetic v2 metadata checks runtime isolation, roles, pins and unresolved
       assert.ok(Number.isSafeInteger(component.sizeBytes) && component.sizeBytes > 0);
     }
   }
+  assert.deepEqual(validateManifest(shipped).errors.map(error => error.split(':')[0]), [
+    'components.comfyui-gguf-node.sha256',
+    'components.comfyui-gguf-node.sizeBytes',
+  ]);
   // Every component must reject incomplete metadata independently of local files.
   const placeholders = structuredClone(shipped);
   for (const group of Object.values(placeholders.components)) {
@@ -124,8 +110,8 @@ test('synthetic v2 metadata checks runtime isolation, roles, pins and unresolved
   assert.ok(schema.$defs.component2.required.includes('engines'));
 });
 
-test('portable config and workflow filenames match synthetic manifest destinations', () => {
-  const shipped = portableManifestFixture();
+test('portable config and workflow filenames match committed manifest destinations', () => {
+  const shipped = readManifest(new URL('../../setup/manifest.json', import.meta.url));
   const config = readManifest(new URL('../../selfie.config.json', import.meta.url));
   const workflow = readManifest(new URL('../../workflows/selfie.api.json', import.meta.url));
   const sdModels = selectComponents(shipped, { command: 'models', engine: 'sdcpp', os: 'win32' });
@@ -141,6 +127,31 @@ test('portable config and workflow filenames match synthetic manifest destinatio
     const selected = selectComponents(shipped, { engine: 'sdcpp', variant, os: 'win32' });
     assert.equal(validateManifest(shipped, { selectedIds: selected.map(component => component.id) }).valid, true);
   }
+});
+
+test('default setup manifest supports offline model and sd.cpp plans in a fresh checkout', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'waifu-shipped-manifest-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await fs.mkdir(path.join(directory, 'setup'));
+  await fs.copyFile(new URL('../../setup/manifest.json', import.meta.url), path.join(directory, 'setup', 'manifest.json'));
+  const options = { repoRoot: directory, env: {}, platform: 'win32', log: () => {},
+    dependencies: { detectGpuVendor: async () => ({ gpuVendor: 'nvidia' }),
+      runCommand: async () => assert.fail('manifest plans cannot run native processes') },
+  };
+  const shipped = readManifest(path.join(directory, 'setup', 'manifest.json'));
+  for (const selection of [
+    { command: 'models', engine: 'sdcpp', count: 4 },
+    { command: 'models', engine: 'comfyui', count: 3 },
+    { command: 'sdcli', variant: 'cuda12', count: 2 },
+    { command: 'sdcli', variant: 'vulkan', count: 1 },
+  ]) {
+    const result = await runSetup(selection.command, { ...options, engine: selection.engine, variant: selection.variant });
+    assert.equal(result.dryRun, true);
+    assert.equal(result.components.length, selection.count);
+    const validation = validateManifest(shipped, { selectedIds: result.components.map(component => component.id) });
+    assert.equal(validation.valid, true, validation.errors.join('\n'));
+  }
+  await assert.rejects(fs.stat(path.join(directory, 'local')), { code: 'ENOENT' });
 });
 
 test('v2 selectors filter engines, choose CUDA only for NVIDIA, allow explicit Vulkan override, and retain OS conditions', () => {

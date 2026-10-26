@@ -33,6 +33,23 @@ Evidence: Phase D implementation committed through `ecef631`; P1-P5 audit correc
 - Selfie memory/argument correction: offload-aware resource estimates, available physical RAM, configurable hard-refusal ratio, GGUF vision projection checks, and effective config diagnostics.
 - Selfie CLI quality experiments: ephemeral numeric/image/argument overrides, cached-help image-to-image flags, append-only run tables, shared GPU peaks, and metadata-only output comparison.
 
+## Shared download manifest (2026-10-26)
+
+`setup/manifest.json` is now committed as public download metadata. It contains upstream
+URLs, immutable pins, published checksums, byte counts, licenses and relative installation
+destinations. Setup commands read it by default; custom or private metadata belongs in an
+ignored `local/manifest.json` passed with `--manifest`. This supersedes the manifest
+exclusion recorded in the 2026-10-25 commit preparation below.
+
+The ComfyUI-GGUF source ZIP still needs a verified SHA-256 and byte count. ComfyUI runtime
+installation refuses until those fields are filled; model downloads and sd.cpp variants
+have complete metadata. Offline regressions check the committed manifest against shared
+config/workflow filenames and exercise setup using its default path.
+
+Validation: **546/546** tests, zero failures/skips; privacy check passes with **0** failing
+files; frontend build passes with **57 modules**. An initial managed idle-cleanup timing
+failure passed in isolation and in the final full suite.
+
 ## Privacy and portable commit preparation (2026-10-25)
 
 `selfie.config.local.json` matches an ignore rule. The shared config uses `${LOCAL}`

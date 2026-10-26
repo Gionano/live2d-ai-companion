@@ -1,0 +1,215 @@
+{
+  "$schema": "./manifest.schema.json",
+  "schemaVersion": 2,
+  "components": {
+    "comfyui-portable": {
+      "name": "ComfyUI portable",
+      "version": "v0.42.1",
+      "url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v0.42.1/ComfyUI_windows_portable_nvidia.7z",
+      "sha256": "496afd18790ec685d99ebba2edf200d7371a29fbdd3a992bb0f4f52f244a6874",
+      "sizeBytes": 2018444114,
+      "licenseName": "GNU General Public License v3.0",
+      "licenseUrl": "https://github.com/Comfy-Org/ComfyUI/blob/63be2f9b82ad0dac88a7ceaa28a9cf3154125a18/LICENSE",
+      "kind": "runtime",
+      "destination": "runtime/comfyui",
+      "required": true,
+      "engines": [
+        "comfyui"
+      ],
+      "role": "runtime",
+      "when": {
+        "gpuVendor": "any",
+        "os": "win32"
+      }
+    },
+    "comfyui-gguf-node": {
+      "name": "ComfyUI-GGUF custom node (leejet fork)",
+      "url": "https://github.com/leejet/ComfyUI-GGUF/archive/373048b8403a7820620065210a691263d4da0a61.zip",
+      "sha256": "TODO verified SHA-256",
+      "sizeBytes": null,
+      "licenseName": "Apache-2.0",
+      "licenseUrl": "https://github.com/leejet/ComfyUI-GGUF/blob/373048b8403a7820620065210a691263d4da0a61/LICENSE",
+      "kind": "custom-node",
+      "destination": "runtime/comfyui/ComfyUI/custom_nodes/ComfyUI-GGUF",
+      "required": true,
+      "engines": [
+        "comfyui"
+      ],
+      "role": "node",
+      "when": {
+        "gpuVendor": "any",
+        "os": "win32"
+      },
+      "commit": "373048b8403a7820620065210a691263d4da0a61"
+    },
+    "sd-cli": [
+      {
+        "name": "sd-cli CUDA12 runtime",
+        "version": "master-1010-bb6a0cc",
+        "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1010-bb6a0cc/sd-master-bb6a0cc-bin-win-cuda12-x64.zip",
+        "sha256": "999ac553c9644964b1d8d5fce4458fb7a9590d15c9c01044487715a825b4c735",
+        "sizeBytes": 343492021,
+        "licenseName": "MIT",
+        "licenseUrl": "https://github.com/leejet/stable-diffusion.cpp/blob/bb6a0ccfa31ef24d776d951580a51599797d8cc0/LICENSE",
+        "kind": "runtime",
+        "destination": "runtime/sdcpp/cuda12",
+        "required": true,
+        "engines": [
+          "sdcpp"
+        ],
+        "role": "runtime",
+        "when": {
+          "gpuVendor": "nvidia",
+          "os": "win32"
+        },
+        "variant": "cuda12"
+      },
+      {
+        "name": "sd-cli Vulkan runtime",
+        "version": "master-1010-bb6a0cc",
+        "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1010-bb6a0cc/sd-master-bb6a0cc-bin-win-vulkan-x64.zip",
+        "sha256": "bfd9c1b0edfbe6cdce488eb6e7a31163d71ad2860358b7a2ddf1c589abfd9536",
+        "sizeBytes": 29714123,
+        "licenseName": "MIT",
+        "licenseUrl": "https://github.com/leejet/stable-diffusion.cpp/blob/bb6a0ccfa31ef24d776d951580a51599797d8cc0/LICENSE",
+        "kind": "runtime",
+        "destination": "runtime/sdcpp/vulkan",
+        "required": true,
+        "engines": [
+          "sdcpp"
+        ],
+        "role": "runtime",
+        "when": {
+          "gpuVendor": "any",
+          "os": "win32"
+        },
+        "variant": "vulkan"
+      }
+    ],
+    "cudart": {
+      "name": "Matching CUDA 12.8.1 cudart and cuBLAS libraries",
+      "version": "12.8.1 / master-1010-bb6a0cc",
+      "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1010-bb6a0cc/cudart-sd-bin-win-cu12-x64.zip",
+      "sha256": "fe20366827d357c00797eebb58244dddab7fd9a348d70090c3871004c320f38d",
+      "sizeBytes": 563452046,
+      "licenseName": "NVIDIA Software License Agreement and CUDA Supplement",
+      "licenseUrl": "https://docs.nvidia.com/cuda/archive/12.8.1/eula/index.html",
+      "kind": "runtime-library",
+      "destination": "runtime/sdcpp/cuda12",
+      "required": true,
+      "engines": [
+        "sdcpp"
+      ],
+      "role": "runtime_library",
+      "when": {
+        "gpuVendor": "nvidia",
+        "os": "win32"
+      },
+      "variant": "cuda12"
+    },
+    "models": [
+      {
+        "name": "Qwen-Image 2.1 Uncensored diffusion GGUF Q5_K_M",
+        "version": "7959e658915f52274897fb573ffeda49de8dc16b",
+        "url": "https://huggingface.co/abenzerps/Qwen-Image-2.1-Uncensored-Quantized/resolve/7959e658915f52274897fb573ffeda49de8dc16b/qwen-image-2.1-UC-Q5_K_M.gguf",
+        "sha256": "af0bf278cf16d204fb31c384dc82fd41dca82d976b15fe9305a60c726fd6f821",
+        "sizeBytes": 5221284640,
+        "licenseName": "Qwen Research License Agreement",
+        "licenseUrl": "https://huggingface.co/Qwen/Qwen-Image-2.1/blob/d26bb61231c349cf6b7896fa83353113880e1ba3/LICENSE",
+        "kind": "diffusion_models",
+        "destination": "models/diffusion_models/qwen-image-2.1-UC-Q5_K_M.gguf",
+        "required": true,
+        "engines": [
+          "comfyui",
+          "sdcpp"
+        ],
+        "role": "diffusion",
+        "when": {
+          "gpuVendor": "any",
+          "os": "win32"
+        }
+      },
+      {
+        "name": "Qwen-Image 2.1 VAE BF16",
+        "version": "0217efd1d9c9452e84f6448903d6e21bfa171ffd",
+        "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/0217efd1d9c9452e84f6448903d6e21bfa171ffd/vae/qwen_image_2.1_vae_bf16.safetensors",
+        "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9",
+        "sizeBytes": 675509688,
+        "licenseName": "Qwen Research License Agreement",
+        "licenseUrl": "https://huggingface.co/Qwen/Qwen-Image-2.1/blob/d26bb61231c349cf6b7896fa83353113880e1ba3/LICENSE",
+        "kind": "vae",
+        "destination": "models/vae/qwen_image_2.1_vae_bf16.safetensors",
+        "required": true,
+        "engines": [
+          "comfyui",
+          "sdcpp"
+        ],
+        "role": "vae",
+        "when": {
+          "gpuVendor": "any",
+          "os": "win32"
+        }
+      },
+      {
+        "name": "Qwen3-VL 8B Instruct text encoder GGUF Q4_K_M",
+        "version": "f982a07559d4a2f6c8744d840bf6fccab30eea96",
+        "url": "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/f982a07559d4a2f6c8744d840bf6fccab30eea96/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+        "sha256": "67d1659bfe71b89d50b45a4ad1a9e5b997e5bb16ce5da66a6a6167abd569e9e2",
+        "sizeBytes": 5027784800,
+        "licenseName": "Apache-2.0",
+        "licenseUrl": "https://github.com/QwenLM/Qwen3-VL/blob/96588727e44c78b25ba03ea03b8e12f7e64fd0da/LICENSE",
+        "kind": "text_encoders",
+        "destination": "models/text_encoders/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+        "required": true,
+        "engines": [
+          "sdcpp"
+        ],
+        "role": "text_encoder",
+        "when": {
+          "gpuVendor": "any",
+          "os": "win32"
+        }
+      },
+      {
+        "name": "Qwen3-VL 8B Instruct vision projector F16",
+        "version": "f982a07559d4a2f6c8744d840bf6fccab30eea96",
+        "url": "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/f982a07559d4a2f6c8744d840bf6fccab30eea96/mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+        "sha256": "ca524100ebf825c9a870db1c580d03879e0da0ab2541697e2458e64891cf9d38",
+        "sizeBytes": 1159029824,
+        "licenseName": "Apache-2.0",
+        "licenseUrl": "https://github.com/QwenLM/Qwen3-VL/blob/96588727e44c78b25ba03ea03b8e12f7e64fd0da/LICENSE",
+        "kind": "text_encoders",
+        "destination": "models/text_encoders/mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+        "required": true,
+        "engines": [
+          "sdcpp"
+        ],
+        "role": "vision_projector",
+        "when": {
+          "gpuVendor": "any",
+          "os": "win32"
+        }
+      },
+      {
+        "name": "Qwen3-VL 8B ComfyUI text encoder INT8 ConvRot",
+        "version": "0217efd1d9c9452e84f6448903d6e21bfa171ffd",
+        "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/0217efd1d9c9452e84f6448903d6e21bfa171ffd/text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+        "sha256": "8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f",
+        "sizeBytes": 9350798360,
+        "licenseName": "Qwen Research License Agreement",
+        "licenseUrl": "https://huggingface.co/Qwen/Qwen-Image-2.1/blob/d26bb61231c349cf6b7896fa83353113880e1ba3/LICENSE",
+        "kind": "text_encoders",
+        "destination": "models/text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+        "required": true,
+        "engines": [
+          "comfyui"
+        ],
+        "role": "text_encoder",
+        "when": {
+          "gpuVendor": "any",
+          "os": "win32"
+        }
+      }
+    ]
+  }
+}
