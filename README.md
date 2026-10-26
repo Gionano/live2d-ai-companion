@@ -158,6 +158,31 @@ npm run doctor
 
 `setup:models`, `setup:sdcli`, and `setup:comfyui` are dry runs by default. Installation requires `--yes`, complete verified metadata, and per-license acceptance. Downloads support resume and verify size/SHA-256 before publication; extraction checks archive paths and prevents accidental replacement or variant mixing. Doctor runs offline and checks runtime/model files, provenance, resources, and bounded help/device probes. `setup:hash` fingerprints an existing artifact offline.
 
+#### Install everything (Windows)
+
+This installs ComfyUI with its GGUF node, one sd.cpp runtime variant, and all five models. Run the commands from the repository root after reviewing the linked licenses; the `--accept-license` flags record your acceptance. NVIDIA selects CUDA12; other or unknown adapters select Vulkan.
+
+**Prerequisites:** install 7-Zip (`7z`/`7zz`) or `bsdtar` for the ComfyUI archive. Copy `setup/manifest.json` to ignored `local/manifest.json` and fill the ComfyUI-GGUF node's `sha256` and `sizeBytes` from a verified copy of its exact pinned ZIP using `npm run setup:hash -- "path/to/ComfyUI-GGUF.zip"`. See [Pinned node metadata](docs/setup-sources.md#comfyui-and-its-gguf-node). Until those fields are complete, the first command refuses to install.
+
+Run each line after the previous command succeeds:
+
+```powershell
+npm run setup:comfyui -- --manifest local/manifest.json --yes --accept-license "GNU General Public License v3.0" --accept-license "Apache-2.0"
+npm run setup:sdcli -- --manifest local/manifest.json --yes --accept-license "MIT" --accept-license "NVIDIA Software License Agreement and CUDA Supplement"
+npm run setup:models -- --manifest local/manifest.json --yes --accept-license "Qwen Research License Agreement" --accept-license "Apache-2.0"
+npm run doctor -- --manifest local/manifest.json
+```
+
+#### Install sd.cpp only (ready with the committed manifest)
+
+For sd.cpp and all models it needs, run this block instead. It downloads about 13 GB on NVIDIA (about 12.1 GB with Vulkan), installs under `local/`, and does not require the ComfyUI node metadata or a 7-Zip extractor:
+
+```powershell
+npm run setup:sdcli -- --yes --accept-license "MIT" --accept-license "NVIDIA Software License Agreement and CUDA Supplement"
+npm run setup:models -- --engine sdcpp --yes --accept-license "Qwen Research License Agreement" --accept-license "Apache-2.0"
+npm run doctor -- --engine sdcpp
+```
+
 See [Local setup](docs/setup.md) for engine selection, license flags, extractor requirements, embedded-Python constraints, and existing-installation overrides. See [Source metadata notes](docs/setup-sources.md) for previously investigated upstream sources; those notes do not replace local verification.
 
 ### Providers and reference images
