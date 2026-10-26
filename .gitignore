@@ -45,7 +45,9 @@ src/visionMonitor.js
 # Local engines, models, personal references, and machine configuration
 local/
 selfie.config.local.json
-assets/references/
+assets/references/*
+!assets/references/default.jpg
+!assets/references/README.md
 
 sd-cli/
 .commit-test-move-*/

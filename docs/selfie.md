@@ -25,9 +25,12 @@ with `classType` as a fallback, and name its input fields:
 Preparation logs detected nodes and fields. Mapping errors identify the missing or ambiguous role.
 
 ## 3. Reference images
-Put PNG/JPG/WebP images in `assets/references/`; filenames form the shared whitelist.
-Set `defaultReference` in `selfie.config.json`. ComfyUI uploads the selected reference when needed;
-sd.cpp receives its local file path directly. Personal references are excluded from Git.
+`assets/references/default.jpg` is included in Git and selected by the shared
+`defaultReference` setting, so fresh clones have a character reference ready to use.
+Put custom PNG/JPG/WebP images in `assets/references/`; filenames form the shared whitelist.
+Set `defaultReference` in `selfie.config.local.json` to choose a custom filename.
+ComfyUI uploads the selected reference when needed; sd.cpp receives its local file path
+directly. Custom references are excluded from Git.
 
 ## 4. Configuration
 Tuning lives in `selfie.config.json`; ignored `selfie.config.local.json` deep-merges over it

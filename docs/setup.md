@@ -12,7 +12,9 @@ amika-live2d-companion/
     manifest.schema.json
   selfie.config.json               # Shared settings
   selfie.config.local.json         # Ignored machine overrides
-  assets/references/               # Ignored private PNG/JPG/WebP references
+  assets/references/
+    default.jpg                   # Bundled character reference tracked in Git
+                                  # Custom PNG/JPG/WebP references are ignored
   local/                          # Ignored; WAIFU_LOCAL_DIR can replace this root
     accepted-licenses.json
     installed.json                # Verified download provenance and active runtime variant
@@ -233,7 +235,8 @@ required by your workflow. For ComfyUI, add your existing model roots to its
 `extra_model_paths.yaml`, using key names from that installation's example. You may also
 place directory junctions/symlinks under `local/models` pointing at existing collections.
 Provider reads support such collections; setup refuses writes through links escaping
-the local root. Keep private references in the ignored `assets/references`, or override
+the local root. Keep custom references alongside the bundled `assets/references/default.jpg`,
+where additional files are ignored by Git, or override
 `referenceDir` with an absolute path. ComfyUI uploads the selected reference; sd.cpp reads
 the same whitelisted file directly.
 
@@ -280,7 +283,8 @@ npm run setup:plan
 npm run doctor
 ```
 
-Engine/GPU generation needs your verified installation and personal reference files.
+Engine/GPU generation needs your verified installation; the default character reference
+is included in Git. Custom references must be supplied separately.
 Run `npm run selfie:test -- --provider=auto --preset=cepat` only when you want a real image.
 
 ## Privacy checks
