@@ -3,6 +3,11 @@
 Evidence: Phase D implementation committed through `ecef631`; P1-P5 audit corrections are included in the follow-up commits. Phases E1 and E1.5, the memory/argument correction, CLI quality experiments, and managed ComfyUI below are implemented in the working tree without a commit. Verification uses code inspection and mocked selfie/provider, HTTP/WS, desktop IPC, speech, spawned local-provider processes, and memory/telemetry tests.
 
 ## Done
+- Providers P1.5: neutral unassigned public templates, preserved ignored local selection,
+  isolated test runner, redirect refusal, TLS/address validation and dependency/STT audit.
+- Providers P1: file-based slot contracts, OpenAI-compatible/Anthropic/Fish adapters,
+  safe errors, streaming deadlines/retries, lazy registry, capability gating,
+  migrated AI call sites and manual provider-test CLI. See the P1 record below.
 - Live2D Cubism rendering, physics, blinking, breathing, synthetic tracking, and emotion controls.
 - Live2D model discovery/upload/switching, persistent framing presets, and animation tuning.
 - WebSocket voice/text chat, VAD, mobile push-to-talk, STT, streaming chat/TTS, and turn-taking.
@@ -32,6 +37,140 @@ Evidence: Phase D implementation committed through `ecef631`; P1-P5 audit correc
 - Selfie Phase E1.5: GPU/DLL readiness, runtime CPU-fallback termination, config/preset args, `hemat`, heuristic memory refusal/override, nonblocking telemetry, private file logging, and bounded peak history for all started job outcomes.
 - Selfie memory/argument correction: offload-aware resource estimates, available physical RAM, configurable hard-refusal ratio, GGUF vision projection checks, and effective config diagnostics.
 - Selfie CLI quality experiments: ephemeral numeric/image/argument overrides, cached-help image-to-image flags, append-only run tables, shared GPU peaks, and metadata-only output comparison.
+
+## Source ZIP validation correction (2026-10-31)
+
+The P1.5 verification used a Git clone, which missed extracted source ZIPs.
+Both `npm test` and `check:privacy` previously required a `.git` directory and
+failed before validation in an extraction. They now share file enumeration:
+checkouts retain their tracked/untracked behavior, while archives use temporary
+Git metadata outside the source to apply nested ignore rules and exceptions.
+The archive and test snapshot remain `.git`-free. Git itself is still required;
+an archive inside another checkout does not inherit its parent, and broken
+metadata in an actual checkout remains an error.
+
+Validation: **702/702** tests pass in both the working checkout and a temporary
+source ZIP-style copy without `.git` (previous verified count **699/699**).
+The copy passes `npm ci` and `npm run check:privacy`, and still has no `.git`
+after both commands. Checkout privacy and whitespace checks pass. Three new
+regressions cover archive ignore rules, unrelated parent repositories and broken
+checkout metadata. Protected files are unchanged; no commits were made.
+
+Changed: `scripts/{runTests,checkPrivacy}.js`,
+`server/tests/{privacy,hermeticSetup}.test.js`, `docs/providers.md`, and this file.
+Previously extracted ZIPs need these updated scripts before rerunning validation.
+
+## Providers P1.5 (2026-10-31)
+
+The shared provider file now contains only three adapter templates with explicit
+endpoint/model placeholders; all six slots are null. Before replacement, the
+effective provider selection was saved to ignored `providers.config.local.json`
+without printing it. An actual-configuration check and a temporary-file reload
+confirmed all existing profiles/slots remain identical. Synthetic migration
+regressions cover environment resolution, nested overrides and unassigned roles.
+Environment values cannot assign a public slot. Unavailable features give setup
+hints and retain the existing text/planner fallbacks.
+
+Every HTTP adapter request enforces the configured origin and refuses redirects;
+Fish disables WebSocket redirects. The reusable URL validator rejects credentials,
+queries, fragments, link-local and known cloud-metadata addresses, and requires
+TLS except for loopback/private IP services. Status reports a plaintext warning
+without exposing the endpoint. Local redirect fixtures verify that custom key
+headers never reach the redirect destination. Address checks are lexical, without
+DNS pinning.
+
+`npm test` now runs a temporary public source snapshot with isolated local,
+home/config, user-data and memory directories. Private configs, credentials,
+references and model runtimes are excluded. A Node filesystem guard rejects
+original-checkout/home access and immutable-source writes, including swallowed
+errors; dependency reads required to execute tests are allowed. Native commands
+are outside that JavaScript guard. Fixtures supply explicit temporary paths.
+Normal memory storage retains its existing default, with optional `WAIFU_DATA_DIR`.
+
+The removed SDKs are absent from both root manifests. All nine direct dependencies
+are used. `whisper-large-v3` predates P1 (initial STT commit `c3e8671`) and was
+preserved locally; the old turbo header comment was stale. No public STT model is
+selected. See [Providers](providers.md) for configuration and transport policy.
+
+Validation: baseline `npm test` ran **637 tests**, with **632 passing** and five
+machine-runtime readiness failures. Final `npm test` passes **699/699** in this
+checkout and **699/699** in a temporary `git clone`, with **62 added tests** and
+zero failures/skips in both locations. Because P1/P1.5 are uncommitted, the clone
+received only Git-eligible public working files, including deletions; it contained
+no private config, `.env`, data or model runtimes. `npm ci` succeeded there
+(116 packages). The frontend build passes (57 modules), privacy check reports
+zero failing files, and syntax/whitespace checks pass. Sixteen regressions exercise
+test isolation, including Node subprocesses, swallowed errors, hardlinks,
+junctions and Windows extended-length paths. Protected-file hashes are unchanged.
+No live provider calls, browser/Electron manual flows or commits were performed.
+
+P1.5 changed files:
+
+```text
+.env.example
+providers.config.json
+providers.config.local.json (ignored)
+package.json
+scripts/runTests.js
+server/providers/{baseUrl,config,registry,resilience}.js
+server/providers/adapters/{shared,anthropicNative,fishAudio}.js
+server/memoryManager.js
+server/selfie/providers/comfyuiProvider.js
+server/tests/{providersRegistry,providersSafety,hermeticSetup,localPaths}.test.js
+server/tests/{providerResolver,sdcppProvider,selfieOutputDir,selfieTestCli,serverIntegration}.test.js
+server/tests/testSetup.cjs
+docs/providers.md
+docs/STATUS.md
+```
+
+## Providers P1 (2026-10-30)
+
+Implemented only P1. Public defaults preserve the existing provider endpoints,
+models, environment names, prompts, Fish voice/protocol, emotion parser and
+sentence splitter. The registry owns chat, planner, memory, both vision paths,
+STT, TTS and optional warm-up. Configuration deep-merges an ignored machine
+file; missing capabilities degrade through existing text/speech flows. ImageProvider,
+selfie moderation and personality are unchanged. No GUI or credential store was added.
+
+The [call-site map and provider guide](providers.md#call-site-audit) records the
+migrated file/line locations, contracts, capability matrix, compatibility quirks,
+configuration and CLI. All three SDK wrapper files and unused model constants
+were removed, together with the OpenAI/Groq SDK dependencies. No legacy AI client
+call sites remain. No new dependencies or commits were made.
+
+Validation: initial in-place `npm test` ran **546 tests**, with **541 passing** and
+five existing failures caused by local sd.cpp runtime state. A portable baseline
+copy passes **546/546**; the final portable copy passes **637/637** (91 added,
+zero failures/skips). Both complete copies used `node --test --test-concurrency=1`
+on every test file, fixture credentials and no private config/runtime files.
+The provider contract/config/flow suite passes **91/91** in the working checkout;
+the migrated pre-existing planner/moderation/speech/shortcut tests pass **76/76**.
+`npm run check:privacy` passes with zero failing files, `npm run build` passes with
+57 modules, and syntax/whitespace checks pass. Tests use local fake HTTP/WebSocket
+servers. Real provider probes and manual browser/Electron flows were not run.
+
+Changed files:
+
+```text
+.env.example
+.gitignore
+package.json
+package-lock.json
+providers.config.json
+server/providers/{contracts,errors,resilience,sse,config,registry,testSlot,cli}.js
+server/providers/adapters/{shared,openaiCompatible,anthropicNative,fishAudio}.js
+server/{index,llmChat,memoryManager,modelWarmup,streamingVisionManager,sttTranscribe,ttsGenerate,visionCapture}.js
+server/selfie/planner.js
+server/tests/{providerFixtures,providersContract.test,providersRegistry.test}.js
+server/tests/{desktopShortcuts,moderationGuards,planner,speech}.test.js
+docs/providers.md
+docs/STATUS.md
+Removed: server/{experientialClient,nineInferenceClient,groqClient,modelConfig}.js
+```
+
+The four untracked provider helper files present at task start were reused.
+The pre-existing `docs/prompts/` files were left unchanged. Protected-file hashes
+match the starting values. Work stops after P1.
 
 ## Shared download manifest (2026-10-26)
 
@@ -424,8 +563,8 @@ Manual check: run `npm.cmd run dev:all`, then `npm.cmd --prefix desktop-companio
 - UNKNOWN: live AI/ComfyUI generation, browser/Electron flows, capture behavior, and installer validation.
 
 ## Decisions
-- Chat/planner/memory: Experiential Labs; EXPLABS_MODEL overrides default `deepseek-v4.1-flash-uncensored`; TTS: Fish Audio `s2.1-pro-free`; avatar: IceGirl.
-- STT/vision: Groq `whisper-large-v3` / `qwen/qwen3.8-27b`; vision filter: 9inference `deepseek-v4.1-flash`.
+- Shared provider configuration contains templates only; all slots start unassigned.
+- Existing provider selections remain in the ignored machine override. STT's prior `whisper-large-v3` selection is preserved; avatar: IceGirl.
 - Selfies: default `auto`, external ComfyUI at `http://127.0.0.1:8188` first, managed ComfyUI second, sd.cpp third; explicit modes do not fall back. Managed installation paths must be configured. Default preset `cepat` (768 px, 12 steps, cfg 3); workflow model `qwen-image-2.1-UC-Q5_K_M.gguf`.
 - sd.cpp: GPU required by default; CPU and insufficient-memory overrides are explicit. `hemat` starts with empty preset args/modelArgs; telemetry is enabled, and optional tuning flags must be verified against the installed binary's help.
 - AI keys/provider access stay backend-only; image generation uses ImageProvider; selfie tuning lives in `selfie.config.json`.
@@ -435,3 +574,4 @@ Manual check: run `npm.cmd run dev:all`, then `npm.cmd --prefix desktop-companio
 - Continuous capture requires active screen sharing and a connected monitor; selfie generation runs independently of conversation turns.
 
 ## Next
+P1.5 is complete. Stop here; no subsequent phase has started.
