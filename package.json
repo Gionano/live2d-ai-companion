@@ -11,6 +11,7 @@
     "server": "node server/index.js",
     "test": "node --test server/tests/*.test.js",
     "check:privacy": "node scripts/checkPrivacy.js",
+    "providers:test": "node server/providers/cli.js",
     "selfie:test": "node server/selfie/selfieTest.js",
     "selfie:test-b": "node --test server/tests/planner.test.js",
     "selfie:test-c": "node --test server/tests/jobManager.test.js",

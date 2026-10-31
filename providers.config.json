@@ -1,0 +1,31 @@
+{
+  "profiles": {
+    "openai-compatible": {
+      "adapter": "openaiCompatible",
+      "baseUrl": "REPLACE_WITH_HTTPS_BASE_URL",
+      "model": "REPLACE_WITH_MODEL",
+      "apiKeyEnv": "PROVIDER_API_KEY",
+      "flags": { "supportsImages": false, "supportsStt": false, "supportsJsonMode": false, "supportsStreamUsage": false }
+    },
+    "anthropic-native": {
+      "adapter": "anthropicNative",
+      "baseUrl": "REPLACE_WITH_HTTPS_BASE_URL",
+      "model": "REPLACE_WITH_MODEL",
+      "apiKeyEnv": "ANTHROPIC_API_KEY"
+    },
+    "fish-audio": {
+      "adapter": "fishAudio",
+      "baseUrl": "REPLACE_WITH_WSS_BASE_URL",
+      "model": "REPLACE_WITH_MODEL",
+      "apiKeyEnv": "FISH_API_KEY"
+    }
+  },
+  "slots": {
+    "llm": null,
+    "planner": null,
+    "vision": null,
+    "visionFilter": null,
+    "stt": null,
+    "tts": null
+  }
+}

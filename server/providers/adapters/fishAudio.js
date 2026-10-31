@@ -3,6 +3,7 @@ import { encode, decode } from '@msgpack/msgpack';
 import { getVoiceId } from '../../voiceConfig.js';
 import { Adapter } from './shared.js';
 import { ProviderError, httpProviderError } from '../errors.js';
+import { validateBaseUrl, validateProviderHeaders } from '../baseUrl.js';
 
 export const capabilities = { llm: false, images: false, jsonMode: false, stt: false, tts: true };
 const FISH_EMOTION_TAG = {
@@ -21,9 +22,14 @@ export class FishAudio extends Adapter {
     return this.run(async function* ({ signal, touch }) {
       this.require('tts');
       if (typeof request.text !== 'string') throw new ProviderError('BAD_REQUEST', this.context);
+      let endpoint;
+      try {
+        endpoint = validateBaseUrl(this.profile.baseUrl, { websocket: true });
+        validateProviderHeaders(this.profile.extraHeaders);
+      } catch { throw new ProviderError('BAD_REQUEST', this.context); }
       const key = await this.key(signal);
       const format = request.format ?? this.params.format ?? 'mp3';
-      const ws = new WebSocket(this.profile.baseUrl, { headers: { ...this.profile.extraHeaders,
+      const ws = new WebSocket(endpoint.url, { headers: { ...this.profile.extraHeaders,
         ...(key && { Authorization: `Bearer ${key}` }), model: this.model } });
       const queue = [];
       let finished = false;
