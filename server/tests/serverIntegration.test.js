@@ -256,10 +256,15 @@ for (const frontend of ['Vite dev', 'Electron production']) {
     const backend = await createBackend(t);
     let baseUrl;
     if (frontend === 'Vite dev') {
+      fs.writeFileSync(path.join(backend.directory, 'package.json'), '{"name":"proxy-fixture","private":true,"workspaces":[]}');
       assert.equal(viteConfig.server.proxy['/api'].xfwd, true);
       assert.equal(viteConfig.server.proxy['/ws'].xfwd, true);
       const vite = await createViteServer({
         ...viteConfig,
+        root: backend.directory,
+        cacheDir: path.join(backend.directory, 'vite-cache'),
+        optimizeDeps: { noDiscovery: true, include: [] },
+        css: { postcss: { plugins: [] } },
         configFile: false,
         logLevel: 'silent',
         server: {
@@ -267,6 +272,7 @@ for (const frontend of ['Vite dev', 'Electron production']) {
           port: 0,
           hmr: false,
           watch: null,
+          fs: { allow: [backend.directory] },
           proxy: {
             '/api': { ...viteConfig.server.proxy['/api'], target: backend.baseUrl },
             '/ws': { ...viteConfig.server.proxy['/ws'], target: backend.baseUrl.replace(/^http/, 'ws') },

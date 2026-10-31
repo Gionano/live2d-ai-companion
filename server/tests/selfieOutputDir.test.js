@@ -112,6 +112,8 @@ test('packaged gallery loads the bundled single-source resolver without a server
   fs.writeFileSync(probe, `process.resourcesPath = ${JSON.stringify(f.resourcesPath)};\n`
     + `const { resolveLocalSelfieOutputDir } = await import('./src/main/selfieOutputDir.js');\n`
     + `console.log(resolveLocalSelfieOutputDir({ isPackaged: true, resourcesPath: process.resourcesPath }));\n`);
-  const output = execFileSync(process.execPath, [probe], { encoding: 'utf8', windowsHide: true, timeout: 5000 });
+  const output = execFileSync(process.execPath, [probe], {
+    env: { ...process.env, WAIFU_LOCAL_DIR: '' }, encoding: 'utf8', windowsHide: true, timeout: 5000,
+  });
   assert.equal(output.trim(), path.join(f.resourcesPath, 'local', 'outputs'));
 });

@@ -72,6 +72,8 @@ function realProviderConfig(t, comfyUrl, { missingBinary = false } = {}) {
   }
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return {
+    rootDir: root,
+    localDir: path.join(root, 'local'),
     provider: 'auto',
     autoOrder: ['comfyui', 'sdcpp'],
     availabilityCacheMs: 30000,

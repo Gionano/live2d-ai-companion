@@ -137,6 +137,8 @@ function createFixture(t, mode = 'valid', options = {}) {
     extraArgs.push(`--${name}=${value}`);
   }
   const cfg = {
+    rootDir: root,
+    localDir: path.join(root, 'local'),
     outputDir,
     referenceDir,
     defaultReference: 'default image.png',

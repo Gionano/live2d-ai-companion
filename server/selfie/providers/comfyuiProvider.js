@@ -107,9 +107,9 @@ function timestampName(ext) {
 }
 
 export class ComfyUiProvider extends ImageProvider {
-  constructor(cfg) {
+  constructor(cfg, { env = process.env } = {}) {
     super();
-    Object.assign(cfg, resolveSelfiePaths(cfg));
+    Object.assign(cfg, resolveSelfiePaths(cfg, { env }));
     this.cfg = cfg;
     this.baseUrl = cfg.comfyUrl;
     this.wsBase = cfg.comfyUrl.replace(/^http/i, 'ws');

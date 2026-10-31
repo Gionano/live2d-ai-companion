@@ -340,6 +340,8 @@ if (args.includes('--help')) {
   fs.mkdirSync(referenceDir);
   const reference = path.join(referenceDir, 'selected image.png');
   fs.writeFileSync(reference, png);
+  h.config.rootDir = root;
+  h.config.localDir = path.join(root, 'local');
   h.config.outputDir = path.join(root, 'outputs');
   h.config.referenceDir = root;
   h.config.jobTimeoutMs = 5000;

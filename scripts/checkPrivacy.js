@@ -43,9 +43,24 @@ export function scanPrivacyText(source, { filename = '', identities = runtimeIde
 }
 
 export function committableFiles(repoRoot = REPO_ROOT) {
-  const git = args => execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  return [...new Set([...git(['ls-files', '-z']).split('\0'),
-    ...git(['ls-files', '--others', '--exclude-standard', '-z']).split('\0')].filter(Boolean))].sort();
+  const git = args => execFileSync('git', args, {
+    cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+  });
+  let metadataRoot;
+  try {
+    const args = [];
+    if (!fs.existsSync(path.join(repoRoot, '.git'))) {
+      // Archives have no index. Use temporary metadata to apply Git's exact
+      // ignore rules without creating .git in the source or using a parent repo.
+      metadataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'waifu-file-index-'));
+      git(['init', '--quiet', '--template=', metadataRoot]);
+      args.push(`--git-dir=${path.join(metadataRoot, '.git')}`, `--work-tree=${path.resolve(repoRoot)}`);
+    }
+    const listed = git([...args, 'ls-files', '-c', '-o', '--exclude-standard', '-z']);
+    return [...new Set(listed.split('\0').filter(Boolean))].sort();
+  } finally {
+    if (metadataRoot) fs.rmSync(metadataRoot, { recursive: true, force: true });
+  }
 }
 
 export function decodeText(buffer) {

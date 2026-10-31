@@ -191,7 +191,7 @@ test('raw ComfyUI and sd.cpp provider configurations resolve references and outp
   const cfg = { rootDir: root, localDir: paths.localDir, comfyUrl: 'http://127.0.0.1:1',
     outputDir: '${LOCAL}/outputs', referenceDir: '${LOCAL}/references',
     sdcpp: { binaryPath: '${LOCAL}/legacy.exe', diffusionModel: '${LOCAL}/models/diffusion_models/d.gguf' } };
-  const comfy = new ComfyUiProvider({ ...cfg });
+  const comfy = new ComfyUiProvider({ ...cfg }, { env: {} });
   const sd = new SdCppProvider({ ...cfg }, { logger: () => {}, warner: () => {}, env: {} });
   for (const provider of [comfy, sd]) {
     assert.equal(provider.cfg.outputDir, paths.outputsDir());
@@ -300,7 +300,7 @@ async function freshComfyFixture(t, { holdUpload = false, missingReference = fal
   const provider = new ComfyUiProvider({ rootDir: root, localDir: paths.localDir,
     comfyUrl: `http://127.0.0.1:${server.address().port}`, referenceDir: '${LOCAL}/references',
     defaultReference: name, workflowPath: path.join(ROOT_DIR, 'workflows', 'selfie.api.json'),
-    mappingPath: path.join(ROOT_DIR, 'selfie.mapping.json'), healthTimeoutMs: 500 });
+    mappingPath: path.join(ROOT_DIR, 'selfie.mapping.json'), healthTimeoutMs: 500 }, { env: {} });
   return { provider, requests, uploaded, bytes, getUpload: () => uploadBytes, name };
 }
 

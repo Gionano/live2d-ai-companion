@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { checkPrivacy, decodeText, runtimeIdentities, scanPrivacyText } from '../../scripts/checkPrivacy.js';
+import { checkPrivacy, committableFiles, decodeText, runtimeIdentities, scanPrivacyText } from '../../scripts/checkPrivacy.js';
 
 const windowsPath = (...parts) => path.win32.join('X:', '/', ...parts);
 
@@ -68,4 +68,49 @@ test('privacy enumeration includes tracked and untracked files while ignoring ma
   assert.equal(result.binaryFiles, 1);
   const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('fixture', 'utf16le')]);
   assert.equal(decodeText(utf16), 'fixture');
+});
+
+test('archive privacy enumeration honors nested ignore rules without creating a repository', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'privacy-archive-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const write = (name, content) => {
+    const filename = path.join(root, name);
+    fs.mkdirSync(path.dirname(filename), { recursive: true });
+    fs.writeFileSync(filename, content);
+  };
+  write('.gitignore', '.env*\n!.env.example\n*.local.json\nnode_modules/\nlocal/\nreferences/*\n!references/README.md\n');
+  write('.env.example', 'PROVIDER_API_KEY=\n');
+  write('public.txt', windowsPath('private', 'detected'));
+  for (const name of ['.env', 'selfie.config.local.json', 'providers.config.local.json',
+    'node_modules/dependency/index.js', 'local/runtime/model.bin', 'references/personal.png']) {
+    write(name, windowsPath('private', 'excluded'));
+  }
+  write('references/README.md', 'Public reference instructions.');
+  write('nested/.gitignore', '*.txt\n!keep.txt\n');
+  write('nested/keep.txt', 'Public fixture.');
+  write('nested/ignored.txt', windowsPath('private', 'excluded'));
+  assert.deepEqual(committableFiles(root), ['.env.example', '.gitignore', 'nested/.gitignore',
+    'nested/keep.txt', 'public.txt', 'references/README.md']);
+  assert.deepEqual(checkPrivacy({ repoRoot: root }).findings.map(finding => finding.file), ['public.txt']);
+  assert.equal(fs.existsSync(path.join(root, '.git')), false);
+});
+
+test('an archive inside another checkout never inherits its index or ignore rules', t => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'privacy-parent-'));
+  t.after(() => fs.rmSync(parent, { recursive: true, force: true }));
+  execFileSync('git', ['init', '--quiet', '--template=', parent], { stdio: 'pipe', windowsHide: true });
+  fs.writeFileSync(path.join(parent, '.gitignore'), 'archive/\n');
+  const root = path.join(parent, 'archive');
+  fs.mkdirSync(root);
+  fs.writeFileSync(path.join(root, 'public.txt'), 'Public fixture.');
+  assert.deepEqual(committableFiles(root), ['public.txt']);
+  assert.equal(fs.existsSync(path.join(root, '.git')), false);
+});
+
+test('a broken checkout does not silently fall back to archive enumeration', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'privacy-broken-git-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, '.git'), 'invalid metadata\n');
+  fs.writeFileSync(path.join(root, 'public.txt'), 'Public fixture.');
+  assert.throws(() => committableFiles(root));
 });

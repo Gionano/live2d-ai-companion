@@ -19,7 +19,7 @@ import { getLlm } from './providers/registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATA_DIR = path.resolve(__dirname, '../data');
+const DATA_DIR = path.resolve(process.env.WAIFU_DATA_DIR || path.resolve(__dirname, '../data'));
 const MEMORY_FILE = path.resolve(DATA_DIR, 'memory.json');
 
 const MAX_FACTS = 40;
