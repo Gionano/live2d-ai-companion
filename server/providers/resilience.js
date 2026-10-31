@@ -1,7 +1,25 @@
 import { ProviderError, normalizeProviderError } from './errors.js';
+import { validateRequestUrl, validateProviderHeaders } from './baseUrl.js';
 
 export const DEFAULT_TIMEOUTS = { firstByteMs: 120000, idleMs: 120000, totalMs: 120000 };
 const RETRYABLE = new Set(['RATE_LIMIT', 'SERVER', 'NETWORK']);
+
+/** All HTTP adapter attempts share origin validation and unconditional redirect refusal. */
+export async function providerFetch(url, options, { baseUrl, fetchImpl = fetch, ...context } = {}) {
+  let target;
+  try {
+    target = validateRequestUrl(baseUrl, url);
+    validateProviderHeaders(options?.headers);
+  } catch { throw new ProviderError('BAD_REQUEST', context); }
+  const response = await fetchImpl(target.url, { ...options, redirect: 'error' });
+  // Also fail closed if an injected/custom fetch ignores redirect:'error'.
+  if (response.redirected || response.status >= 300 && response.status < 400
+    || response.url && new URL(response.url).origin !== target.origin) {
+    await response.body?.cancel().catch(() => {});
+    throw new ProviderError('BAD_REQUEST', context);
+  }
+  return response;
+}
 
 /**
  * Owns cancellation and all attempts. Any event yielded to the caller prohibits

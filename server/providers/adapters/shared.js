@@ -1,6 +1,6 @@
 import { completeStream, providerCapabilities } from '../contracts.js';
 import { ProviderError, httpProviderError, throwIfAborted } from '../errors.js';
-import { resilientStream } from '../resilience.js';
+import { resilientStream, providerFetch } from '../resilience.js';
 
 export class Adapter {
   constructor({ profile = {}, model, params = {}, timeouts = {}, providerId, slot,
@@ -28,7 +28,9 @@ export class Adapter {
   }
 
   async request(url, options, { signal }) {
-    const response = await this.fetchImpl(url, { ...options, signal });
+    const response = await providerFetch(url, { ...options, signal }, {
+      baseUrl: this.profile.baseUrl, fetchImpl: this.fetchImpl, ...this.context,
+    });
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
       throw httpProviderError(response, this.context);
