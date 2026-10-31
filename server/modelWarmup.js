@@ -2,8 +2,8 @@
 // modelWarmup.js
 // Best-effort, fire-and-forget maintenance requests for 9inference models.
 // ---------------------------------------------------------------------------
-import { client } from './nineInferenceClient.js';
-import { FILTER_MODEL } from './modelConfig.js';
+import { getProviderRegistry } from './providers/registry.js';
+import { totalTokens } from './providers/adapters/shared.js';
 
 export const KEEP_ALIVE_IDLE_MS = 4.5 * 60 * 1000;
 
@@ -17,25 +17,25 @@ function errorMessage(error) {
 }
 
 function responseSummary(response) {
-  const choice = response?.choices?.[0];
   return {
-    characters: choice?.message?.content?.length ?? 0,
-    finishReason: choice?.finish_reason ?? 'n/a',
-    completionTokens: response?.usage?.completion_tokens ?? 'n/a',
-    totalTokens: response?.usage?.total_tokens ?? 'n/a',
+    characters: response?.text?.length ?? 0,
+    finishReason: response?.finishReason ?? 'n/a',
+    completionTokens: response?.outputTokens ?? 'n/a',
+    totalTokens: totalTokens(response ?? {}, 'n/a'),
   };
 }
 
-async function pingModel(model, kind) {
+async function pingModel(kind, { signal, registry = getProviderRegistry() } = {}) {
+  const status = registry.getSlotStatus('visionFilter');
+  if (!status.available) return null;
+  const provider = registry.getLlm('visionFilter');
+  if (!provider.warmup) return null;
+  const model = status.model;
   const startedAt = performance.now();
   console.log(`[${kind}] ${model} request sent`);
 
   try {
-    const response = await client.chat.completions.create({
-      model,
-      messages: [{ role: 'user', content: 'hi' }],
-      max_tokens: 5,
-    });
+    const response = await provider.warmup({ signal });
     const durationMs = Math.round(performance.now() - startedAt);
     const summary = responseSummary(response);
     console.log(
@@ -54,21 +54,21 @@ async function pingModel(model, kind) {
   }
 }
 
-function pingDeepSeek(kind) {
+function pingDeepSeek(kind, options) {
   // Avoid stacking maintenance calls if 9inference is responding slowly.
   if (deepSeekMaintenanceInFlight) return deepSeekMaintenanceInFlight;
 
-  deepSeekMaintenanceInFlight = pingModel(FILTER_MODEL, kind).finally(() => {
+  deepSeekMaintenanceInFlight = pingModel(kind, options).finally(() => {
     deepSeekMaintenanceInFlight = null;
   });
   return deepSeekMaintenanceInFlight;
 }
 
-export function warmUpModels() {
+export function warmUpModels(options) {
   // Only warm up 9inference DeepSeek. Vision (Qwen 3.8 27B) runs on Groq
   // which doesn't need maintenance pings (always-on infrastructure).
   return Promise.allSettled([
-    pingDeepSeek('warmup'),
+    pingDeepSeek('warmup', options),
   ]);
 }
 

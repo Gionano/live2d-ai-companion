@@ -382,18 +382,12 @@ test('5. Fallback saat JSON Planner Rusak / Tidak Valid', async (t) => {
 
   await t.test('planSelfie tetap menghasilkan rencana valid jika LLM mengembalikan respons rusak', async () => {
     const mockBrokenLlm = {
-      chat: {
-        completions: {
-          create: async () => ({
-            choices: [{ message: { content: 'Maaf saya tidak sengaja merusak JSON output { broken' } }],
-          }),
-        },
-      },
+      complete: async () => ({ text: 'Maaf saya tidak sengaja merusak JSON output { broken' }),
     };
 
     const res = await planSelfie({
       userText: 'pap dong sayang',
-      llmClient: mockBrokenLlm,
+      llmProvider: mockBrokenLlm,
     });
 
     assert.equal(res.ok, true);
@@ -406,18 +400,14 @@ test('5. Fallback saat JSON Planner Rusak / Tidak Valid', async (t) => {
 
   await t.test('planSelfie langsung memblokir jika masukan user melanggar konten', async () => {
     const mockLlm = {
-      chat: {
-        completions: {
-          create: async () => {
-            throw new Error('LLM tidak boleh dipanggil saat konten dilarang!');
-          },
-        },
+      complete: async () => {
+        throw new Error('LLM must not be called for blocked content!');
       },
     };
 
     const res = await planSelfie({
       userText: 'pap telanjang dong',
-      llmClient: mockLlm,
+      llmProvider: mockLlm,
     });
 
     assert.equal(res.ok, false);

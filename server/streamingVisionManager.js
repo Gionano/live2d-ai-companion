@@ -4,14 +4,11 @@
 // buffer accumulation, periodic filtering via DeepSeek V4 Flash (9inference),
 // spontaneous voice commentary execution, and telemetry broadcast to Vision Monitor.
 // ---------------------------------------------------------------------------
-import { groq } from './groqClient.js';
-import { client } from './nineInferenceClient.js';
-import { FILTER_MODEL } from './modelConfig.js';
+import { getProviderRegistry, UNAVAILABLE_MESSAGES } from './providers/registry.js';
+import { imagePartFromDataUrl, totalTokens as countTokens } from './providers/adapters/shared.js';
 import { markConversationActivity } from './modelWarmup.js';
 import { HISTORY_MESSAGE_LIMIT } from './llmChat.js';
 import { getServerTuning } from './serverConfig.js';
-
-const VISION_MODEL = 'qwen/qwen3.8-27b';
 
 // Cost constants (Groq vision is free-tier / very cheap; 9inference for filter)
 const VISION_COST_PER_1K_TOKENS = 0.0002; // Qwen 3.8 27B (Groq) — estimate
@@ -52,8 +49,9 @@ Aturan Output:
 Format output WAJIB tepat satu JSON valid tanpa blok markdown (\`\`\`json) atau teks lain.
 `.trim();
 
-class StreamingVisionManager {
-  constructor() {
+export class StreamingVisionManager {
+  constructor({ registry = getProviderRegistry(), startTimer = true } = {}) {
+    this.registry = registry;
     this.isScreenShareActive = false;
     this.isDescribingInProgress = false;
     this.isFilteringInProgress = false;
@@ -85,7 +83,7 @@ class StreamingVisionManager {
     this.historyRef = null;
     this.speechHandler = null;
 
-    this.initPeriodicFilter();
+    if (startTimer) this.initPeriodicFilter();
   }
 
   setBroadcaster(fn) {
@@ -184,8 +182,9 @@ class StreamingVisionManager {
     });
   }
 
-  async handleContinuousFrame(imageDataUrl) {
+  async handleContinuousFrame(imageDataUrl, { signal } = {}) {
     if (!imageDataUrl) return;
+    if (!this.registry.getSlotStatus('vision').available) return;
     this.stats.totalFramesCaptured++;
 
     // Tidak ada Vision Monitor terhubung → frame di-skip, hemat Groq API.
@@ -213,16 +212,15 @@ class StreamingVisionManager {
       const maxTokens = getServerTuning('vision', 'visionMaxTokens', this.settings.maxTokens);
       const temperature = getServerTuning('vision', 'visionTemperature', 0.2);
 
-      const response = await groq.chat.completions.create({
-        model: VISION_MODEL,
-        reasoning_effort: 'none',   // Non-thinking / instruct mode for speed
-        max_tokens: maxTokens,
+      const response = await this.registry.getLlm('vision').complete({
+        signal,
+        maxTokens,
         temperature: temperature,
         messages: [
           {
             role: 'user',
             content: [
-              { type: 'image_url', image_url: { url: imageDataUrl } },
+              imagePartFromDataUrl(imageDataUrl),
               { type: 'text', text: SCREEN_VISION_PROMPT },
             ],
           },
@@ -230,12 +228,12 @@ class StreamingVisionManager {
       });
 
       const latencyMs = Math.round(performance.now() - startTime);
-      const description = response.choices?.[0]?.message?.content?.trim() || '(Tidak ada deskripsi)';
-      const totalTokens = response.usage?.total_tokens || 120;
+      const description = response.text.trim() || '(Tidak ada deskripsi)';
+      const totalTokens = countTokens(response, 120);
       const costUsd = (totalTokens / 1000) * VISION_COST_PER_1K_TOKENS;
       this.stats.totalVisionCostUsd += costUsd;
 
-      console.log(`[StreamingVision] Qwen 3.8 27B (Groq) — ${latencyMs}ms | "${description.slice(0, 60)}..."`);
+      console.log(`[StreamingVision] Vision — ${latencyMs}ms`);
 
       const entry = {
         id: 'desc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
@@ -263,9 +261,10 @@ class StreamingVisionManager {
   }
 
   initPeriodicFilter() {
-    setInterval(async () => {
+    this.filterTimer = setInterval(async () => {
       if (!this.isScreenShareActive) return;
       if (this.isFilteringInProgress) return;
+      if (!this.registry.getSlotStatus('visionFilter').available) return;
 
       const now = Date.now();
       const elapsedSec = (now - this.lastFilterTimestamp) / 1000;
@@ -330,9 +329,13 @@ class StreamingVisionManager {
         }
       }
     }, 500);
+    this.filterTimer.unref?.();
   }
 
-  async evaluateFilter(bufferEntries) {
+  async evaluateFilter(bufferEntries, { signal } = {}) {
+    if (!this.registry.getSlotStatus('visionFilter').available) {
+      return { action: 'SKIP', reason: UNAVAILABLE_MESSAGES.vision, tokens: 0, latencyMs: 0, costUsd: 0 };
+    }
     const startTime = performance.now();
     const formatted = bufferEntries
       .map((item, idx) => `[${idx + 1}] (${item.timestamp}) ${item.description}`)
@@ -349,10 +352,10 @@ Putuskan apakah Amika harus berkomentar secara spontan sekarang atau SKIP:
       const filterTemp = getServerTuning('vision', 'filterTemperature', 0.3);
       const filterMaxTok = getServerTuning('vision', 'filterMaxTokens', 150);
 
-      const response = await client.chat.completions.create({
-        model: FILTER_MODEL,
+      const response = await this.registry.getLlm('visionFilter').complete({
+        signal,
         temperature: filterTemp,
-        max_tokens: filterMaxTok,
+        maxTokens: filterMaxTok,
         messages: [
           { role: 'system', content: FILTER_SYSTEM_PROMPT },
           { role: 'user', content: userPrompt },
@@ -360,8 +363,8 @@ Putuskan apakah Amika harus berkomentar secara spontan sekarang atau SKIP:
       });
 
       const latencyMs = Math.round(performance.now() - startTime);
-      const rawContent = response.choices?.[0]?.message?.content?.trim() || '';
-      const totalTokens = response.usage?.total_tokens || 200;
+      const rawContent = response.text.trim() || '';
+      const totalTokens = countTokens(response, 200);
       const costUsd = (totalTokens / 1000) * FILTER_COST_PER_1K_TOKENS;
 
       const cleanJson = rawContent

@@ -189,11 +189,11 @@ function inputHandler(socket, controller, transcribeAudio, generateReplyStream =
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   const run = new AsyncFunction('socket', 'speechController', 'transcribeAudio', 'generateReplyStream',
     'history', 'msg', 'extFromMime', 'detectSelfieIntent', 'detectVisionIntent',
-    'markConversationActivity', 'HISTORY_MESSAGE_LIMIT', 'memoryManager', source.slice(start, end));
+    'markConversationActivity', 'HISTORY_MESSAGE_LIMIT', 'memoryManager', 'getSlotStatus', source.slice(start, end));
   const history = [];
   return msg => run(socket, controller, transcribeAudio, generateReplyStream, history, msg,
     () => 'webm', () => ({ isSelfie: false }), () => false, () => {}, 20,
-    { recordTurnAndExtract() {} });
+    { recordTurnAndExtract() {} }, () => ({ available: true }));
 }
 
 test('processing expiry aborts STT and a late old error cannot reset a newer turn', async () => {
@@ -374,13 +374,13 @@ test('expired selfie turn aborts its planner request and refunds unsubmitted adm
     submitJob: async () => { submitted++; return { ok: true }; },
     pickPhrase: () => '',
   };
-  const llmClient = { chat: { completions: { create: async (body, { signal }) => {
+  const llmProvider = { complete: async ({ signal }) => {
     plannerSignal = signal;
     signal.addEventListener('abort', () => paused.reject(signal.reason), { once: true });
     entered.resolve();
     return paused.promise;
-  } } } };
-  const request = prepareSelfieJob({ manager, planner: args => planSelfie({ ...args, llmClient }),
+  } };
+  const request = prepareSelfieJob({ manager, planner: args => planSelfie({ ...args, llmProvider }),
     userText: 'pap dong', history: [], signal: abort.signal });
   await entered.promise;
   abort.abort(new Error('Turn expired'));

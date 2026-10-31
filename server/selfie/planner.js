@@ -6,8 +6,7 @@
 // ---------------------------------------------------------------------------
 import fs from 'node:fs';
 import path from 'node:path';
-import { explabs } from '../experientialClient.js';
-import { CHAT_MODEL } from '../modelConfig.js';
+import { getLlm } from '../providers/registry.js';
 import { loadSelfieConfig } from './config.js';
 import { checkModeration } from './moderation.js';
 import { normalizeSlots } from './slotMatcher.js';
@@ -110,14 +109,14 @@ STRICT CONSTRAINTS:
  * @param {string} params.userText - Permintaan user ("pap dong", "minta foto kamu lagi senyum", dll)
  * @param {Array} [params.history] - Riwayat percakapan sebelumnya (opsional)
  * @param {object} [params.config] - Konfigurasi selfie
- * @param {object} [params.llmClient] - OpenAI-compatible client (default: explabs)
+ * @param {object} [params.llmProvider] - Canonical LlmProvider; defaults to the planner slot.
  * @returns {Promise<{ ok: boolean, blocked?: boolean, reason?: string, refusalText?: string, emotion?: string, plan?: object }>}
  */
 export async function planSelfie({
   userText,
   history = [],
   config = null,
-  llmClient = explabs,
+  llmProvider,
   signal,
 }) {
   signal?.throwIfAborted();
@@ -176,17 +175,11 @@ export async function planSelfie({
   const timeoutHandle = setTimeout(() => controller.abort(), cfg.plannerTimeoutMs || 20000);
   try {
 
-    const completion = await llmClient.chat.completions.create(
-      {
-        model: CHAT_MODEL,
-        messages,
-        temperature: 0.3,
-      },
-      { signal: controller.signal },
-    );
+    const provider = llmProvider ?? getLlm('planner');
+    const completion = provider ? await provider.complete({ messages, signal: controller.signal }) : null;
     signal?.throwIfAborted();
 
-    rawResponseText = completion?.choices?.[0]?.message?.content || '';
+    rawResponseText = completion?.text || '';
     rawJson = parsePlannerJson(rawResponseText);
     const durationMs = Math.round(performance.now() - t0);
     logSelfie(`[planner] Respons LLM diterima dalam ${durationMs}ms`);

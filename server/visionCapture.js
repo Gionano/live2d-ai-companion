@@ -4,9 +4,8 @@
 // Distinguishes between "screen" vs "webcam" requests and calls
 // Qwen 3.8 27B (Groq) for frame description.
 // ---------------------------------------------------------------------------
-import { groq } from './groqClient.js';
-
-const VISION_MODEL = 'qwen/qwen3.8-27b';
+import { getProviderRegistry, UNAVAILABLE_MESSAGES } from './providers/registry.js';
+import { imagePartFromDataUrl } from './providers/adapters/shared.js';
 
 const WEBCAM_PROMPT =
   'Deskripsikan secara singkat 1-2 kalimat apa yang sedang ditunjukkan atau terlihat di kamera/webcam ini.';
@@ -19,21 +18,19 @@ const SCREEN_PROMPT =
  * @param {string} imageDataUrl - "data:image/jpeg;base64,..."
  * @param {'webcam'|'screen'} source
  */
-export async function describeFrame(imageDataUrl, source = 'webcam') {
+export async function describeFrame(imageDataUrl, source = 'webcam', { signal, registry = getProviderRegistry() } = {}) {
+  if (!registry.getSlotStatus('vision').available) return UNAVAILABLE_MESSAGES.vision;
   const promptText = source === 'screen' ? SCREEN_PROMPT : WEBCAM_PROMPT;
 
   const startTime = performance.now();
 
-  const res = await groq.chat.completions.create({
-    model: VISION_MODEL,
-    reasoning_effort: 'none',   // Non-thinking / instruct mode for fast response
-    max_tokens: 150,
-    temperature: 0.2,
+  const res = await registry.getLlm('vision').complete({
+    signal,
     messages: [
       {
         role: 'user',
         content: [
-          { type: 'image_url', image_url: { url: imageDataUrl } },
+          imagePartFromDataUrl(imageDataUrl),
           { type: 'text', text: promptText },
         ],
       },
@@ -41,9 +38,9 @@ export async function describeFrame(imageDataUrl, source = 'webcam') {
   });
 
   const latencyMs = Math.round(performance.now() - startTime);
-  const description = res.choices[0]?.message?.content?.trim() ?? '';
+  const description = res.text.trim();
 
-  console.log(`[vision] Qwen 3.8 27B (Groq) ${source} — ${latencyMs}ms | "${description.slice(0, 80)}..."`);
+  console.log(`[vision] ${source} — ${latencyMs}ms`);
 
   return description;
 }

@@ -23,8 +23,8 @@ import {
   HISTORY_MESSAGE_LIMIT,
 } from './llmChat.js';
 import { transcribeAudio } from './sttTranscribe.js';
-import { generateSpeech } from './ttsGenerate.js';
-import { isVoiceConfigured } from './voiceConfig.js';
+import { generateSpeech, isSpeechConfigured as isVoiceConfigured } from './ttsGenerate.js';
+import { getSlotStatus, UNAVAILABLE_MESSAGES } from './providers/registry.js';
 import { SpeechController } from './speechController.js';
 import {
   companionSessionClosed,
@@ -167,7 +167,9 @@ app.post('/api/vision', async (req, res) => {
     if (!image) {
       return res.status(400).json({ error: 'Field "image" (data URL) wajib.' });
     }
-    const description = await describeFrame(image);
+    const controller = new AbortController();
+    res.on('close', () => controller.abort());
+    const description = await describeFrame(image, 'webcam', { signal: controller.signal });
     res.json({ description });
   } catch (err) {
     console.error('[vision] error:', err);
@@ -201,6 +203,8 @@ app.post('/api/memory/fact', (req, res) => {
 });
 
 app.post('/api/chat', async (req, res) => {
+  const controller = new AbortController();
+  res.on('close', () => controller.abort());
   // Server-Sent Events: satu event per potongan token.
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -215,7 +219,7 @@ app.post('/api/chat', async (req, res) => {
       return res.end();
     }
     markConversationActivity();
-    for await (const event of generateReply(history, message, visionDescription)) {
+    for await (const event of generateReply(history, message, visionDescription, { signal: controller.signal })) {
       res.write(`data: ${JSON.stringify(event)}\n\n`);
     }
     res.write('data: [DONE]\n\n');
@@ -336,7 +340,7 @@ wss.on('connection', (socket, req) => {
 
     // Monitor baru konek & share aktif → mulai continuous capture di companion
     if (monitorSockets.size === 1 && sharingSockets.size > 0) {
-      broadcastToCompanions({ type: 'continuous_capture_control', enabled: true });
+      broadcastToCompanions({ type: 'continuous_capture_control', enabled: getSlotStatus('vision').available });
     }
 
     socket.on('message', (raw) => {
@@ -516,7 +520,7 @@ wss.on('connection', (socket, req) => {
       else sharingSockets.delete(socket);
       streamingVisionManager.setScreenShareStatus(sharingSockets.size > 0);
       // Continuous capture hanya jalan jika ada monitor terhubung
-      const enableCapture = msg.active && monitorSockets.size > 0;
+      const enableCapture = msg.active && monitorSockets.size > 0 && getSlotStatus('vision').available;
       send({ type: 'continuous_capture_control', enabled: enableCapture });
       return;
     }
@@ -584,6 +588,10 @@ wss.on('connection', (socket, req) => {
       if (!turn) return;
       const isCurrent = () => speechController.isCurrentTurn(socket, turn.turnId);
       const send = (event) => speechController.sendTurn(socket, turn.turnId, event);
+      if (!isTyped && !getSlotStatus('stt').available) {
+        await playSpokenMessage(UNAVAILABLE_MESSAGES.stt, 'netral', socket, turn.turnId);
+        return;
+      }
 
       // --- timing diagnostics (ponytail: hapus blok [timing] kalau tak perlu) --
       // Semua durasi relatif ke saat input valid diterima (tPipe).
@@ -600,7 +608,7 @@ wss.on('connection', (socket, req) => {
         const tSttStart = performance.now();
         socket.sttTurnId = turn.turnId;
         try {
-          text = await transcribeAudio(buf, `audio.${extFromMime(mime)}`, { signal: turn.signal });
+          text = await transcribeAudio(buf, `audio.${extFromMime(mime)}`, { signal: turn.signal, mime });
         } finally {
           if (socket.sttTurnId === turn.turnId) socket.sttTurnId = null;
         }
@@ -653,6 +661,10 @@ wss.on('connection', (socket, req) => {
 
       // 2) Vision — periksa intent & pisahkan source (screen vs webcam)
       let vision = null;
+      if (detectVisionIntent(text) && !getSlotStatus('vision').available) {
+        await playSpokenMessage(UNAVAILABLE_MESSAGES.vision, 'netral', socket, turn.turnId);
+        return;
+      }
       if (detectVisionIntent(text)) {
         // Klien Electron: layar "aktif" = Screen Vision di tray ON; frame diminta
         // on-demand lewat request_screen_capture (bukan Share Screen browser).
@@ -725,7 +737,7 @@ wss.on('connection', (socket, req) => {
             } else {
               // Fallback one-shot: buffer kosong atau sumber = kamera
               if (!desc) {
-                desc = await describeFrame(frame, source);
+                desc = await describeFrame(frame, source, { signal: turn.signal });
                 if (!isCurrent()) return;
               }
 

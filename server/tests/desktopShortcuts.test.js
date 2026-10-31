@@ -386,9 +386,10 @@ test('microphone mute aborts current STT and rejects new audio without affecting
   controller.register(socket, event => events.push(event));
   t.after(() => controller.unregister(socket));
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-  const runInput = new AsyncFunction('socket', 'speechController', 'transcribeAudio', 'msg', 'extFromMime',
+  const runInputBody = new AsyncFunction('socket', 'speechController', 'transcribeAudio', 'msg', 'extFromMime', 'getSlotStatus',
     section(serverSource, "    if (msg.type !== 'audio_input' && msg.type !== 'text_input') return;", '\n      // Filter noise:')
       + '\n    } finally { if (turn) speechController.completeTurn(socket, turn.turnId); }');
+  const runInput = (...args) => runInputBody(...args, () => ({ available: true }));
   const mute = new Function('socket', 'speechController', 'msg', section(serverSource, "    if (msg.type === 'mic_mute')", '\n    // 0.'));
   let signal;
   let complete;

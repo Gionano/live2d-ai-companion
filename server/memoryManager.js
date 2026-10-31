@@ -15,8 +15,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { explabs } from './experientialClient.js';
-import { CHAT_MODEL } from './modelConfig.js';
+import { getLlm } from './providers/registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -209,7 +208,7 @@ class MemoryManager {
   }
 
   // Ekstraksi memori di latar belakang secara cerdas (Fire & Forget, non-blocking)
-  async recordTurnAndExtract(userText, assistantText) {
+  async recordTurnAndExtract(userText, assistantText, { signal } = {}) {
     this.updateLastSeen();
 
     if (!userText || userText.length < 5) return;
@@ -244,16 +243,17 @@ Kembalikan tepat satu JSON valid tanpa blok markdown:
 }
 `.trim();
 
-      const response = await explabs.chat.completions.create({
-        model: CHAT_MODEL,
+      const provider = getLlm();
+      if (!provider) return;
+      const response = await provider.complete({
+        signal,
         messages: [{ role: 'user', content: extractionPrompt }],
         temperature: 0.1,
-        max_tokens: 250,
-        response_format: { type: 'json_object' },
-        reasoning_effort: 'none',
+        maxTokens: 250,
+        json: true,
       });
 
-      const raw = response.choices?.[0]?.message?.content?.trim() || '{}';
+      const raw = response.text.trim() || '{}';
       const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
       const parsed = JSON.parse(clean);
 

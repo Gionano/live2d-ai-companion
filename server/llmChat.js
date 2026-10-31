@@ -6,8 +6,7 @@
 // datang, supaya route /api/chat bisa mem-forward token demi token ke browser
 // (dan nanti gampang dipecah per-kalimat untuk TTS).
 // ---------------------------------------------------------------------------
-import { explabs, EXPLABS_BASE_URL } from './experientialClient.js';
-import { CHAT_MODEL } from './modelConfig.js';
+import { getProviderRegistry, UNAVAILABLE_MESSAGES } from './providers/registry.js';
 import { WAIFU_SYSTEM_PROMPT } from './personality.js';
 import { memoryManager } from './memoryManager.js';
 export const HISTORY_MESSAGE_LIMIT = 8;
@@ -157,9 +156,14 @@ export async function* generateReply(
   conversationHistory,
   userMessage,
   visionDescription,
-  { signal } = {},
+  { signal, registry = getProviderRegistry() } = {},
 ) {
   signal?.throwIfAborted();
+  if (!registry.getSlotStatus('llm').available) {
+    yield { type: 'emotion', emotion: 'netral' };
+    yield { type: 'delta', text: UNAVAILABLE_MESSAGES.llm };
+    return;
+  }
   const rawHistory = Array.isArray(conversationHistory)
     ? conversationHistory
     : [];
@@ -187,31 +191,13 @@ export async function* generateReply(
       ` ~${context.estimatedTokens} tokens`,
   );
 
-  let stream;
-  try {
-    stream = await explabs.chat.completions.create({
-      model: CHAT_MODEL,
-      messages,
-      stream: true,
-      response_format: { type: 'json_object' },
-      reasoning_effort: 'none',
-    }, { signal });
-  } catch (error) {
-    if (error?.status === 401) {
-      console.error('[llm-chat] Experiential Labs 401 — cek EXPLABS_API_KEY di .env.');
-    } else if (error?.status === 429) {
-      console.error('[llm-chat] ⚠️ Experiential Labs 429 RATE LIMIT:', error?.message ?? '');
-    } else {
-      console.error(`[llm-chat] Experiential Labs error (${EXPLABS_BASE_URL}):`, error?.message ?? error);
-    }
-    throw error;
-  }
+  const stream = registry.getLlm().stream({ messages, json: true, signal });
   const parser = new StructuredReplyParser();
   let gotText = false;
 
   for await (const chunk of stream) {
     signal?.throwIfAborted();
-    const delta = chunk.choices[0]?.delta?.content;
+    const delta = chunk.type === 'text' ? chunk.delta : '';
     if (!delta) continue;
     for (const event of parser.push(delta)) {
       signal?.throwIfAborted();
@@ -221,8 +207,7 @@ export async function* generateReply(
   }
   if (!gotText) {
     console.warn(
-      '[llm-chat] LLM tidak menghasilkan teks balasan. Raw output:',
-      JSON.stringify(parser.raw.slice(0, 300)),
+      '[llm-chat] Provider returned no reply text.',
     );
   }
   signal?.throwIfAborted();
@@ -265,14 +250,14 @@ export async function* generateReplyStream(
   conversationHistory,
   userMessage,
   visionDescription,
-  { signal } = {},
+  { signal, registry } = {},
 ) {
   let buf = '';
   for await (const event of generateReply(
     conversationHistory,
     userMessage,
     visionDescription,
-    { signal },
+    { signal, registry },
   )) {
     signal?.throwIfAborted();
     if (event.type === 'emotion') {

@@ -4,35 +4,24 @@
 // (webm/wav/m4a dari MediaRecorder browser) dan mengembalikan teks transkripsi.
 // Model whisper-large-v3-turbo dipilih untuk kecepatan (percakapan real-time).
 // ---------------------------------------------------------------------------
-import { toFile } from 'groq-sdk';
-import { groq } from './groqClient.js';
+import { getProviderRegistry } from './providers/registry.js';
 import { getServerTuning } from './serverConfig.js';
-
-const STT_MODEL = 'whisper-large-v3';
-
-// Prompt awal memberikan konteks ejaan, tanda baca, dan gaya bahasa santai 
-// yang secara drastis menaikkan akurasi Whisper untuk bahasa Indonesia.
-const STT_PROMPT = 'Umm, halo sayang? Ini adalah percakapan santai. Kamu lagi ngapain?';
 
 // audioBuffer: Buffer audio mentah. `filename` dipakai Groq untuk menebak
 // container — samakan ekstensinya dengan mime rekaman (default webm).
-export async function transcribeAudio(audioBuffer, filename = 'audio.webm', { signal } = {}) {
+export async function transcribeAudio(audioBuffer, filename = 'audio.webm', { signal, mime,
+  registry = getProviderRegistry() } = {}) {
   signal?.throwIfAborted();
-  const file = await toFile(audioBuffer, filename);
-  signal?.throwIfAborted();
-  const res = await groq.audio.transcriptions.create({
-    file,
-    model: STT_MODEL,
-    language: 'id', // Bahasa Indonesia — akurasi lebih baik
-    response_format: 'verbose_json',
-    prompt: STT_PROMPT,
-  }, { signal });
+  if (!registry.getSlotStatus('stt').available) return '';
+  const extension = filename.split('.').pop().toLowerCase();
+  const type = mime ?? ({ wav: 'audio/wav', ogg: 'audio/ogg', mp3: 'audio/mpeg', m4a: 'audio/mp4' }[extension] || 'audio/webm');
+  const res = await registry.getStt().transcribe({ audio: audioBuffer, mime: type, filename, signal });
   signal?.throwIfAborted();
 
   // Filter halusinasi berdasarkan no_speech_prob (khas Whisper saat mendengar ketukan/noise)
-  if (res.segments && res.segments.length > 0) {
+  if (res.segments?.length && res.segments.every(segment => Number.isFinite(segment.noSpeechProb))) {
     // Ambil rata-rata no_speech_prob dari semua segmen
-    const noSpeechProb = res.segments.reduce((acc, seg) => acc + seg.no_speech_prob, 0) / res.segments.length;
+    const noSpeechProb = res.segments.reduce((acc, seg) => acc + seg.noSpeechProb, 0) / res.segments.length;
     const threshold = getServerTuning('vad', 'noSpeechThreshold', 0.5);
     // Jika kemungkinan besar bukan suara, anggap sebagai noise dan buang
     if (noSpeechProb > threshold) {

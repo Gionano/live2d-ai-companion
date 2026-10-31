@@ -19,13 +19,9 @@ function mockPlannerLlm(slots = {}) {
   return {
     get calls() { return calls; },
     client: {
-      chat: {
-        completions: {
-          create: async () => {
-            calls += 1;
-            return { choices: [{ message: { content: JSON.stringify(slots) } }] };
-          },
-        },
+      complete: async () => {
+        calls += 1;
+        return { text: JSON.stringify(slots) };
       },
     },
   };
@@ -80,7 +76,7 @@ for (const [label, userText] of BLOCKED_REQUESTS) {
     const llm = mockPlannerLlm();
     let result;
     await assert.doesNotReject(async () => {
-      result = await planSelfie({ userText, config: { moderationPath: MODERATION_PATH }, llmClient: llm.client });
+      result = await planSelfie({ userText, config: { moderationPath: MODERATION_PATH }, llmProvider: llm.client });
     }, `Moderation regressed: planner threw instead of rejecting ${label}`);
     assertBlockedPlan(result, `blocked request "${userText}"`);
     assert.equal(llm.calls, 0, `Moderation regressed: blocked request "${userText}" reached the LLM`);
@@ -122,7 +118,7 @@ for (const [label, slot, description] of BLOCKED_PROMPTS) {
     const llm = mockPlannerLlm(slots);
     let result;
     await assert.doesNotReject(async () => {
-      result = await planSelfie({ userText: 'pap dong sayang', config, llmClient: llm.client });
+      result = await planSelfie({ userText: 'pap dong sayang', config, llmProvider: llm.client });
     }, `Moderation regressed: planner threw instead of rejecting the built prompt with ${label}`);
     assert.equal(llm.calls, 1, `Moderation guard regressed: the ${label} fixture did not exercise prompt assembly`);
     assertBlockedPlan(result, `built prompt with ${label}`);
