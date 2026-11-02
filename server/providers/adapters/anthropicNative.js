@@ -1,6 +1,7 @@
 import { Adapter, jsonPrompt, validateMessages } from './shared.js';
 import { ProviderError } from '../errors.js';
 import { parseSse } from '../sse.js';
+import { deepMerge } from '../../selfie/localPaths.js';
 
 export const capabilities = { llm: true, images: true, jsonMode: false, stt: false, tts: false };
 
@@ -11,6 +12,7 @@ export class AnthropicNative extends Adapter {
     return this.run(async function* ({ signal, touch }) {
       this.require('llm');
       validateMessages(request.messages, this.context);
+      const credentials = await this.credentials(signal);
       const params = { ...this.params, ...request };
       const input = params.json ? jsonPrompt(request.messages) : request.messages;
       const blocks = content => typeof content === 'string' ? [{ type: 'text', text: content }]
@@ -21,7 +23,7 @@ export class AnthropicNative extends Adapter {
         });
       const system = input.filter(message => message.role === 'system').flatMap(message => blocks(message.content));
       if (system.some(block => block.type !== 'text')) throw new ProviderError('BAD_REQUEST', this.context);
-      const body = { ...this.profile.bodyExtras, ...this.params.bodyExtras,
+      const body = { ...deepMerge(this.profile.bodyExtras, credentials.bodyExtras, this.params.bodyExtras, credentials.slotBodyExtras),
         model: this.model, max_tokens: params.maxTokens ?? this.profile.defaultMaxTokens ?? 1024,
         stream: true, ...(system.length && { system }),
         ...(params.temperature != null && { temperature: params.temperature }),
@@ -29,10 +31,10 @@ export class AnthropicNative extends Adapter {
           role: message.role, content: blocks(message.content),
         })),
       };
-      const key = await this.key(signal);
+      const key = credentials.apiKey;
       const baseUrl = (this.profile.baseUrl || '').replace(/\/$/, '');
       const response = await this.request(`${baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`}/messages`, {
-        method: 'POST', headers: { ...this.profile.extraHeaders, 'Content-Type': 'application/json',
+        method: 'POST', headers: { ...this.profile.extraHeaders, ...credentials.headers, 'Content-Type': 'application/json',
           ...(key && { 'x-api-key': key }), 'anthropic-version': this.profile.anthropicVersion || '2023-06-01' },
         body: JSON.stringify(body),
       }, { signal });

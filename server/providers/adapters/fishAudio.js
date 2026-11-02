@@ -27,9 +27,12 @@ export class FishAudio extends Adapter {
         endpoint = validateBaseUrl(this.profile.baseUrl, { websocket: true });
         validateProviderHeaders(this.profile.extraHeaders);
       } catch { throw new ProviderError('BAD_REQUEST', this.context); }
-      const key = await this.key(signal);
+      const credentials = await this.credentials(signal);
+      try { validateProviderHeaders(credentials.headers); }
+      catch { throw new ProviderError('BAD_REQUEST', this.context); }
+      const key = credentials.apiKey;
       const format = request.format ?? this.params.format ?? 'mp3';
-      const ws = new WebSocket(endpoint.url, { followRedirects: false, headers: { ...this.profile.extraHeaders,
+      const ws = new WebSocket(endpoint.url, { followRedirects: false, headers: { ...this.profile.extraHeaders, ...credentials.headers,
         ...(key && { Authorization: `Bearer ${key}` }), model: this.model } });
       const queue = [];
       let finished = false;

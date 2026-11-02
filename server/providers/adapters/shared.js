@@ -24,11 +24,17 @@ export class Adapter {
   }
 
   async key(signal) {
+    return (await this.credentials(signal)).apiKey;
+  }
+
+  async credentials(signal) {
     throwIfAborted(signal, this.context);
-    const key = this.profile.apiKeyEnv ? await this.secretResolver.resolve(this.profile.apiKeyEnv) : undefined;
+    const values = this.secretResolver.profileSecrets
+      ? await this.secretResolver.profileSecrets(this.providerId, this.profile, this.slot)
+      : { apiKey: this.profile.apiKeyEnv ? await this.secretResolver.resolve(this.profile.apiKeyEnv) : undefined };
     throwIfAborted(signal, this.context);
-    if (this.profile.apiKeyEnv && !key) throw new ProviderError('AUTH', this.context);
-    return key;
+    if (this.profile.apiKeyEnv && !values.apiKey) throw new ProviderError('AUTH', this.context);
+    return values;
   }
 
   async request(url, options, { signal }) {

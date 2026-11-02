@@ -3,6 +3,7 @@ import { OpenAiCompatible } from './adapters/openaiCompatible.js';
 import { AnthropicNative } from './adapters/anthropicNative.js';
 import { FishAudio } from './adapters/fishAudio.js';
 import { validateBaseUrl } from './baseUrl.js';
+import { getSettingsService } from '../settings/service.js';
 
 export const ADAPTERS = { openaiCompatible: OpenAiCompatible, anthropicNative: AnthropicNative, fishAudio: FishAudio };
 export const envSecretResolver = { resolve: name => process.env[name] };
@@ -63,12 +64,25 @@ export class ProviderRegistry {
 }
 
 let defaultRegistry;
-export function getProviderRegistry() { return defaultRegistry ??= new ProviderRegistry(); }
+export function getProviderRegistry() {
+  if (!defaultRegistry) {
+    const settings = getSettingsService();
+    defaultRegistry = new ProviderRegistry({ loadConfig: () => settings.config(), secretResolver: settings.resolver() });
+    settings.attach(defaultRegistry);
+  }
+  return defaultRegistry;
+}
 export const getSlotStatus = slot => getProviderRegistry().getSlotStatus(slot);
 export const getLlm = role => getProviderRegistry().getLlm(role);
 export const getStt = () => getProviderRegistry().getStt();
 export const getTts = () => getProviderRegistry().getTts();
-export const reload = () => getProviderRegistry().reload();
+export const reload = () => {
+  const registry = getProviderRegistry();
+  const settings = getSettingsService();
+  settings.refresh();
+  registry.secretResolver = settings.resolver();
+  registry.reload(settings.config());
+};
 
 export const UNAVAILABLE_MESSAGES = {
   llm: 'Maaf sayang, aku belum bisa mengobrol sekarang. Atur penyedia obrolan dulu ya.',

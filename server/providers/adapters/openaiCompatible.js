@@ -1,21 +1,23 @@
 import { Adapter, jsonPrompt, readJson, validateMessages } from './shared.js';
 import { ProviderError } from '../errors.js';
 import { parseSse } from '../sse.js';
+import { deepMerge } from '../../selfie/localPaths.js';
 
 export const capabilities = { llm: true, images: false, jsonMode: false, stt: false, tts: false };
 
 export class OpenAiCompatible extends Adapter {
   constructor(options) { super(options, capabilities); }
 
-  async headers(signal) {
-    const key = await this.key(signal);
-    return { ...this.profile.extraHeaders, ...(key ? { Authorization: `Bearer ${key}` } : {}) };
+  async headers(signal, credentials) {
+    const values = credentials || await this.credentials(signal);
+    return { ...this.profile.extraHeaders, ...values.headers, ...(values.apiKey ? { Authorization: `Bearer ${values.apiKey}` } : {}) };
   }
 
   stream(request) {
     return this.run(async function* ({ signal, touch }) {
       this.require('llm');
       validateMessages(request.messages, this.context);
+      const credentials = await this.credentials(signal);
       const flags = this.profile.flags ?? {};
       const params = { ...this.params, ...request };
       let messages = request.messages;
@@ -26,7 +28,7 @@ export class OpenAiCompatible extends Adapter {
           this.require('images');
           return { type: 'image_url', image_url: { url: `data:${part.mime};base64,${part.base64}` } };
         }) }));
-      const body = { ...this.profile.bodyExtras, ...this.params.bodyExtras,
+      const body = { ...deepMerge(this.profile.bodyExtras, credentials.bodyExtras, this.params.bodyExtras, credentials.slotBodyExtras),
         model: this.model, messages, stream: true,
         ...(params.temperature != null && { temperature: params.temperature }),
         ...(params.maxTokens != null && { max_tokens: params.maxTokens }),
@@ -35,7 +37,7 @@ export class OpenAiCompatible extends Adapter {
       };
       for (const key of [...(this.profile.omitParams ?? []), ...(this.params.omitParams ?? [])]) delete body[key];
       const response = await this.request(`${this.profile.baseUrl.replace(/\/$/, '')}/chat/completions`, {
-        method: 'POST', headers: { ...await this.headers(signal), 'Content-Type': 'application/json' },
+        method: 'POST', headers: { ...await this.headers(signal, credentials), 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       }, { signal });
       let finished = false;
