@@ -10,7 +10,7 @@ const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'waifu-tests-'));
 const sourceRoot = path.join(runRoot, 'source');
 const directories = ['server/', 'src/', 'config/', 'workflows/', 'setup/', 'scripts/',
   'desktop-companion/src/', 'desktop-companion/scripts/'];
-const files = new Set(['.gitignore', 'package.json', 'providers.config.json', 'selfie.config.json',
+const files = new Set(['.gitignore', 'package.json', 'index.html', 'providers.config.json', 'selfie.config.json',
   'selfie.mapping.json', 'vite.config.js', 'desktop-companion/package.json']);
 
 try {
