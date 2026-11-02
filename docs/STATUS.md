@@ -3,6 +3,11 @@
 Evidence: Phase D implementation committed through `ecef631`; P1-P5 audit corrections are included in the follow-up commits. Phases E1 and E1.5, the memory/argument correction, CLI quality experiments, and managed ComfyUI below are implemented in the working tree without a commit. Verification uses code inspection and mocked selfie/provider, HTTP/WS, desktop IPC, speech, spawned local-provider processes, and memory/telemetry tests.
 
 ## Done
+- Providers P3: local id/en settings GUI, first-run wizard, inherited-slot probes,
+  models helper, stale-lock recovery and isolated dummy-key diagnostics. Audit below.
+- Providers P2: versioned local settings, origin-bound credentials, Windows DPAPI
+  and explicit plaintext backends, protected local settings API, import/migration,
+  and registry reload with private in-flight credential snapshots.
 - Providers P1.5: neutral unassigned public templates, preserved ignored local selection,
   isolated test runner, redirect refusal, TLS/address validation and dependency/STT audit.
 - Providers P1: file-based slot contracts, OpenAI-compatible/Anthropic/Fish adapters,
@@ -37,6 +42,136 @@ Evidence: Phase D implementation committed through `ecef631`; P1-P5 audit correc
 - Selfie Phase E1.5: GPU/DLL readiness, runtime CPU-fallback termination, config/preset args, `hemat`, heuristic memory refusal/override, nonblocking telemetry, private file logging, and bounded peak history for all started job outcomes.
 - Selfie memory/argument correction: offload-aware resource estimates, available physical RAM, configurable hard-refusal ratio, GGUF vision projection checks, and effective config diagnostics.
 - Selfie CLI quality experiments: ephemeral numeric/image/argument overrides, cached-help image-to-image flags, append-only run tables, shared GPU peaks, and metadata-only output comparison.
+
+## Providers P3 (2026-11-01)
+
+Resumed the interrupted working tree, preserving uncommitted P2 and existing P3.
+Health check: all **40** changed/untracked JS/CJS files parsed; build and privacy
+passed. The first full run was **825/826**: one existing ComfyUI fixture exceeded
+its three-second startup deadline. Its focused retry passed **12/12** and the
+final full run passed **834/834**, zero failures/skips. No syntax errors, truncated
+files or dangling imports were found. The transient fixture needed no code change.
+PowerShell's npm wrapper was blocked by execution policy; `npm.cmd` worked.
+
+The inherited-slot override implementation was already present. New regressions
+verify planner and visionFilter with implicit/explicit inheritance, profile-only,
+model-only and combined overrides, separate probe deadlines, and unchanged saved
+settings/LLM configuration. Diagnostics previously created its scratch directory
+inside the configured local directory. It now uses OS temporary storage, never
+creates or repairs the real local directory, and never opens its secret store.
+CLI subprocess guards cover missing/corrupt settings and forbidden credential or
+provider-config access. Dummy deletion and cleanup are checked on success/failure;
+the GUI requests the same self-test with an empty body.
+
+### P3 audit
+
+DONE describes implementation and offline evidence. Live verification limits below
+still apply. The handoff column records the resumed implementation, not an earlier
+session's remembered TODO list. Evidence paths include one-based line numbers.
+
+| Item | Handoff | Final | Evidence |
+| --- | --- | --- | --- |
+| A1 stale locks | DONE | DONE | server/settings/files.js:67; server/settings/files.js:79 |
+| A2 bounded probe/progress | DONE | DONE | server/settings/routes.js:121; server/providers/registry.js:53; server/tests/settingsApi.test.js:310 |
+| A3 models helper | DONE | DONE | server/settings/models.js:6; server/settings/routes.js:100 |
+| A4 isolated doctor/API | PARTIAL | DONE | server/settings/doctor.js:9; server/settings/doctorCli.js:1; server/settings/routes.js:95; server/tests/settingsP3.test.js:93 |
+| B1 local entry points/window | DONE | DONE | src/bootstrap.js:9; desktop-companion/src/main/settingsWindowManager.js:1 |
+| B2 tabs/wizard/resume | DONE | DONE | src/settings/page.js:250; src/settings/page.js:276; src/settings/wizard.js:1 |
+| B3 profiles/presets/credentials | DONE | DONE | src/settings/page.js:70; src/settings/presets.json:1 |
+| B4 slot editors/inheritance/tests | DONE | DONE | src/settings/page.js:136; server/providers/registry.js:53 |
+| B5 status/warnings | DONE | DONE | src/settings/page.js:201 |
+| B6 privacy destinations/links | DONE | DONE | src/settings/page.js:219; src/settings/viewModel.js:58 |
+| B7 id/en and parity | DONE | DONE | src/settings/i18n.js:4; src/i18n/id.json:1; src/i18n/en.json:1; server/tests/settingsGui.test.js:21 |
+| B8 security/accessibility | DONE | DONE | src/settings/apiClient.js:4; src/settings/dom.js:2; src/settings/settings.css:1; desktop-companion/src/main/settingsWindowManager.js:13 |
+| C tests/docs | PARTIAL | DONE | server/tests/settingsApi.test.js:444; server/tests/settingsGui.test.js:186; server/tests/settingsP3.test.js:124; docs/settings-gui.md:1; docs/settings.md:1; README.md:90 |
+
+Validation: **798** before P3, **826** at interruption, **834/834** final (**8 new
+regressions this continuation**, **36 total since P2**). Build, privacy and
+whitespace checks pass. Proxy integration exercises real local HTTP fixtures for
+profile/secret saves, models, streamed probes, deadline bounds, stale locks and
+diagnostics through both Vite and Electron. The session token remains in memory;
+provider strings use textContent; password inputs clear before transport.
+
+Cannot verify offline: **live DPAPI, live providers, real Electron rendering and
+browser layout**, including actual 360px usability. DPAPI and windows use fakes;
+contrast ratios are calculated tests. Maintainers must verify preset URLs against
+official docs before release. See the [GUI guide](settings-gui.md) for the checklist.
+No dependencies or commits were added. Protected moderation/personality files are
+unchanged. P3 is complete; stop before any subsequent phase.
+
+Files edited in this continuation: README.md; docs/STATUS.md; docs/settings.md;
+docs/settings-gui.md; server/settings/doctor.js;
+server/tests/settingsApi.test.js; server/tests/settingsGui.test.js;
+server/tests/settingsP3.test.js.
+
+### Full uncommitted P2/P3 file list
+
+This includes prior-session changes. The two untracked prompt documents are
+preserved inputs, not edited outputs.
+
+| Area | Modified or untracked files |
+| --- | --- |
+| Root | README.md, index.html, package.json, vite.config.js |
+| Desktop main | desktop-companion/src/main/index.js, desktop-companion/src/main/staticServer.js, desktop-companion/src/main/trayManager.js, desktop-companion/src/main/settingsWindowManager.js |
+| Desktop preload | desktop-companion/src/preload/preload.cjs |
+| Docs | docs/STATUS.md, docs/providers.md, docs/settings.md, docs/settings-gui.md, docs/prompts/providers-p2.md, docs/prompts/providers-p3.md |
+| Scripts/server entry | scripts/runTests.js, server/index.js |
+| Providers | server/providers/baseUrl.js, server/providers/config.js, server/providers/registry.js, server/providers/testSlot.js |
+| Adapters | server/providers/adapters/anthropicNative.js, server/providers/adapters/fishAudio.js, server/providers/adapters/openaiCompatible.js, server/providers/adapters/shared.js |
+| Settings backend | server/settings/doctor.js, server/settings/doctorCli.js, server/settings/files.js, server/settings/models.js, server/settings/routes.js, server/settings/schema.js, server/settings/secretStore.js, server/settings/service.js, server/settings/store.js |
+| Tests | server/tests/desktopShortcuts.test.js, server/tests/selfieRouting.test.js, server/tests/settingsApi.test.js, server/tests/settingsGui.test.js, server/tests/settingsP3.test.js, server/tests/settingsReload.test.js, server/tests/settingsService.test.js, server/tests/settingsStorage.test.js |
+| Frontend bootstrap/language | src/bootstrap.js, src/i18n/en.json, src/i18n/id.json |
+| Settings frontend | src/settings/apiClient.js, src/settings/dom.js, src/settings/i18n.js, src/settings/page.js, src/settings/presets.json, src/settings/settings.css, src/settings/viewModel.js, src/settings/wizard.js |
+
+## Providers P2 (2026-11-01)
+
+Implemented only P2. The runtime layers committed templates, developer overrides,
+and strict non-secret user settings; environment values supply credentials only.
+The API reports per-field sources and safe credential presence. Header values and
+credential-like body extras stay in the separate origin-bound secret store.
+Changing an origin requires replacement credentials or explicit deletion;
+imports cannot bypass the rule. Legacy endpoint/model migration is explicit and
+never copies environment keys. See [Settings](settings.md) for schema and API use.
+
+The API checks loopback peers, allowed Hosts, every forwarded hop, same-origin
+evidence and a backend-session token. Both frontend proxies preserve those checks
+and no-store/no-CORS responses. Provider probes share the existing helper with
+bounded input, a rolling rate limit, one active call and a five-second deadline.
+Successful writes reload the registry and send only a value-free
+`settings_changed` event; active calls keep their old provider and credentials.
+
+Settings use bounded, versioned atomic writes and corrupt-file backups. Windows
+uses DPAPI CurrentUser; non-Windows defaults to read-only environment credentials.
+Plaintext persistence requires explicit opt-in and reports a persistent warning.
+Native non-Windows keychains are not implemented. DPAPI is tested with an injected
+runner, not the live OS backend. Atomicity is per file: ordinary write failures
+attempt rollback, but no cross-file crash journal exists. Origin mismatches fail
+closed; same-origin crashes can leave a new key with previous settings. Stale lock
+files require local recovery after stopping all writers.
+
+Validation: baseline **702/702**, final **798/798**, with **96 added tests** and
+zero failures/skips. Tests use temporary directories, fake DPAPI, local HTTP/WS
+providers and real Vite/Electron proxy fixtures. Coverage includes API access,
+schema rejection, secret omission, origin binding, optimistic conflicts, corrupt
+recovery, import/export/migration, probe limits and in-flight reloads. Privacy
+reports zero failing files; frontend build and whitespace checks pass. Protected
+moderation/personality hashes are unchanged. No dependencies, commits, generation,
+live provider calls or GUI were added.
+
+Changed files:
+
+```text
+server/settings/{schema,files,store,secretStore,service,routes}.js
+server/providers/{config,registry}.js
+server/providers/adapters/{shared,openaiCompatible,anthropicNative,fishAudio}.js
+server/index.js
+vite.config.js
+desktop-companion/src/main/staticServer.js
+server/tests/{settingsStorage,settingsService,settingsApi,settingsReload}.test.js
+docs/{settings,providers,STATUS}.md
+```
+
+The user-supplied untracked `docs/prompts/providers-p2.md` is preserved unchanged.
 
 ## Source ZIP validation correction (2026-10-31)
 
@@ -574,4 +709,4 @@ Manual check: run `npm.cmd run dev:all`, then `npm.cmd --prefix desktop-companio
 - Continuous capture requires active screen sharing and a connected monitor; selfie generation runs independently of conversation turns.
 
 ## Next
-P1.5 is complete. Stop here; no subsequent phase has started.
+P3 is complete in the working tree. Stop here; no subsequent phase has started.

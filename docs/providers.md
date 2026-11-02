@@ -1,8 +1,10 @@
-# Providers (P1 + P1.5)
+# Providers (P1–P2)
 
-The backend selects file-configured providers for chat, vision, speech recognition
-and speech synthesis. P1 has no settings GUI or credential store. Image generation
-continues to use the existing `server/selfie/imageProvider.js` and selfie gating.
+The backend selects providers for chat, vision, speech recognition and speech
+synthesis through a shared registry. P2 adds a local settings store, credential
+backends and a protected settings API; there is no settings GUI yet. See
+[Settings](settings.md) for the schema, layering, secret storage and API. Image
+generation continues to use `server/selfie/imageProvider.js` and selfie gating.
 
 ## Call-site audit
 
@@ -40,12 +42,14 @@ dependencies or setting old provider environment variables never assigns a slot.
 The template's `model` field is a setup reminder; the actual model belongs in
 `slots.<slot>.model`. A placeholder model cannot be used for a request.
 
-The public file deep-merges with ignored
-`providers.config.local.json`: objects merge recursively; arrays, scalars and null
-replace. `${LOCAL}` expands through the existing local-path helper. Restart the
-backend after edits, or call the backend-only registry `reload()` hook. Reload
-invalidates lazy instances for subsequent calls; active requests retain their
-original provider and cancellation signal.
+The default runtime registry layers the public file, ignored
+`providers.config.local.json`, then `<local>/settings.json`. Objects merge
+recursively; arrays, scalars and null replace. Only supported non-secret fields
+enter runtime settings; API writes validate the strict [P2 schema](settings.md).
+Settings API mutations reload the registry automatically. Restart after manual
+file edits, or call the backend-only exported `reload()` hook. Subsequent calls
+use new adapters; active calls retain their original provider, credentials and
+cancellation signal. Settings do not accept local filesystem paths.
 
 P1.5 copied this installation's resolved selection into
 `providers.config.local.json` before replacing the public file. Temporary-file
@@ -53,25 +57,30 @@ checks confirmed all existing profiles, models, parameters and timeouts survive
 unchanged; only unused templates were added. The local snapshot contains key
 environment names, not resolved key values, and stays ignored by Git.
 
-Existing key variable names remain usable when explicitly named by a local
-profile. Generic `baseUrlEnv`/`baseUrlEnvSuffix` and `modelEnv` seeding remains
-available only on profiles/slots explicitly present in the shared configuration;
-there are no such mappings in the shipped templates. Environment seeding happens
-before local overrides, so a saved local value wins. Endpoint/model environment
-variables alone cannot restore the former personal defaults. No key values belong
-in shared JSON or `.env.example`.
+Existing key variable names remain usable when explicitly named by a profile's
+`apiKeyEnv`; a nonempty environment key wins over the stored key. Runtime
+environment overrides supply secrets only. Endpoint/model migration requires
+`POST /api/settings/legacy/import`; it never copies environment keys. The
+low-level P1 `loadProvidersConfig()` helper retains generic `baseUrlEnv`,
+`baseUrlEnvSuffix`, `modelEnv` seeding and `${LOCAL}` expansion for explicit
+backend callers/tests. The default runtime registry uses the P2 settings service
+instead. No key values belong in shared JSON or `.env.example`.
 
 STT provenance: `whisper-large-v3` was the executable default before P1, including
 the initial STT commit `c3e8671`. P1 preserved it and P1.5 preserves the local
 selection. The old `whisper-large-v3-turbo` header comment was already stale in
 that initial commit. There is now no public STT selection.
 
-The schema is `{profiles: {id: profile}, slots: {slot: settings}}`:
+The developer provider file is `{profiles: {id: profile}, slots: {slot: settings}}`;
+the settings document adds schema/version and UI fields:
 
-- A profile has `adapter`, optional `baseUrl`, `apiKeyEnv`, `extraHeaders`, `flags`,
-  `capabilities`, `bodyExtras`, `omitParams`, and per-model `models` overrides.
-  Omit `apiKeyEnv` for an unauthenticated local service. The P1 SecretResolver reads
-  the named environment variable; it never exposes the key in status or errors.
+- A configured profile needs `adapter` and `baseUrl`; it can also set `apiKeyEnv`,
+  `flags`, `capabilities`, `bodyExtras`, `omitParams` and safe per-model `models`
+  options. Developer `extraHeaders` values become private credentials; the settings
+  API accepts only `headerNames` plus separate write-only secret values. Per-model
+  options cannot change the endpoint, adapter, headers or environment mapping.
+  Omit `apiKeyEnv` for an unauthenticated local service. Credential resolution
+  stays private and bound to the profile origin; see [Settings](settings.md).
 - Slot settings have `profile`, `model`, `params`, and `timeouts`. Params include
   `temperature`, `maxTokens`, `json`, optional `bodyExtras`/`omitParams`, STT
   `language`/`prompt`, and TTS `voice`/`format`. Explicit call parameters take
@@ -234,7 +243,7 @@ npm run providers:test -- --slot vision --profile PROFILE_ID --model MODEL_NAME
 npm run providers:test
 ```
 
-`testSlot(slot, {profile?, model?})` is shared by the CLI and future UI work. It
+`testSlot(slot, {profile?, model?})` is shared by the CLI and settings API. It
 returns success, elapsed time, first text/audio timing, optional token counts,
 safe errors and metadata. Overrides are ephemeral. A changed profile clears
 inherited vendor body extras for the probe. Vision uses a generated 8x8 PNG;

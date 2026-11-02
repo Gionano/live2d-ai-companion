@@ -77,20 +77,35 @@ Use **Node.js 18 or newer**. Install dependencies in the root and in each option
 npm install
 ```
 
-Copy `.env.example` to `.env`, then configure the backend credentials:
-
-```env
-EXPLABS_API_KEY=your_key_here
-GROQ_API_KEY=your_key_here
-FISH_API_KEY=your_key_here
-NINEINFERENCE_API_KEY=your_key_here
-```
+Copy `.env.example` to `.env` for optional backend configuration. Provider choices
+and credentials can be entered through local Settings; environment credentials
+remain supported and override stored keys when mapped to a profile.
 
 ```sh
 npm run dev:all
 ```
 
 Open the companion at [http://localhost:5173](http://localhost:5173). Use `npm run server` or `npm run dev` to start either service independently.
+
+### First run
+
+On the host computer, an unassigned chat slot opens the first-run wizard:
+Language → Chat → Voice → Hearing → optional Vision → optional Images → Privacy
+→ Finish. Add a provider, save its endpoint/key, then assign a model to Chat.
+Voice and Hearing can be skipped for text-only use. Each save takes effect
+immediately; the wizard step survives reloads. Connection tests are optional
+provider calls and may consume quota.
+
+Reopen [Settings](http://localhost:5173/#settings) with the gear in the debug
+panel or Electron's **Settings…** tray item. Mobile/LAN clients must configure
+providers on the host. Keys are write-only; Windows uses DPAPI by default.
+Non-Windows defaults to environment credentials unless plaintext storage is
+explicitly enabled. Run `npm run settings:doctor` for an isolated dummy-key check.
+
+See the [GUI guide](docs/settings-gui.md) for screens, presets, languages and
+manual verification, and the [settings reference](docs/settings.md) for storage
+and access rules. Preset service URLs require maintainer verification against
+official documentation before release.
 
 ### Optional Vision Monitor
 
