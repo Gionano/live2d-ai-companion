@@ -1,0 +1,24 @@
+html:has(#settings-page), html:has(#settings-page) body { background: #161622 !important; overflow: auto; height: auto; }
+#settings-page { color: #eeeef6; background: #161622; font: 16px/1.55 system-ui, sans-serif; max-width: 1100px; margin: 0 auto; padding: 24px; min-height: 100vh; }
+#settings-page * { box-sizing: border-box; }
+#settings-page h1 { font-size: 1.8rem; margin: 0 0 12px; }
+#settings-page h2, #settings-page h3 { margin: 20px 0 10px; }
+#settings-page p { margin: 8px 0; overflow-wrap: anywhere; }
+#settings-page a { color: #9dcaff; text-decoration: underline; }
+#settings-page button, #settings-page input, #settings-page select, #settings-page textarea { font: inherit; color: #eeeef6; background: #29293e; border: 1px solid #8b8ba6; border-radius: 6px; padding: 9px 12px; min-height: 44px; max-width: 100%; }
+#settings-page input, #settings-page select, #settings-page textarea { display: block; width: 100%; min-width: 0; margin-top: 5px; }
+#settings-page input[type=checkbox] { display: inline-block; width: 22px; min-height: 22px; margin-left: 12px; vertical-align: middle; }
+#settings-page button, #settings-page summary { cursor: pointer; }
+#settings-page button:hover, #settings-page button[aria-selected=true] { background: #414166; }
+#settings-page button:disabled { opacity: .6; cursor: not-allowed; }
+#settings-page :focus-visible { outline: 3px solid #ffd479; outline-offset: 3px; }
+#settings-page .settings-card { background: #202030; border: 1px solid #67677f; border-radius: 10px; padding: 18px; margin: 16px 0; }
+#settings-page .settings-field { display: block; margin: 14px 0; overflow-wrap: anywhere; }
+#settings-page .settings-actions, #settings-page .settings-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+#settings-page details { border-left: 3px solid #8585ac; padding: 8px 12px; margin: 12px 0; }
+#settings-page summary { padding: 8px; }
+#settings-page form > button { margin: 8px 8px 8px 0; }
+#settings-page table { width: 100%; text-align: left; border-collapse: collapse; }
+#settings-page td, #settings-page th { border-bottom: 1px solid #67677f; padding: 8px; overflow-wrap: anywhere; }
+#settings-page .settings-toast:not(:empty) { border: 1px solid #ffd479; border-radius: 6px; padding: 12px; }
+@media (max-width: 480px) { #settings-page { padding: 14px; } #settings-page .settings-card { padding: 12px; } #settings-page .settings-tabs button { flex: 1 1 42%; } }

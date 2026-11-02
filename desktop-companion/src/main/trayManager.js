@@ -1,4 +1,5 @@
 import { app, Menu, Notification, Tray, nativeImage, screen } from 'electron';
+import { settingsMenuItem } from './settingsWindowManager.js';
 import { CONFIG } from './config.js';
 import { logger } from './logger.js';
 
@@ -115,6 +116,7 @@ export class TrayManager {
     }
 
     const contextMenu = Menu.buildFromTemplate([
+      settingsMenuItem(() => this.handlers.onOpenSettings?.()),
       {
         label: shortcutLabel(state.isVisible ? 'Sembunyikan Avatar' : 'Tampilkan Avatar', 'toggleAvatarVisibility'),
         click: () => this.handlers.onToggleVisible?.(),

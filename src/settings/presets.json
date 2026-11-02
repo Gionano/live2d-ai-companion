@@ -1,0 +1,8 @@
+[
+  { "id": "custom", "labelKey": "preset.custom", "adapter": "openaiCompatible", "baseUrl": "" },
+  { "id": "compatible", "labelKey": "preset.compatible", "adapter": "openaiCompatible", "baseUrl": "" },
+  { "id": "openai", "labelKey": "preset.openai", "adapter": "openaiCompatible", "baseUrl": "https://api.openai.com/v1", "maintainerVerificationRequired": true },
+  { "id": "groq", "labelKey": "preset.groq", "adapter": "openaiCompatible", "baseUrl": "https://api.groq.com/openai/v1", "maintainerVerificationRequired": true },
+  { "id": "anthropic", "labelKey": "preset.anthropic", "adapter": "anthropicNative", "baseUrl": "https://api.anthropic.com", "maintainerVerificationRequired": true },
+  { "id": "fish", "labelKey": "preset.fish", "adapter": "fishAudio", "baseUrl": "" }
+]

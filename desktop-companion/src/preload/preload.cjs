@@ -12,6 +12,7 @@ const desktopBridge = Object.freeze({
    * Mengambil informasi dasar aplikasi & konfigurasi runtime non-rahasia (FPS overlay, mode, versi).
    */
   getAppInfo: () => ipcRenderer.invoke('desktop:get-app-info'),
+  openSettings: (firstRun = false) => ipcRenderer.invoke('desktop:open-settings', firstRun === true),
 
   /**
    * Mengambil state overlay saat ini (preset aktif, konfigurasi framing, status editMode & clickThrough).

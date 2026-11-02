@@ -15,6 +15,7 @@ import {
 import { startProductionStaticServer } from './staticServer.js';
 import { clampBoundsToWorkArea, windowStateStore } from './windowStateStore.js';
 import { TrayManager } from './trayManager.js';
+import { SettingsWindowManager } from './settingsWindowManager.js';
 import { loadShortcutConfig, registerShortcuts } from './shortcutManager.js';
 import { captureService } from './captureService.js';
 import { selfieWindowManager } from './selfieWindowManager.js';
@@ -46,6 +47,7 @@ if (!gotTheLock) {
 }
 
 let overlayWindow = null;
+const settingsWindowManager = new SettingsWindowManager({ BrowserWindow });
 let backendProcess = null;
 let staticServerInstance = null;
 let trayManager = null;
@@ -440,6 +442,17 @@ function registerIpcHandlers() {
       overlayFpsLimit: CONFIG.overlay.fpsLimit,
       subtitleHideDelayMs: CONFIG.overlay.subtitleHideDelayMs,
     };
+  });
+
+  ipcMain.handle('desktop:open-settings', async (event, firstRun) => {
+    assertTrustedSender(event, 'desktop:open-settings');
+    try {
+      await settingsWindowManager.open(overlayWindow.webContents.getURL());
+      if (firstRun === true) settingsWindowManager.window?.once('closed', () => {
+        if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.reload();
+      });
+      return { ok: true };
+    } catch { return { ok: false }; }
   });
 
   ipcMain.handle('desktop:get-overlay-state', (event) => {
@@ -878,6 +891,12 @@ function selectMonitor(displayId, reason = 'select-monitor') {
 
 function setupSystemTray() {
   trayManager = new TrayManager({
+    onOpenSettings: () => {
+      const frontendUrl = overlayWindow?.webContents.getURL();
+      if (frontendUrl) void settingsWindowManager.open(frontendUrl).catch(() => {
+        trayManager?.notify('Pengaturan', 'Pengaturan hanya tersedia melalui frontend lokal.');
+      });
+    },
     getState: () => ({
       activePreset: windowStateStore.getActivePresetId(),
       activeDisplayId: windowStateStore.state.activeDisplayId,
@@ -1004,6 +1023,7 @@ app.on('before-quit', () => {
   }
   selfieCommands.clear();
   trayManager?.destroy();
+  settingsWindowManager.close();
   captureService.destroy();
   stopBackendProcess();
   if (staticServerInstance) {

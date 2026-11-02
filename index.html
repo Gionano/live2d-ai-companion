@@ -4,14 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Amika Live2D Companion</title>
-    <script>
-      if (window.desktopBridge) {
-        document.documentElement.classList.add('electron-mode');
-      }
-      if (new URLSearchParams(window.location.search).get('mode') === 'overlay') {
-        document.documentElement.classList.add('overlay-mode');
-      }
-    </script>
     <style>
       :root {
         --pip-width: 35vw;
@@ -423,7 +415,6 @@
     <div id="status">Memuat model…</div>
 
     <script src="/vendor/live2d/live2dcubismcore.min.js"></script>
-    <script type="module" src="/src/main.js"></script>
-    <script type="module" src="/src/companion.js"></script>
+    <script type="module" src="/src/bootstrap.js"></script>
   </body>
 </html>

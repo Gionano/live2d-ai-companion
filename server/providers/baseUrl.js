@@ -1,4 +1,5 @@
-import { isIP } from 'node:net';
+// URL parsing below validates/canonicalizes IP literals; keep this helper browser-safe.
+const isIP = host => /^\d+\.\d+\.\d+\.\d+$/.test(host) ? 4 : host.includes(':') ? 6 : 0;
 
 const INVALID_URL = 'baseUrl must be an HTTP(S) endpoint (WS(S) for Fish), without credentials, query or fragment.';
 const METADATA_HOSTS = new Set(['metadata.google.internal', 'metadata.goog', 'instance-data', 'instance-data.ec2.internal']);
