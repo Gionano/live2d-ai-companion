@@ -11,7 +11,11 @@ export class Adapter {
   }
 
   run(factory, request = {}) {
-    return resilientStream(factory, { ...this.resilience, ...this.context, signal: request.signal,
+    let first = true;
+    return resilientStream(context => factory({ ...context, touch: () => {
+      context.touch();
+      if (first) { first = false; request.onProgress?.('first_byte'); }
+    } }), { ...this.resilience, ...this.context, signal: request.signal,
       timeouts: { ...this.timeouts, ...request.timeouts } });
   }
 

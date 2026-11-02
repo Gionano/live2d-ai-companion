@@ -1,4 +1,3 @@
-import { deepMerge } from '../selfie/localPaths.js';
 import { loadProvidersConfig, resolveSlot, effectiveProfile, slotProblem } from './config.js';
 import { OpenAiCompatible } from './adapters/openaiCompatible.js';
 import { AnthropicNative } from './adapters/anthropicNative.js';
@@ -54,9 +53,12 @@ export class ProviderRegistry {
     const settings = resolveSlot(this.config, slot) ?? {};
     const params = profile && profile !== settings.profile
       ? { ...settings.params, bodyExtras: null, omitParams: null } : settings.params;
-    return new ProviderRegistry({ config: deepMerge(this.config, { slots: { [slot]: {
+    const config = structuredClone(this.config);
+    config.slots ||= {};
+    config.slots[slot] = {
       ...settings, params, ...(profile && { profile }), ...(model && { model }),
-    } } }), secretResolver: this.secretResolver, adapterOptions: this.adapterOptions });
+    };
+    return new ProviderRegistry({ config, secretResolver: this.secretResolver, adapterOptions: this.adapterOptions });
   }
 }
 

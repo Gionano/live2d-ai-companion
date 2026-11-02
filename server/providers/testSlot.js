@@ -41,22 +41,23 @@ export function shortWav() {
 }
 
 // This helper performs real calls only when explicitly invoked, never at import.
-export async function testSlot(slot, { profile, model, signal, registry = getProviderRegistry() } = {}) {
+export async function testSlot(slot, { profile, model, signal, onProgress = () => {}, registry = getProviderRegistry() } = {}) {
   const startedAt = performance.now();
   const active = profile || model ? registry.withSlotOverride(slot, { profile, model }) : registry;
   const status = active.getSlotStatus(slot);
   const result = { ok: false, latencyMs: 0, details: { slot, profile: status.profile, model: status.model, adapter: status.adapter } };
   try {
+    onProgress('connecting');
     if (!status.available) {
       result.error = { code: status.reason?.startsWith('Missing key') ? 'AUTH' : 'UNSUPPORTED', message: status.reason };
       return result;
     }
     if (slot === 'stt') {
-      const response = await active.getStt().transcribe({ audio: shortWav(), filename: 'probe.wav', mime: 'audio/wav', signal });
+      const response = await active.getStt().transcribe({ audio: shortWav(), filename: 'probe.wav', mime: 'audio/wav', signal, onProgress });
       if (typeof response.text !== 'string') throw new ProviderError('BAD_RESPONSE');
       result.details.characters = response.text.length;
     } else if (slot === 'tts') {
-      for await (const event of active.getTts().stream({ text: 'Halo sayang.', signal })) {
+      for await (const event of active.getTts().stream({ text: 'Halo sayang.', signal, onProgress })) {
         if (!event.data.length) continue;
         result.ttftMs = Math.round(performance.now() - startedAt);
         result.details.format = event.format;
@@ -66,7 +67,7 @@ export async function testSlot(slot, { profile, model, signal, registry = getPro
     } else {
       const content = slot === 'vision' ? [{ type: 'image', mime: 'image/png', base64: tinyPng().toString('base64') },
         { type: 'text', text: 'Name the main color in one word.' }] : 'Reply with OK.';
-      for await (const event of active.getLlm(slot).stream({ messages: [{ role: 'user', content }], maxTokens: 16, signal })) {
+      for await (const event of active.getLlm(slot).stream({ messages: [{ role: 'user', content }], maxTokens: 16, signal, onProgress })) {
         if (event.type === 'text' && event.delta && result.ttftMs === undefined) result.ttftMs = Math.round(performance.now() - startedAt);
         if (event.type === 'usage') {
           result.tokens ??= {};
@@ -82,6 +83,7 @@ export async function testSlot(slot, { profile, model, signal, registry = getPro
     result.error = { code: safe.code, message: safe.message };
   } finally {
     result.latencyMs = Math.round(performance.now() - startedAt);
+    onProgress('done');
   }
   return result;
 }

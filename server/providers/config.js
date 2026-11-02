@@ -47,7 +47,7 @@ export function loadProvidersConfig({ repoRoot = ROOT_DIR, env = process.env,
 
 export function resolveSlot(config, slot) {
   const value = config.slots?.[slot];
-  return value === undefined && ['planner', 'visionFilter'].includes(slot) ? config.slots?.llm : value;
+  return (value === undefined || value?.followLlm) && ['planner', 'visionFilter'].includes(slot) ? config.slots?.llm : value;
 }
 
 export function effectiveProfile(config, slotConfig) {
