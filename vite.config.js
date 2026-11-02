@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SELFIE_PATH = /^\/api\/selfies(?:\/|$)/i;
+const SELFIE_PATH = /^\/api\/(?:selfies|settings)(?:\/|$)/i;
 
 const selfieImagePolicy = {
   name: 'selfie-image-policy',
@@ -39,6 +39,7 @@ function configureApiProxy(proxy) {
   });
   proxy.on('proxyRes', (proxyRes, req, res) => {
     if (!SELFIE_PATH.test(req.url?.split('?')[0] || '')) return;
+    proxyRes.headers['cache-control'] = 'no-store';
     // Vite's CORS middleware runs before its proxy. Images must remain without CORS.
     for (const name of res.getHeaderNames()) {
       if (String(name).toLowerCase().startsWith('access-control-')) res.removeHeader(name);

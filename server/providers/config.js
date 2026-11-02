@@ -25,6 +25,13 @@ function readConfig(filename) {
   }
 }
 
+export function readProviderLayers({ repoRoot = ROOT_DIR } = {}) {
+  return {
+    defaults: deepMerge(DEFAULT_CONFIG, readConfig(path.join(repoRoot, 'providers.config.json'))),
+    dev: readConfig(path.join(repoRoot, 'providers.config.local.json')),
+  };
+}
+
 export function loadProvidersConfig({ repoRoot = ROOT_DIR, env = process.env,
   configPath = path.join(repoRoot, 'providers.config.json'), localPath = path.join(repoRoot, 'providers.config.local.json'),
   overrides = {} } = {}) {
@@ -75,7 +82,8 @@ export function slotProblem(config, slot, resolver = { resolve: name => process.
   if (profile.apiKeyEnv != null) {
     if (typeof profile.apiKeyEnv !== 'string' || !/^[A-Z_][A-Z0-9_]*$/i.test(profile.apiKeyEnv)) return 'apiKeyEnv must name an environment variable.';
     try {
-      if (!resolver.resolve(profile.apiKeyEnv)) return `Missing key environment variable ${profile.apiKeyEnv}. Set it in the backend environment.`;
+      const hasKey = resolver.hasKey ? resolver.hasKey(settings.profile, profile) : resolver.resolve(profile.apiKeyEnv);
+      if (!hasKey) return `Missing key environment variable ${profile.apiKeyEnv}. Set it in the backend environment or settings secret store.`;
     } catch { return 'The secret resolver could not read the configured key. Check the backend environment.'; }
   }
   try {

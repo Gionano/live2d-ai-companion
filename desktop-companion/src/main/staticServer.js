@@ -60,7 +60,8 @@ export async function startProductionStaticServer(staticRootDir, { backendUrl = 
     const server = http.createServer((req, res) => {
       try {
         const reqUrl = new URL(req.url || '/', 'http://127.0.0.1');
-        if (/^\/api\/selfies(?:\/|$)/i.test(reqUrl.pathname)) {
+        const privateApi = /^\/api\/(?:selfies|settings)(?:\/|$)/i.test(reqUrl.pathname);
+        if (privateApi) {
           res.setHeader('Cache-Control', 'no-store');
         }
 
@@ -75,6 +76,12 @@ export async function startProductionStaticServer(staticRootDir, { backendUrl = 
               headers: getProxyHeaders(req, backendHost, backendPort),
             },
             (proxyRes) => {
+              if (privateApi) {
+                proxyRes.headers['cache-control'] = 'no-store';
+                for (const name of Object.keys(proxyRes.headers)) {
+                  if (name.toLowerCase().startsWith('access-control-')) delete proxyRes.headers[name];
+                }
+              }
               res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
               proxyRes.pipe(res, { end: true });
             },

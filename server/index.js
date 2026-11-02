@@ -24,7 +24,9 @@ import {
 } from './llmChat.js';
 import { transcribeAudio } from './sttTranscribe.js';
 import { generateSpeech, isSpeechConfigured as isVoiceConfigured } from './ttsGenerate.js';
-import { getSlotStatus, UNAVAILABLE_MESSAGES } from './providers/registry.js';
+import { getProviderRegistry, getSlotStatus, UNAVAILABLE_MESSAGES } from './providers/registry.js';
+import { getSettingsService } from './settings/service.js';
+import { installSettingsRoutes } from './settings/routes.js';
 import { SpeechController } from './speechController.js';
 import {
   companionSessionClosed,
@@ -49,6 +51,8 @@ import { installSelfieImagePolicy, installSelfieImageRoutes } from './selfie/ima
 import { watchSelfieConfig } from './selfie/config.js';
 
 const app = express();
+const providerSettings = getSettingsService();
+installSettingsRoutes(app, { service: providerSettings, registry: getProviderRegistry(), imageStatus: () => jobManager.getProviderStatus() });
 installSelfieImagePolicy(app, jobManager);
 // Frame base64 bisa lumayan besar — naikkan limit body JSON.
 app.use(express.json({ limit: '12mb' }));
@@ -283,6 +287,7 @@ function broadcastToCompanions(obj) {
 
 // Hubungkan broadcaster JobManager ke semua socket companion
 jobManager.setBroadcaster(broadcastToCompanions);
+providerSettings.setBroadcaster(broadcastToCompanions);
 void jobManager.refreshProviderStatus({ force: true }).catch((err) => {
   console.warn(`[selfie] Provider startup check failed: ${err.message}`);
 });
