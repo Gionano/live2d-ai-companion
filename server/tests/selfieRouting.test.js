@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { settingsMenuItem } from '../../desktop-companion/src/main/settingsWindowManager.js';
 
 const companionSource = fs.readFileSync(new URL('../../src/companion.js', import.meta.url), 'utf8');
 const mainSource = fs.readFileSync(new URL('../../desktop-companion/src/main/index.js', import.meta.url), 'utf8');
@@ -18,6 +19,7 @@ test('tray exposes the persisted Pap toggle and gallery actions', () => {
   const toggles = [];
   let galleries = 0;
   const context = vm.createContext({
+    settingsMenuItem,
     Buffer,
     process: { execPath: 'electron.exe' },
     app: { isPackaged: true, getLoginItemSettings: () => ({ openAtLogin: false }) },

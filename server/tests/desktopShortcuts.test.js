@@ -8,6 +8,7 @@ import { EventEmitter } from 'node:events';
 import { CONFIG } from '../../desktop-companion/src/main/config.js';
 import { loadShortcutConfig, registerShortcuts } from '../../desktop-companion/src/main/shortcutManager.js';
 import { SpeechController } from '../speechController.js';
+import { settingsMenuItem } from '../../desktop-companion/src/main/settingsWindowManager.js';
 
 const desktopSource = fs.readFileSync(new URL('../../desktop-companion/src/main/index.js', import.meta.url), 'utf8');
 const clientSource = fs.readFileSync(new URL('../../src/companion.js', import.meta.url), 'utf8');
@@ -131,7 +132,7 @@ function desktopHarness(t, outcomes = {}) {
     constructor(options) { this.options = options; }
     show() { h.notices.push(this.options); }
   }
-  const context = vm.createContext({ ...h, path, Buffer, CONFIG, overlayWindow: overlay, ipcMain,
+  const context = vm.createContext({ ...h, path, Buffer, CONFIG, settingsMenuItem, overlayWindow: overlay, ipcMain,
     process: { env: { DESKTOP_SHORTCUTS_PATH: path.join(directory, 'shortcuts.json') }, execPath: process.execPath },
     app: { isPackaged: false, getAppPath: () => directory, getLoginItemSettings: () => ({}) },
     screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display },
