@@ -6,7 +6,9 @@
 // ---------------------------------------------------------------------------
 import fs from 'node:fs';
 import path from 'node:path';
-import { getLlm } from '../providers/registry.js';
+import { getProviderRegistry } from '../providers/registry.js';
+import { normalizeSpeechEmotion, speechEmotionPrompt } from '../speechEmotionPrompt.js';
+import { resolveTtsParams, sanitizeSpeechText } from '../ttsExpression.js';
 import { loadSelfieConfig } from './config.js';
 import { checkModeration } from './moderation.js';
 import { normalizeSlots } from './slotMatcher.js';
@@ -118,6 +120,7 @@ export async function planSelfie({
   config = null,
   llmProvider,
   signal,
+  registry = getProviderRegistry(),
 }) {
   signal?.throwIfAborted();
   const cfg = config || loadSelfieConfig();
@@ -145,7 +148,10 @@ export async function planSelfie({
   const availableRefs = getAvailableReferences(cfg.referenceDir);
 
   // 3. Panggil LLM Cloud dengan skema JSON ketat
-  const systemPrompt = buildPlannerSystemPrompt(card, availableRefs);
+  const ttsParams = resolveTtsParams(registry.getTts?.()?.params);
+  const nativePrompt = registry.getSlotStatus('tts').available
+    ? speechEmotionPrompt(ttsParams, 'selfie') : '';
+  const systemPrompt = [buildPlannerSystemPrompt(card, availableRefs), nativePrompt].filter(Boolean).join('\n\n');
   const userContent = userText ? `Permintaan user: "${userText}"` : 'User meminta foto selfie santai.';
 
   // Siapkan pesan percakapan singkat untuk konteks (ambil 2 turn terakhir jika ada)
@@ -175,7 +181,7 @@ export async function planSelfie({
   const timeoutHandle = setTimeout(() => controller.abort(), cfg.plannerTimeoutMs || 20000);
   try {
 
-    const provider = llmProvider ?? getLlm('planner');
+    const provider = llmProvider ?? registry.getLlm('planner');
     const completion = provider ? await provider.complete({ messages, signal: controller.signal }) : null;
     signal?.throwIfAborted();
 
@@ -194,6 +200,9 @@ export async function planSelfie({
 
   // 4. Normalisasi slot terhadap whitelist (otomatis fallback ke default jika JSON rusak atau nilai di luar whitelist)
   const normalizedSlots = normalizeSlots(rawJson, card, availableRefs);
+  const caption = sanitizeSpeechText(normalizedSlots.caption, ttsParams);
+  normalizedSlots.caption = caption.displayText;
+  const speechEmotion = nativePrompt ? normalizeSpeechEmotion(rawJson?.speechEmotion) : undefined;
 
   // 5. Susun prompt deterministik dari template
   const promptData = buildPrompt(normalizedSlots, card, cfg);
@@ -231,6 +240,8 @@ export async function planSelfie({
       referenceImage: promptData.referenceImage,
       caption: normalizedSlots.caption,
       emotion: normalizedSlots.emotion,
+      ...(speechEmotion && { speechEmotion }),
+      ...(caption.ttsText !== caption.displayText && { captionSpeechText: caption.ttsText }),
     },
   };
 }

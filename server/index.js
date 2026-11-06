@@ -28,6 +28,7 @@ import { getProviderRegistry, getSlotStatus, UNAVAILABLE_MESSAGES } from './prov
 import { getSettingsService } from './settings/service.js';
 import { installSettingsRoutes } from './settings/routes.js';
 import { SpeechController } from './speechController.js';
+import { stripSpeechTags } from './ttsExpression.js';
 import {
   companionSessionClosed,
   companionSessionOpened,
@@ -305,14 +306,14 @@ function playSpokenMessage(text, emotion = 'sayang', socket, turnId) {
   return speechController.play({ text, emotion, recipients: [socket], turnId });
 }
 
-function enqueueSpeech(text, emotion = 'sayang') {
-  return speechController.play({ text, emotion, deferred: true });
+function enqueueSpeech(text, emotion = 'sayang', { speechEmotion } = {}) {
+  return speechController.play({ text, emotion, speechEmotion, deferred: true });
 }
 
-jobManager.setSpeechHandler(({ text, emotion }) => {
-  void enqueueSpeech(text, emotion);
+jobManager.setSpeechHandler(({ text, emotion, speechEmotion }) => {
+  void enqueueSpeech(text, emotion, { speechEmotion });
 });
-streamingVisionManager.setSpeechHandler((text, emotion) => enqueueSpeech(text, emotion));
+streamingVisionManager.setSpeechHandler((text, emotion, options) => enqueueSpeech(text, emotion, options));
 
 function sendVisionInit(sock) {
   if (sock.readyState !== WebSocket.OPEN) return;
@@ -542,18 +543,19 @@ wss.on('connection', (socket, req) => {
         console.log(`[spontaneous] Diabaikan: percakapan sedang "${socket.conversationState}"`);
         return;
       }
-      const { text, emotion = 'netral' } = msg;
+      const { text, emotion = 'netral', speechEmotion } = msg;
       if (!text) return;
-      console.log(`[spontaneous] Komentar visual diterima dari vision-monitor: "${text}" (${emotion})`);
+      const displayText = stripSpeechTags(text);
+      console.log(`[spontaneous] Komentar visual diterima dari vision-monitor: "${displayText}" (${emotion})`);
 
       markConversationActivity();
-      history.push({ role: 'assistant', content: text });
+      history.push({ role: 'assistant', content: displayText });
       if (history.length > HISTORY_MESSAGE_LIMIT) {
         history.splice(0, history.length - HISTORY_MESSAGE_LIMIT);
       }
 
-      broadcastToAll({ type: 'vision', text: `[Spontan] ${text}` });
-      await enqueueSpeech(text, emotion);
+      broadcastToAll({ type: 'vision', text: `[Spontan] ${displayText}` });
+      await enqueueSpeech(text, emotion, { speechEmotion });
       return;
     }
 
@@ -777,7 +779,7 @@ wss.on('connection', (socket, req) => {
 
       let replyEmotion = 'netral';
 
-      async function speak(sentence, idx, say, emotion) {
+      async function speak(sentence, idx, say, emotion, speechEmotion) {
         const isFirst = idx === 0;
         if (isFirst) tTtsStart = performance.now();
         await say(sentence, emotion, () => {
@@ -792,7 +794,7 @@ wss.on('connection', (socket, req) => {
                 ` | total to first audio: ${ms(tPipe, tFirstAudioOut)}ms`,
             );
           }
-        });
+        }, { speechEmotion });
       }
 
       await speechController.play({
@@ -820,7 +822,8 @@ wss.on('connection', (socket, req) => {
                 }
                 const idx = sentenceIdx++;
                 const emotion = replyEmotion;
-                ttsChain = ttsChain.then(() => speak(ev.text, idx, say, emotion));
+                const speechEmotion = ev.speechEmotion;
+                ttsChain = ttsChain.then(() => speak(ev.text, idx, say, emotion, speechEmotion));
               }
             }
           } finally {

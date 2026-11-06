@@ -26,7 +26,8 @@ for (const spec of ADAPTER_CASES) {
     if (spec.audio) {
       assert.ok(events.every(event => Buffer.isBuffer(event.data) && event.format === 'mp3'));
       assert.deepEqual(state.frames, [
-        { event: 'start', request: { text: '', reference_id: 'fixture-voice', format: 'mp3', latency: 'low' } },
+        { event: 'start', request: { text: '', reference_id: 'fixture-voice', format: 'mp3', latency: 'balanced',
+          temperature: 0.8, top_p: 0.7, prosody: { speed: 1, volume: 0 } } },
         { event: 'text', text: '[happy] Halo sayang.' }, { event: 'flush' }, { event: 'stop' },
       ]);
       assert.equal(state.requests[0].headers.model, 'fixture-model');

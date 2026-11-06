@@ -178,7 +178,7 @@ test('configuration parse errors never echo malformed private contents', t => {
 
 test('llmChat preserves structured emotions, escaped chunks and sentence splitting with a fake provider', async () => {
   let received;
-  const provider = { async *stream(request) {
+  const provider = { params: { expression: { mergeShortSentences: { enabled: false } } }, async *stream(request) {
     received = request;
     for (const delta of ['{"emotion":"sayang","te', 'xt":"Halo sayang. Aku ', 'suka angka 3.14!\\n', 'Sampai nanti."}']) {
       yield { type: 'text', delta };
@@ -224,9 +224,10 @@ test('TTS delegates canonical events while retaining existing Buffer output and 
   } });
   const signal = new AbortController().signal;
   assert.deepEqual(await collect(generateSpeech('Halo', 'happy', { registry, signal })), [Buffer.from('one'), Buffer.from('two')]);
-  assert.deepEqual(received, { text: 'Halo', emotion: 'happy', signal });
-  for (const emotion of ['happy', 'sad', 'excited', 'surprised', 'shy']) assert.equal(withFishEmotion('Halo', emotion), `[${emotion}] Halo`);
-  assert.equal(withFishEmotion('Halo', 'neutral'), 'Halo');
+  assert.deepEqual(received, { text: 'Halo', emotion: 'happy', signal, sentenceIndex: 0 });
+  for (const emotion of ['happy', 'sad', 'excited', 'surprised']) assert.equal(withFishEmotion('Halo', emotion), `[${emotion}] Halo`);
+  assert.equal(withFishEmotion('Halo', 'shy'), '[embarrassed] Halo');
+  assert.equal(withFishEmotion('Halo', 'neutral'), '[calm] [warm] Halo');
   assert.equal(withFishEmotion('Halo', 'unknown'), 'Halo');
 });
 
@@ -234,7 +235,7 @@ test('Fish adapter uses the dynamic voice configuration when no override is requ
   const { adapter, state } = await fixture(t, ADAPTER_CASES[2]);
   await collect(adapter.stream({ text: 'Halo' }));
   assert.equal(state.frames[0].request.reference_id, getVoiceId());
-  assert.equal(state.frames[1].text, 'Halo');
+  assert.equal(state.frames[1].text, '[calm] [warm] Halo');
 });
 
 test('unconfigured slots degrade gracefully without calling an adapter', async () => {

@@ -9,6 +9,8 @@ import { imagePartFromDataUrl, totalTokens as countTokens } from './providers/ad
 import { markConversationActivity } from './modelWarmup.js';
 import { HISTORY_MESSAGE_LIMIT } from './llmChat.js';
 import { getServerTuning } from './serverConfig.js';
+import { normalizeSpeechEmotion, speechEmotionPrompt } from './speechEmotionPrompt.js';
+import { resolveTtsParams, sanitizeSpeechText } from './ttsExpression.js';
 
 // Cost constants (Groq vision is free-tier / very cheap; 9inference for filter)
 const VISION_COST_PER_1K_TOKENS = 0.0002; // Qwen 3.8 27B (Groq) — estimate
@@ -292,7 +294,8 @@ export class StreamingVisionManager {
             console.log(`[StreamingVision] Momen terpilih! Amika berkomentar: "${result.text}" (${result.emotion})`);
 
             // 1. Eksekusi langsung ke Companion Utama (TTS & Avatar Speech)
-            await this.executeSpontaneousCommentary(result.text, result.emotion);
+            await this.executeSpontaneousCommentary(result.speechText ?? result.text, result.emotion,
+              { speechEmotion: result.speechEmotion });
 
             // 2. Broadcast hasil filter ke Vision Monitor
             this.broadcast({
@@ -351,13 +354,16 @@ Putuskan apakah Amika harus berkomentar secara spontan sekarang atau SKIP:
     try {
       const filterTemp = getServerTuning('vision', 'filterTemperature', 0.3);
       const filterMaxTok = getServerTuning('vision', 'filterMaxTokens', 150);
+      const ttsParams = resolveTtsParams(this.registry.getTts?.()?.params);
+      const nativePrompt = this.registry.getSlotStatus('tts').available
+        ? speechEmotionPrompt(ttsParams, 'vision') : '';
 
       const response = await this.registry.getLlm('visionFilter').complete({
         signal,
         temperature: filterTemp,
         maxTokens: filterMaxTok,
         messages: [
-          { role: 'system', content: FILTER_SYSTEM_PROMPT },
+          { role: 'system', content: [FILTER_SYSTEM_PROMPT, nativePrompt].filter(Boolean).join('\n\n') },
           { role: 'user', content: userPrompt },
         ],
       });
@@ -374,13 +380,17 @@ Putuskan apakah Amika harus berkomentar secara spontan sekarang atau SKIP:
         .trim();
       const parsed = JSON.parse(cleanJson);
 
-      if (parsed.action === 'COMMENT' && parsed.text) {
-        let emotion = (parsed.emotion || 'netral').toLowerCase();
+      if (parsed.action === 'COMMENT' && typeof parsed.text === 'string' && parsed.text.trim()) {
+        let emotion = typeof parsed.emotion === 'string' ? parsed.emotion.toLowerCase() : 'netral';
         if (!VALID_EMOTIONS.has(emotion)) emotion = 'netral';
+        const speechEmotion = nativePrompt ? normalizeSpeechEmotion(parsed.speechEmotion) : undefined;
+        const text = sanitizeSpeechText(parsed.text.trim(), ttsParams);
         return {
           action: 'COMMENT',
           emotion,
-          text: parsed.text.trim(),
+          text: text.displayText,
+          ...(speechEmotion && { speechEmotion }),
+          ...(text.ttsText !== text.displayText && { speechText: text.ttsText }),
           tokens: totalTokens,
           latencyMs,
           costUsd,
@@ -406,18 +416,20 @@ Putuskan apakah Amika harus berkomentar secara spontan sekarang atau SKIP:
     }
   }
 
-  async executeSpontaneousCommentary(text, emotion) {
+  async executeSpontaneousCommentary(text, emotion, { speechEmotion } = {}) {
     markConversationActivity();
+    const sanitized = sanitizeSpeechText(text, this.registry.getTts?.()?.params);
+    const nativeEmotion = normalizeSpeechEmotion(speechEmotion);
 
     if (this.historyRef && Array.isArray(this.historyRef)) {
-      this.historyRef.push({ role: 'assistant', content: text });
+      this.historyRef.push({ role: 'assistant', content: sanitized.displayText });
       if (this.historyRef.length > HISTORY_MESSAGE_LIMIT) {
         this.historyRef.splice(0, this.historyRef.length - HISTORY_MESSAGE_LIMIT);
       }
     }
 
-    this.broadcast({ type: 'vision', text: `[Spontan] ${text}` });
-    await this.speechHandler?.(text, emotion);
+    this.broadcast({ type: 'vision', text: `[Spontan] ${sanitized.displayText}` });
+    await this.speechHandler?.(sanitized.ttsText, emotion, { ...(nativeEmotion && { speechEmotion: nativeEmotion }) });
   }
 }
 

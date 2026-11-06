@@ -20,7 +20,7 @@ const json = data => new Response(JSON.stringify(data), { headers: { 'content-ty
 
 test('settings translations have parity and no unused or missing literal keys', () => {
   assert.deepEqual(Object.keys(id).sort(), Object.keys(en).sort());
-  const code = ['src/bootstrap.js', ...fs.readdirSync(new URL('../../src/settings/', import.meta.url)).filter(name => /\.(?:js|json)$/.test(name)).map(name => 'src/settings/' + name)].map(source).join('\n');
+  const code = ['src/bootstrap.js', 'server/fishEmotionTags.js', ...fs.readdirSync(new URL('../../src/settings/', import.meta.url)).filter(name => /\.(?:js|json)$/.test(name)).map(name => 'src/settings/' + name)].map(source).join('\n');
   for (const key of Object.keys(en)) assert.ok(code.includes("'" + key + "'") || code.includes('"' + key + '"'), 'Unused translation: ' + key);
   for (const [, key] of code.matchAll(/\bt\('([^']+)'/g)) assert.ok(Object.hasOwn(en, key), 'Missing translation: ' + key);
   const namespaces = [...new Set(Object.keys(en).map(key => key.split('.')[0]))].join('|');
@@ -131,12 +131,13 @@ class Element {
 }
 const walk = item => [item, ...item.children.flatMap(walk)];
 const settle = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
-async function pageFixture() {
+async function pageFixture(ttsParams = null, language = 'en') {
   const document = { createElement: tag => new Element(tag, document), getElementById: id => walk(document.body).find(value => value.id === id) };
   document.body = new Element('body', document); document.documentElement = {};
   const names = Object.keys(view.SLOT_LABELS);
   const state = { version: 0, settings: { profiles: { sample: { adapter: 'openaiCompatible', baseUrl: 'https://example.invalid/v1' } },
-    slots: Object.fromEntries(names.map(name => [name, name === 'llm' ? { profile: 'sample', model: 'fixture' } : null])), ui: { language: 'en' } },
+    slots: Object.fromEntries(names.map(name => [name, name === 'llm' ? { profile: 'sample', model: 'fixture' }
+      : name === 'tts' && ttsParams ? { profile: 'sample', model: 'fixture-tts', params: ttsParams } : null])), ui: { language } },
     sources: { 'ui.language': 'settings' }, secrets: { sample: { apiKey: { has: false } } } };
   const calls = [];
   const api = { get: async path => structuredClone(path === '/' ? state : path === '/images' ? { ready: false } : {
@@ -147,6 +148,7 @@ async function pageFixture() {
       if (path === '/diagnostics') return { backendName: 'plaintext-file', version: 0, permissionNote: 'OWNER_ONLY_RECOMMENDED',
         writable: true, locations: { 'settings.json': '<local>/settings.json' }, locks: {}, corruptBackups: 0, selfTest: { ok: true, code: null } };
       if (path.startsWith('/profiles/')) { state.settings.profiles.sample = body.profile; state.secrets.sample.apiKey = { has: Boolean(body.secrets?.apiKey) }; }
+      if (path.startsWith('/slots/')) state.settings.slots[path.slice('/slots/'.length)] = body.slot;
       return { version: ++state.version };
     } };
   const bindings = { id, en, presets, setupGuide: '/docs/setup.md', translator, detectLanguage, createSettingsClient, node, ...view, ...wizard };
@@ -164,6 +166,98 @@ test('settings page renders malicious model names using textContent and labelled
     assert.ok(page.nodes().some(label => label.tagName === 'label' && label.attributes.for === input.id));
   }
   assert.ok(page.nodes().some(item => item.attributes['aria-live'] === 'polite'));
+});
+
+test('Fish preset selectors show every Basic and Advanced tag in both languages', async () => {
+  for (const language of ['id', 'en']) {
+    const page = await pageFixture({}, language);
+    const rows = page.nodes().filter(item => item.attributes['data-avatar-emotion']);
+    assert.equal(rows.length, 12);
+    const inputs = walk(rows[0]).filter(item => item.tagName === 'select');
+    assert.equal(inputs.length, 2);
+    for (const input of inputs) {
+      const groups = input.children.filter(item => item.tagName === 'optgroup');
+      assert.deepEqual(groups.map(group => group.children.length), [24, 25]);
+      assert.deepEqual(groups.map(group => group.attributes.label), view.FISH_EMOTION_GROUPS.map(group => (language === 'id' ? id : en)[group.labelKey]));
+      assert.deepEqual(groups.flatMap(group => group.children.map(option => option.attributes.value)), view.FISH_EMOTION_TAGS.map(tag => tag.tag));
+      assert.ok(groups.every(group => group.children.every(option => !option.textContent.startsWith('tts.'))));
+    }
+  }
+});
+
+test('speech emotion selection shows translated choices and defaults to native for existing slots', async () => {
+  for (const language of ['id', 'en']) {
+    const labels = language === 'id' ? id : en;
+    const page = await pageFixture({}, language);
+    const input = page.nodes().find(item => item.tagName === 'select' && item.parent.ownText === labels['tts.selection']);
+    assert.equal(input.value, 'native');
+    assert.deepEqual(input.children.map(option => [option.attributes.value, option.textContent]), [
+      ['native', labels['tts.selectionNative']], ['mapped', labels['tts.selectionMapped']],
+    ]);
+    assert.ok(page.nodes().some(item => item.tagName === 'p' && item.textContent === labels['tts.selectionHelp']));
+    assert.ok(page.nodes().some(item => item.tagName === 'p' && item.textContent === labels['tts.emotionPresetsHelp']));
+  }
+});
+
+test('speech emotion selection saves mapped and native without enabling spoken style or losing mappings', async () => {
+  for (const selection of ['mapped', 'native']) {
+    const originalSelection = selection === 'native' ? 'mapped' : 'native';
+    const page = await pageFixture({ expression: { selection: originalSelection, emotionTagMap: { sayang: '[compassionate]' } },
+      speechStyle: { enabled: false } });
+    const input = page.nodes().find(item => item.tagName === 'select' && item.parent.ownText === en['tts.selection']);
+    assert.equal(input.value, originalSelection);
+    input.value = selection;
+    let form = input.parent;
+    while (form.tagName !== 'form') form = form.parent;
+    form.fire('submit'); await settle();
+    const saved = page.calls.find(call => call.path === '/slots/tts').body.slot.params;
+    assert.equal(saved.expression.selection, selection);
+    assert.equal(saved.expression.emotionTagMap.sayang, '[compassionate]');
+    assert.equal(saved.speechStyle.enabled, false);
+  }
+});
+
+test('Fish preset choices save a two-tag avatar mapping while preserving unrelated entries', async () => {
+  const page = await pageFixture({ expression: { emotionTagMap: { netral: '[calm] [warm]', nostalgic: '[moved]' } } });
+  const row = page.nodes().find(item => item.attributes['data-avatar-emotion'] === 'kagum');
+  const inputs = walk(row).filter(item => item.tagName === 'select');
+  inputs[0].value = '[delighted]'; inputs[0].fire('change');
+  inputs[1].value = '[nostalgic]'; inputs[1].fire('change');
+  let form = row.parent;
+  while (form.tagName !== 'form') form = form.parent;
+  form.fire('submit'); await settle();
+  const saved = page.calls.find(call => call.path === '/slots/tts').body.slot.params.expression.emotionTagMap;
+  assert.equal(saved.kagum, '[delighted] [nostalgic]');
+  assert.equal(saved.netral, '[calm] [warm]');
+  assert.equal(saved.nostalgic, '[moved]');
+});
+
+test('Fish custom JSON edits update selectors and custom selections survive unrelated changes', async () => {
+  const page = await pageFixture({ expression: { emotionTagMap: { netral: '[calm] [warm]' } } });
+  const editor = page.nodes().find(item => item.tagName === 'textarea' && item.parent.ownText === en['tts.emotionMap']);
+  const row = page.nodes().find(item => item.attributes['data-avatar-emotion'] === 'netral');
+  const inputs = walk(row).filter(item => item.tagName === 'select');
+  assert.equal(inputs[1].value, '[warm]');
+  assert.ok(inputs[1].children.some(option => option.tagName === 'option' && option.textContent.includes('[warm]')));
+  editor.value = JSON.stringify({ netral: ['[soft, warm and gentle]', '[compassionate]'], sayang: '[grateful]' }); editor.fire('input');
+  assert.deepEqual(inputs.map(input => input.value), ['[soft, warm and gentle]', '[compassionate]']);
+  inputs[1].value = '[moved]'; inputs[1].fire('change');
+  assert.deepEqual(JSON.parse(editor.value), { netral: '[soft, warm and gentle] [moved]', sayang: '[grateful]' });
+  const savedSelectors = inputs.map(input => input.value);
+  editor.value = '{broken'; editor.fire('input');
+  assert.deepEqual(inputs.map(input => input.value), savedSelectors);
+  inputs[0].value = '[calm]'; inputs[0].fire('change');
+  assert.equal(editor.value, '{broken');
+  assert.equal(page.calls.some(call => call.path === '/slots/tts'), false);
+});
+
+test('Fish preset None selections disable an emotion without deleting the mapping', async () => {
+  const page = await pageFixture({ expression: { emotionTagMap: { kagum: '[excited] [happy]' } } });
+  const row = page.nodes().find(item => item.attributes['data-avatar-emotion'] === 'kagum');
+  const inputs = walk(row).filter(item => item.tagName === 'select');
+  for (const input of inputs) { input.value = ''; input.fire('change'); }
+  const editor = page.nodes().find(item => item.tagName === 'textarea' && item.parent.ownText === en['tts.emotionMap']);
+  assert.deepEqual(JSON.parse(editor.value).kagum, []);
 });
 test('settings page saves profile secrets once and never repopulates the password field', async () => {
   const page = await pageFixture();

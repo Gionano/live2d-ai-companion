@@ -4,15 +4,26 @@ import { getVoiceId } from '../../voiceConfig.js';
 import { Adapter } from './shared.js';
 import { ProviderError, httpProviderError } from '../errors.js';
 import { validateBaseUrl, validateProviderHeaders } from '../baseUrl.js';
+import { prepareTtsText, resolveTtsParams } from '../../ttsExpression.js';
+import { FISH_EMOTION_NAMES } from '../../fishEmotionTags.js';
 
 export const capabilities = { llm: false, images: false, jsonMode: false, stt: false, tts: true };
-const FISH_EMOTION_TAG = {
-  happy: '[happy]', sad: '[sad]', excited: '[excited]', surprised: '[surprised]', shy: '[shy]', neutral: '',
-};
-
 export function withFishEmotion(text, emotion = 'neutral') {
-  const tag = FISH_EMOTION_TAG[emotion] ?? '';
-  return tag ? `${tag} ${text}` : text;
+  return prepareTtsText(text, emotion);
+}
+
+function debugRequest(details, credentials, headers) {
+  const secrets = [];
+  const collect = value => {
+    if (typeof value === 'string' && value) secrets.push(value);
+    else if (value && typeof value === 'object') Object.values(value).forEach(collect);
+  };
+  collect(credentials); collect(headers);
+  let safe = JSON.stringify(details);
+  for (const value of secrets.sort((a, b) => b.length - a.length)) safe = safe.split(JSON.stringify(value).slice(1, -1)).join('[REDACTED]');
+  safe = safe.replace(/\bBearer\s+[^\s"\\]+/gi, 'Bearer [REDACTED]')
+    .replace(/\b(?:sk-|gsk_|gh[pousr]_|github_pat_|hf_|AIza)[a-z0-9_-]{12,}/gi, '[REDACTED]');
+  console.log('[tts:debug]', safe);
 }
 
 export class FishAudio extends Adapter {
@@ -31,7 +42,24 @@ export class FishAudio extends Adapter {
       try { validateProviderHeaders(credentials.headers); }
       catch { throw new ProviderError('BAD_REQUEST', this.context); }
       const key = credentials.apiKey;
-      const format = request.format ?? this.params.format ?? 'mp3';
+      const params = resolveTtsParams(this.params, request);
+      const format = params.format ?? 'mp3';
+      const voice = params.voice ?? getVoiceId();
+      if (!Number.isFinite(params.temperature) || params.temperature < 0 || params.temperature > 2
+        || !Number.isFinite(params.topP) || params.topP <= 0 || params.topP > 1
+        || !['normal', 'balanced', 'low'].includes(params.latency)
+        || !Number.isFinite(params.prosody.speed) || params.prosody.speed < 0.5 || params.prosody.speed > 2
+        || !Number.isFinite(params.prosody.volume) || params.prosody.volume < -20 || params.prosody.volume > 20
+        || !['mp3', 'wav', 'pcm', 'opus'].includes(format) || typeof voice !== 'string'
+        || !Number.isSafeInteger(request.sentenceIndex ?? 0) || (request.sentenceIndex ?? 0) < 0) {
+        throw new ProviderError('BAD_REQUEST', this.context);
+      }
+      const speechEmotion = FISH_EMOTION_NAMES.includes(request.speechEmotion) ? request.speechEmotion : undefined;
+      const finalText = prepareTtsText(request.text, request.emotion ?? 'netral', params,
+        request.sentenceIndex ?? 0, request.tag, speechEmotion);
+      if (!finalText) return;
+      const startRequest = { text: '', reference_id: voice, format, latency: params.latency,
+        temperature: params.temperature, top_p: params.topP, prosody: params.prosody };
       const ws = new WebSocket(endpoint.url, { followRedirects: false, headers: { ...this.profile.extraHeaders, ...credentials.headers,
         ...(key && { Authorization: `Bearer ${key}` }), model: this.model } });
       const queue = [];
@@ -60,9 +88,13 @@ export class FishAudio extends Adapter {
       if (signal.aborted) onAbort();
       ws.on('open', () => {
         if (signal.aborted) return;
-        ws.send(encode({ event: 'start', request: { text: '', reference_id: request.voice ?? this.params.voice ?? getVoiceId(),
-          format, latency: 'low' } }));
-        ws.send(encode({ event: 'text', text: withFishEmotion(request.text, request.emotion) }));
+        if (params.debug || /^(?:1|true|on)$/i.test(process.env.TTS_DEBUG ?? '')) {
+          debugRequest({ text: finalText, emotion: request.emotion ?? 'netral', speechEmotion,
+            sentenceIndex: request.sentenceIndex ?? 0,
+            model: this.model, params: startRequest }, credentials, this.profile.extraHeaders);
+        }
+        ws.send(encode({ event: 'start', request: startRequest }));
+        ws.send(encode({ event: 'text', text: finalText }));
         ws.send(encode({ event: 'flush' }));
         ws.send(encode({ event: 'stop' }));
       });

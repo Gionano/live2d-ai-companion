@@ -1,8 +1,8 @@
-# Providers (P1–P2)
+# Providers (P1–P3)
 
 The backend selects providers for chat, vision, speech recognition and speech
 synthesis through a shared registry. P2 adds a local settings store, credential
-backends and a protected settings API; there is no settings GUI yet. See
+backends and a protected settings API; P3 adds the local settings GUI. See
 [Settings](settings.md) for the schema, layering, secret storage and API. Image
 generation continues to use `server/selfie/imageProvider.js` and selfie gating.
 
@@ -161,9 +161,9 @@ safe provider errors omit response bodies and credentials.
   `avgLogprob`, and `compressionRatio`; absent fields stay absent. The existing
   average no-speech check runs only when every segment supplies its input. The
   phrase hallucination filter remains active without metadata.
-- TTS `stream({text, emotion?, voice?, format?, signal?})` yields
+- TTS `stream({text, emotion?, speechEmotion?, voice?, format?, signal?})` yields
   `{type:'audio', data: Buffer, format}`. Fish defaults to the dynamic voice ID in
-  `voiceConfig.js`, MP3 and the existing emotion tags. MessagePack start, text,
+  `voiceConfig.js`, MP3 and the expressive settings below. MessagePack start, text,
   flush and stop frames preserve the previous protocol.
 
 | Adapter | LLM | Images | Native JSON | STT | TTS |
@@ -200,6 +200,204 @@ Adding an adapter requires one adapter file, registration in the registry and
 capability table, and an entry in the shared contract suite. Use the shared
 resilience/error helpers and canonical events. Do not add a second vendor
 interface to business logic.
+
+## TTS expressiveness
+
+Inspection before this change (2026-11-06, original line numbers):
+`server/providers/adapters/fishAudio.js:9–15` recognized only the English labels
+happy/sad/excited/surprised/shy. It prepended one square-bracket tag per request;
+`server/index.js:821–823` made a request for every completed chat sentence.
+All twelve Indonesian reply emotions, including `netral`, therefore received no
+tag. The final text for `netral` was the original sentence, unchanged. No text
+normalizer, legacy-tag removal or inline cue sanitization existed.
+
+`fishAudio.js:63–67` sent MessagePack start (empty text, selected reference ID,
+format default MP3, hardcoded latency `low`), text, flush, stop. Temperature,
+`top_p`, and prosody were omitted. The model came from the TTS slot
+(`server/providers/registry.js:43`) and was sent in a WebSocket header
+(`fishAudio.js:36`); this checkout's resolved TTS slot was unassigned during the
+inspection, so no model was selected and no live call was made.
+`server/llmChat.js:223–244` split on `. ! ? …` followed by whitespace or newline,
+kept decimal dots, and waited when punctuation ended a streaming buffer.
+The final remainder flushed at `:277–279`. No minimum existed: `Ya.` or even `!`
+could become a request.
+
+Configure the following fields under `slots.tts.params`, through the local
+settings GUI/API or the ignored developer override. Existing slot assignments,
+models and credentials are preserved. These are runtime defaults, rather than a
+public provider selection:
+
+```json
+{
+  "temperature": 0.8,
+  "topP": 0.7,
+  "latency": "balanced",
+  "prosody": { "speed": 1, "volume": 0 },
+  "expression": {
+    "selection": "native",
+    "emotionTagMap": {
+      "terkejut": "[surprised]", "marah": "[angry]", "bingung": "[confused]",
+      "jengkel": "[frustrated]", "malu": "[embarrassed]", "kesal": "[upset]",
+      "sedih": "[sad]", "kagum": "[excited]", "sayang": "[empathetic]",
+      "jahil": "[sarcastic]", "penasaran": "[curious]", "netral": "[calm] [warm]"
+    },
+    "tagPlacement": "every-sentence",
+    "maxTagsPerSentence": 2,
+    "mergeShortSentences": { "enabled": true, "minChars": 25, "maxChars": 180 }
+  },
+  "inlineTags": {
+    "enabled": false,
+    "allowList": ["laughs", "sigh", "pause", "whisper", "chuckle", "emphasis", "break"],
+    "maxPerSentence": 2
+  },
+  "speechStyle": { "enabled": true },
+  "debug": false
+}
+```
+
+`balanced` intentionally replaces the former hardcoded `low` to give expressive
+synthesis a less aggressive latency setting. `normal` and `low` remain available
+for manual comparison; audible improvement and provider/model support require
+live listening. Temperature accepts 0–2, topP is greater than 0 through 1,
+speed is 0.5–2, and volume is -20–20 dB. The Fish start frame now receives
+temperature, `top_p`, latency and prosody explicitly. Voice and model resolution
+retain their existing precedence. MP3 is the default; WAV/Opus can be selected.
+PCM is raw audio intended for manual trials with a suitable player, not the
+browser's encoded-audio decoder.
+
+The map uses the supplied Fish core emotions first. **Experimental:** `netral`
+uses the core `[calm]` plus free-form `[warm]` to request gentle neutral warmth;
+`[warm]` is not a documented core emotion and model support may vary. Replace it
+with `[calm]` alone if needed. Map entries accept a bracket-tag string or an array
+of bracket-tag strings; an empty array disables that emotion's prefix. Every
+Basic/Advanced emotion name is accepted directly by TTS, including the CLI;
+shy maps to embarrassed and neutral uses the same experimental mapping as netral.
+
+The local GUI's Fish tag presets include **all 49 supplied emotions**, grouped
+into **24 Basic Emotions** and **25 Advanced Emotions**, with Indonesian/English
+labels and exact bracket tags. Open TTS settings, expand emotion controls and
+the preset editor, then choose a first and optional second tag for each of the
+twelve avatar emotions. Save the slot to apply changes. For example, sayang may
+use `[compassionate]`, or kagum may use `[delighted] [excited]`.
+
+Selectors and the advanced JSON editor stay synchronized. Selecting None can
+disable an emotion prefix; custom/free-form tags such as experimental `[warm]`
+remain editable, and changing one row preserves the other mappings. The shared
+catalogue is `server/fishEmotionTags.js`; the avatar keeps its twelve emotion
+labels. Native selection chooses one catalogue emotion per AI reply. The existing two-tag cap and display
+stripping remain enforced. The settings schema also accepts all 49 catalogue
+names as explicit map keys for manual/backend use.
+
+To listen to one of the new presets with the configured slot:
+
+```text
+npm run tts:try -- --text "Aku teringat waktu itu..." --emotion nostalgic
+npm run tts:try -- --text "Aku di sini, kok." --emotion compassionate
+```
+
+Short complete sentences wait for the next sentence until their combined spoken
+text reaches minChars, would exceed maxChars, or the reply ends. One indivisible
+sentence may exceed maxChars; words are never truncated. Disabling merging
+restores immediate sentence requests. Each lexical sentence starts with its
+own bracket tags even inside a merged request. `first-only` uses a cumulative
+sentence index within each speech, reset for the next reply. Emotion prefixes
+take priority over inline cues; their combined count never exceeds the configured
+cap (0–2). Each encoded audio request has a separate playback boundary.
+
+Before TTS, the normalizer removes emoji, markdown markers, URLs and control
+characters, preserves link-label words and Indonesian spelling, keeps expressive
+punctuation, and caps punctuation runs at three characters. Tags are separate
+from displayed text. Unknown square-bracket content and recognized legacy
+parenthesis emotion tags (including configured tags) are removed; ordinary
+parenthetical prose remains. Inline cues are optional and default off. Enabled
+cues must be in allowList and are relocated to the sentence start, with a maximum
+of two per sentence. `(break)` becomes `[break]` only when explicitly allowed.
+Streaming sanitization buffers split/nested tag delimiters before emitting chat
+text; captions and log/lip-sync text never receive TTS tags.
+Nested parentheses and Markdown labels use an explicit work stack and shared
+delimiter positions. Deep text cannot exhaust the JavaScript call stack; words,
+incomplete-delimiter buffering, label stripping and inline limits are preserved.
+
+### Native Fish emotion selection
+
+`slots.tts.params.expression.selection` defaults to `native`. Chat, spontaneous
+vision comments and selfie captions choose one of the 49 catalogue emotions in
+their existing LLM request. The avatar still receives its twelve Indonesian
+emotion labels. For example, `emotion: "sayang"` controls the avatar while
+`speechEmotion: "compassionate"` produces `[compassionate]` at sentence starts.
+The translated TTS settings selector switches between automatic selection and
+`mapped`, which uses the existing avatar emotion maps. In native mode those maps
+are fallbacks; fixed system messages always retain their mappings.
+
+`server/speechEmotionPrompt.js` appends the catalogue and metadata instructions
+when TTS is available and native mode is selected. This works independently of
+`speechStyle.enabled` and adds no generation call. Chat requests ordered JSON
+`{"emotion":"sayang","speechEmotion":"compassionate","text":"Aku di sini."}`.
+Vision comments and selfie plans add the same optional top-level field alongside
+their existing fields. Selfie speech metadata never becomes an image slot or
+changes the image whitelist, prompt builder, or moderation rules.
+
+Only exact canonical catalogue names without brackets are accepted. Chat reads
+top-level metadata from the header before `text`, then freezes the choice.
+Missing, unknown, malformed or late metadata falls back to the avatar map without
+waiting for more tokens. Nested members and metadata-looking quoted reply text
+cannot change the choice. Each queued sentence snapshots the reply's choice;
+cancellation and concurrent turns cannot carry it into another reply.
+
+Speech playback accepts optional `speechEmotion` in `play()` and TTS requests.
+`say(text, emotion, onChunk, {speechEmotion})` preserves the third callback
+argument. Tag precedence is explicit manual `tag` (including an empty string to
+disable prefixes), then a valid native choice, then the avatar map. Existing
+every-sentence/first-only placement, cumulative indexes, short-sentence merging,
+normalization, inline allow-lists and the combined two-tag cap remain enforced.
+Displayed captions, chat, history and avatar events contain no performance tags
+or native speech metadata. Opt-in TTS debug includes the validated speech emotion
+alongside the avatar emotion; credential redaction and audio exclusion remain in
+place. The persona and moderation configuration remain unchanged.
+
+`server/speechStylePrompt.js` appends spoken-Indonesian writing instructions to
+the chat system prompt only when TTS is available and speechStyle.enabled is true.
+It asks for varied short sentences, natural interjections and expressive
+punctuation, without emoji/markdown. Allowed inline cues are mentioned only when
+enabled. The persona and moderation files are unchanged and hash-tested.
+
+Set `TTS_DEBUG=1` (also accepts true/on) or `slots.tts.params.debug=true` to log
+each request's final tagged text, emotion, sentence index, model and transmitted
+parameters. Audio is never logged. Credential/header values and recognizable key
+patterns are redacted. Debug is opt-in because it exposes spoken conversation
+text to backend logs; ordinary displayed conversation text remains tag-free.
+
+Manual trials use the configured TTS slot and may consume provider quota:
+
+```text
+npm run tts:try -- --text "Wah, aku senang! Kamu sudah kembali." --emotion kagum --variants
+npm run tts:try -- --text "Halo, sayang!" --tag "[excited]" --temperature 0.8 --latency normal --top-p 0.7 --speed 1.05 --voice YOUR_REFERENCE_ID --out YOUR_OUTPUT_DIR
+npm run tts:try -- --help
+```
+
+Every result is written to a unique audio file; default output is a new OS-temp
+directory, and printed results contain paths, first-chunk timing and total time.
+Variants are sequential: plain (all tags off), emotion tag, expressive punctuation,
+temperature 0.8, latency normal, latency balanced. Omitted overrides use the saved
+slot settings. Partial files are removed on failure/cancellation; saved settings
+are not changed and underlying provider errors/secrets are not printed. Automated
+tests use fake loopback Fish WebSocket servers and never invoke live synthesis.
+Use the GUI to save controls and compare the generated files by listening; real
+provider sound and browser/Electron rendering remain manual verification.
+
+Offline verification for the initial expressiveness change: baseline 834/834, final 898/898 tests
+(64 added, zero failures/skips), frontend build (72 modules), privacy (zero failing
+files), syntax/whitespace, and CLI help all pass. The persona/moderation hash
+regressions pass. No live synthesis, dependencies or commits were added.
+The full catalogue extension passes **911/911** tests (13 more), build (73 modules),
+privacy, syntax and whitespace. Fake Fish transport checks exercise all 49 names;
+GUI regressions cover grouping, selection/save, custom tags and JSON synchronization.
+Native selection passes **955/955** tests from the 911-test baseline (44 new,
+zero failures/skips), build (73 modules), privacy and whitespace. Fake LLM/Fish,
+vision/planner and playback tests cover all 49 choices, header freezing, mapped
+fallbacks, cancellation, independent avatar cues and unchanged image/moderation
+behavior. Protected-file hashes remain unchanged; no live calls, dependencies,
+credential changes or commits were made.
 
 ## Validation and manual probes
 

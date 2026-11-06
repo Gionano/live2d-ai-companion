@@ -1,4 +1,5 @@
 import { validateBaseUrl, validateProviderHeaders } from '../providers/baseUrl.js';
+import { FISH_EMOTION_NAMES } from '../fishEmotionTags.js';
 
 export const SETTINGS_LIMIT = 64 * 1024;
 export const SLOT_NAMES = ['llm', 'planner', 'vision', 'visionFilter', 'stt', 'tts'];
@@ -8,7 +9,10 @@ export const PROFILE_FIELDS = ['id', 'adapter', 'baseUrl', 'apiKeyEnv', 'flags',
 export const MODEL_FIELDS = ['flags', 'capabilities', 'bodyExtras', 'omitParams', 'anthropicVersion', 'defaultMaxTokens'];
 export const FLAGS = ['supportsImages', 'supportsStt', 'supportsVerboseStt', 'supportsJsonMode', 'supportsStreamUsage'];
 export const CAPABILITIES = ['llm', 'images', 'jsonMode', 'stt', 'tts'];
-export const PARAMS = ['temperature', 'maxTokens', 'json', 'language', 'prompt', 'voice', 'format', 'bodyExtras', 'omitParams'];
+export const PARAMS = ['temperature', 'maxTokens', 'json', 'language', 'prompt', 'voice', 'format', 'bodyExtras', 'omitParams',
+  'topP', 'latency', 'prosody', 'expression', 'inlineTags', 'speechStyle', 'debug'];
+const TTS_EMOTIONS = [...new Set(['terkejut', 'marah', 'bingung', 'jengkel', 'malu', 'kesal', 'sedih', 'kagum',
+  'sayang', 'jahil', 'penasaran', 'netral', 'shy', 'neutral', ...FISH_EMOTION_NAMES])];
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype', 'safety', 'moderation', 'selfiemoderation',
   'persona', 'personality', 'system', 'instructions', 'messages', 'tools', 'toolchoice']);
 
@@ -84,6 +88,56 @@ function booleans(value, names) {
 function number(value, min, max) {
   if (!Number.isFinite(value) || value < min || value > max) invalid();
 }
+function integer(value, min, max) {
+  number(value, min, max);
+  if (!Number.isSafeInteger(value)) invalid();
+}
+
+export function validateTtsParams(params) {
+  if (params.topP !== undefined) { number(params.topP, 0, 1); if (params.topP === 0) invalid(); }
+  if (params.format !== undefined && !['mp3', 'wav', 'pcm', 'opus'].includes(params.format)) invalid();
+  if (params.latency !== undefined && !['normal', 'balanced', 'low'].includes(params.latency)) invalid();
+  if (params.debug !== undefined && typeof params.debug !== 'boolean') invalid();
+  if (params.prosody !== undefined) {
+    object(params.prosody, ['speed', 'volume']);
+    if (params.prosody.speed !== undefined) number(params.prosody.speed, 0.5, 2);
+    if (params.prosody.volume !== undefined) number(params.prosody.volume, -20, 20);
+  }
+  if (params.expression !== undefined) {
+    const expression = object(params.expression, ['selection', 'emotionTagMap', 'tagPlacement', 'maxTagsPerSentence', 'mergeShortSentences']);
+    if (expression.selection !== undefined && !['native', 'mapped'].includes(expression.selection)) invalid();
+    if (expression.tagPlacement !== undefined && !['every-sentence', 'first-only'].includes(expression.tagPlacement)) invalid();
+    if (expression.maxTagsPerSentence !== undefined) integer(expression.maxTagsPerSentence, 0, 2);
+    if (expression.emotionTagMap !== undefined) {
+      object(expression.emotionTagMap, TTS_EMOTIONS);
+      for (const tags of Object.values(expression.emotionTagMap)) {
+        const values = Array.isArray(tags) ? tags : [tags];
+        if (values.length > 8) invalid();
+        for (const tag of values) {
+          text(tag, 256);
+          if (!/^(?:\[[^\[\]\x00-\x1f\x7f]{1,80}\]\s*)+$/.test(tag)) invalid();
+        }
+      }
+    }
+    if (expression.mergeShortSentences !== undefined) {
+      const merge = object(expression.mergeShortSentences, ['enabled', 'minChars', 'maxChars']);
+      if (merge.enabled !== undefined && typeof merge.enabled !== 'boolean') invalid();
+      if (merge.minChars !== undefined) integer(merge.minChars, 1, 1000);
+      if (merge.maxChars !== undefined) integer(merge.maxChars, 1, 4000);
+      if ((merge.maxChars ?? 180) < (merge.minChars ?? 25)) invalid();
+    }
+  }
+  if (params.inlineTags !== undefined) {
+    const inline = object(params.inlineTags, ['enabled', 'allowList', 'maxPerSentence']);
+    if (inline.enabled !== undefined && typeof inline.enabled !== 'boolean') invalid();
+    if (inline.maxPerSentence !== undefined) integer(inline.maxPerSentence, 0, 2);
+    if (inline.allowList !== undefined) strings(inline.allowList, value => {
+      text(value, 80);
+      if (!/^[a-z][a-z0-9 _-]*$/.test(value)) invalid();
+    });
+  }
+  if (params.speechStyle !== undefined) booleans(params.speechStyle, ['enabled']);
+}
 function omittedParam(value) {
   text(value, 80);
   const normalized = value.replace(/[_-]/g, '').toLowerCase();
@@ -154,6 +208,7 @@ export function validateSlot(value, { allowSecrets = false } = {}) {
   const params = value.params === undefined ? {} : value.params;
   object(params, PARAMS);
   if (params.temperature != null) number(params.temperature, 0, 2);
+  validateTtsParams(params);
   if (params.maxTokens != null) number(params.maxTokens, 1, 1000000);
   if (params.json !== undefined && typeof params.json !== 'boolean') invalid();
   for (const key of ['language', 'prompt', 'voice', 'format']) if (params[key] !== undefined) text(params[key], key === 'prompt' ? 2048 : 256);

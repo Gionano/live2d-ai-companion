@@ -14,6 +14,8 @@ html:has(#settings-page), html:has(#settings-page) body { background: #161622 !i
 #settings-page :focus-visible { outline: 3px solid #ffd479; outline-offset: 3px; }
 #settings-page .settings-card { background: #202030; border: 1px solid #67677f; border-radius: 10px; padding: 18px; margin: 16px 0; }
 #settings-page .settings-field { display: block; margin: 14px 0; overflow-wrap: anywhere; }
+#settings-page .settings-emotion-row { min-inline-size: 0; min-width: 0; max-width: 100%; margin: 12px 0; padding: 10px; border: 1px solid #67677f; border-radius: 6px; }
+#settings-page .settings-emotion-row legend { padding: 0 6px; overflow-wrap: anywhere; }
 #settings-page .settings-actions, #settings-page .settings-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
 #settings-page details { border-left: 3px solid #8585ac; padding: 8px 12px; margin: 12px 0; }
 #settings-page summary { padding: 8px; }

@@ -3,6 +3,15 @@
 Evidence: Phase D implementation committed through `ecef631`; P1-P5 audit corrections are included in the follow-up commits. Phases E1 and E1.5, the memory/argument correction, CLI quality experiments, and managed ComfyUI below are implemented in the working tree without a commit. Verification uses code inspection and mocked selfie/provider, HTTP/WS, desktop IPC, speech, spawned local-provider processes, and memory/telemetry tests.
 
 ## Done
+- Native Fish speech emotions: the existing chat, vision-comment and selfie-caption
+  LLM requests choose one of 49 speech emotions per reply, separate from the
+  avatar's twelve labels. Header freezing, queue snapshots and mapped fallbacks
+  preserve streaming and cancellation. Translated selection controls default to native.
+- Fish emotion catalogue: all 24 Basic and 25 Advanced tags are available in
+  translated grouped selectors and direct TTS/CLI emotion names.
+- TTS expressiveness: twelve Indonesian emotion mappings, bracket prefixes,
+  sentence merging, normalizer, optional safe inline cues, spoken-style prompt,
+  debug redaction, local GUI controls and manual `tts:try` A/B audio files.
 - Providers P3: local id/en settings GUI, first-run wizard, inherited-slot probes,
   models helper, stale-lock recovery and isolated dummy-key diagnostics. Audit below.
 - Providers P2: versioned local settings, origin-bound credentials, Windows DPAPI
@@ -42,6 +51,268 @@ Evidence: Phase D implementation committed through `ecef631`; P1-P5 audit correc
 - Selfie Phase E1.5: GPU/DLL readiness, runtime CPU-fallback termination, config/preset args, `hemat`, heuristic memory refusal/override, nonblocking telemetry, private file logging, and bounded peak history for all started job outcomes.
 - Selfie memory/argument correction: offload-aware resource estimates, available physical RAM, configurable hard-refusal ratio, GGUF vision projection checks, and effective config diagnostics.
 - Selfie CLI quality experiments: ephemeral numeric/image/argument overrides, cached-help image-to-image flags, append-only run tables, shared GPU peaks, and metadata-only output comparison.
+
+## Precommit security verification (2026-11-06)
+
+Reviewed all 37 pending changed/added files with Codex Security before committing.
+The review confirmed one low-severity availability issue: nested parentheses or
+Markdown labels recursively sanitized speech text, allowing a spontaneous-comment
+WebSocket message to exhaust the stack outside the listener's error handler.
+The supported Vite LAN proxy can reach this path; actual firewall/browser
+reachability was not probed.
+
+The shared sanitizer now uses iterative source-range frames with precomputed
+delimiter and whitespace positions. It retains words, streaming buffering,
+Markdown-label behavior, Unicode custom tags and inline caps. The original
+8 KB crash payload and extracted actual listener now succeed; nesting through
+65,536 levels also succeeds. A fresh read-only review found no remaining concrete
+bypass or regression after correcting shared trailing-whitespace scanning and
+Unicode lowercase-expansion compatibility.
+
+Final validation: **964/964 tests pass**, zero failures/cancellations/skips;
+**nine security regressions** added after the 955-test native-emotion implementation
+(**53 total additions from the 911-test baseline**). Build passes with **73 modules**;
+privacy checks **399 files** with **zero failing files**; whitespace checks pass.
+One earlier full run had a timing-dependent failure in the existing managed
+ComfyUI idle-cleanup test; its focused suite passed 21/21 and the final full rerun
+passed. That test and runtime were not changed. Differential checks covered
+30,000 parent controls plus 125,000 reviewer inputs with varied streaming chunks.
+
+No new dependencies, credential changes or live provider calls were used.
+The persona and moderation SHA-256 hashes listed below remain unchanged.
+Live audio quality and browser/Electron/provider integration remain unverified
+by this security follow-up. The following 37 files are included in the authorized
+commit:
+
+```text
+docs/STATUS.md
+docs/prompts/providers-p2.md
+docs/prompts/providers-p3.md
+docs/providers.md
+package.json
+server/fishEmotionTags.js
+server/index.js
+server/llmChat.js
+server/providers/adapters/fishAudio.js
+server/providers/contracts.js
+server/selfie/jobManager.js
+server/selfie/planner.js
+server/settings/schema.js
+server/speechController.js
+server/speechEmotionPrompt.js
+server/speechStylePrompt.js
+server/streamingVisionManager.js
+server/tests/fishEmotionGui.test.js
+server/tests/fishEmotionTags.test.js
+server/tests/nativeSpeechChat.test.js
+server/tests/nativeSpeechPlayback.test.js
+server/tests/nativeVisualEmotion.test.js
+server/tests/providersContract.test.js
+server/tests/providersRegistry.test.js
+server/tests/settingsGui.test.js
+server/tests/speechStyle.test.js
+server/tests/ttsExpression.test.js
+server/tests/ttsSettings.test.js
+server/tests/ttsTry.test.js
+server/ttsExpression.js
+server/ttsGenerate.js
+server/ttsTry.js
+src/i18n/en.json
+src/i18n/id.json
+src/settings/page.js
+src/settings/settings.css
+src/settings/viewModel.js
+```
+
+## Native Fish speech emotions (2026-11-06)
+
+Implemented optional canonical `speechEmotion` in chat headers, vision comments
+and selfie plans. A separate appended catalogue/schema prompt requests one of
+the 49 names in the existing LLM call when TTS is available and native selection
+is enabled, independently of the speech-style switch. Chat uses ordered JSON
+`{emotion, speechEmotion, text}`; the avatar still uses its twelve existing labels.
+
+The parser reads only top-level header metadata and freezes the selection when
+text starts. Split headers work; missing, invalid, nested, quoted or late fields
+cannot delay streaming or override the frozen choice. Sentences snapshot their
+choice through the playback queue and cancellation/concurrent turns. Native
+metadata stays out of frontend events, captions and history. Vision and selfie
+captions strip tags for display while retaining allowed speech cues internally;
+selfie metadata stays outside image slots, prompts and moderation decisions.
+
+TTS expression selection defaults to `native`, with translated native/mapped
+settings controls. The existing map is the native fallback and continues to serve
+fixed system messages. Prefix precedence is manual tag, valid native selection,
+then avatar mapping. Placement, merging, tag caps, inline allow-lists, normalizer
+and secret-safe debug logging remain enforced. `play()` and TTS requests accept
+the optional field; `say()` adds a fourth options argument and preserves its
+third callback argument.
+
+Validation: **911-test baseline; 955/955 pass**, with **44 new regressions** and
+zero failures, cancellations or skips. Fake LLM/Fish transport covers all 49
+choices; visual/planner tests verify unchanged image prompts and moderation.
+Actual chat-handler and playback tests cover queue snapshots, cancellation,
+concurrent clients, callback compatibility, fallback/override precedence,
+placement/caps and secret-free debug logs. Build passes (73 modules), privacy
+reports zero failing files, and whitespace checks pass. No live provider calls, dependencies,
+credential changes or commits. Protected files retain these SHA-256 hashes:
+
+- `server/personality.js`: `22A76160074880B22D1AA435437D740DDED1EA3AA2BCDC3BC4B43116164F2921`
+- `config/selfieModeration.json`: `A0E67CBBFE0259F9A966A3725E352223419F2638715EE8EA9094FBD1FB5AA8FD`
+
+Changed files in this native-selection follow-up (earlier uncommitted work is preserved):
+
+```text
+server/index.js
+server/llmChat.js
+server/speechEmotionPrompt.js
+server/speechController.js
+server/ttsExpression.js
+server/ttsGenerate.js
+server/providers/adapters/fishAudio.js
+server/providers/contracts.js
+server/streamingVisionManager.js
+server/selfie/planner.js
+server/selfie/jobManager.js
+server/settings/schema.js
+server/tests/nativeSpeechChat.test.js
+server/tests/nativeSpeechPlayback.test.js
+server/tests/nativeVisualEmotion.test.js
+server/tests/ttsSettings.test.js
+server/tests/settingsGui.test.js
+src/settings/page.js
+src/settings/viewModel.js
+src/i18n/en.json
+src/i18n/id.json
+docs/providers.md
+docs/STATUS.md
+```
+
+Manual verification: restart the backend and enable automatic Fish selection in
+TTS settings. Try chat, a visual comment and a selfie caption; opt-in TTS debug
+shows the native prefix while the avatar keeps its existing expression. Switch
+to mapped mode to compare the saved mappings. Provider sound and actual browser/
+Electron rendering remain manual verification.
+
+## Local provider recovery (2026-11-06)
+
+The machine's ignored provider override and backend environment file were missing.
+Saved model assignments remained in local settings, but their provider references
+had no definitions; the optional filter and TTS slots were unassigned. The manual
+probe reported local configuration errors before any network request.
+
+Restored four credential environment mappings and provider definitions in ignored
+backend-only files. Endpoint/model metadata came from the pre-registry source at
+`65e628c^` and the verified Groq preset. Existing saved chat, planner, vision and
+STT choices were preserved; the missing filter and speech slots were restored.
+All six slots pass offline availability checks. Backend restart is required after
+manual configuration/environment edits. API-key validity and remote model support
+remain unverified; no live provider calls were made.
+
+Changed in this recovery: ignored `.env`, ignored `providers.config.local.json`,
+and this status record. Credential values are not recorded in documentation or
+public configuration. No dependencies or commits; protected files are unchanged.
+Validation: **911/911** isolated tests pass, zero failures/skips; privacy and
+whitespace checks pass. A credential scan finds zero public project files
+containing the supplied keys. Both restored machine files are Git-ignored.
+
+## Fish emotion catalogue (2026-11-06)
+
+Added all 49 user-supplied Fish emotion tags as a shared catalogue: 24 Basic and
+25 Advanced, with id/en labels. TTS settings provide two grouped selectors for
+each of the existing twelve avatar emotions. The selectors synchronize with the
+advanced JSON map, preserve custom tags and other entries, and support no tag.
+Scoped fieldset styles keep the editor within narrow settings panels.
+
+All catalogue names are accepted as TTS emotion/map keys, including manual
+`tts:try -- --emotion nostalgic` or `compassionate`. Defaults, the avatar emotion
+enum, tag caps, inline-tag behavior and protected files are preserved. The full
+catalogue is selectable; tags are not all sent at once or chosen randomly.
+
+Validation baseline: **898/898**; final **911/911**, with **13 added regressions**,
+zero failures/skips. Focused catalogue transport/config tests pass **6/6**, and
+GUI/schema tests pass **35/35**. Build passes (73 modules), privacy reports zero
+failing files, all eight changed/new JavaScript files parse, and whitespace
+checks pass. Protected-file hashes are unchanged. Tests use fake loopback providers and local DOM/config
+fixtures. No live synthesis, dependencies or commits. Actual UI layout and sound
+remain manual verification; choose preset tags in TTS settings and save the slot,
+then use the manual CLI for listening.
+
+Changed files in this follow-up:
+
+```text
+server/fishEmotionTags.js
+server/ttsExpression.js
+server/settings/schema.js
+server/tests/fishEmotionTags.test.js
+server/tests/fishEmotionGui.test.js
+server/tests/settingsGui.test.js
+src/settings/page.js
+src/settings/viewModel.js
+src/settings/settings.css
+src/i18n/id.json
+src/i18n/en.json
+docs/providers.md
+docs/STATUS.md
+```
+
+## TTS expressiveness (2026-11-06)
+
+Original inspection found that Fish's five English emotion labels never matched
+the twelve Indonesian chat emotions (`netral` included). Each sentence request
+used MP3 and hardcoded latency low, omitted temperature/top_p/prosody, and had no
+minimum sentence length or sanitizer. The TTS slot was unassigned during
+inspection. Full original file/line evidence and parameter defaults are in
+[Providers: TTS expressiveness](providers.md#tts-expressiveness).
+
+Implemented configurable temperature 0.8, topP 0.7, balanced latency, speed/volume,
+core emotion mappings (experimental netral calm/warm), per-sentence/first-only
+prefixes, tag caps, short-sentence merging, and normalizing without word rewrites.
+Inline performance cues default off, require an allow-list, and are removed
+before display even across split/nested chunks. The speech-style module appends
+instructions without editing the persona. Whole captions and streamed chat share
+cumulative indexes and separate encoded audio request boundaries.
+
+The local settings GUI has id/en controls. `TTS_DEBUG=1` or TTS params.debug logs
+safe request metadata/final text without audio. `npm run tts:try` writes manual
+audio trials and six sequential A/B variants with first-chunk/total timings;
+temporary output is the default. No live provider calls were made.
+
+Validation: baseline **834/834** passed; final **898/898** passed twice, with
+**64 added regressions**, zero failures/skips. Build passes (72 modules), privacy
+reports zero failing files, all 17 changed/new JavaScript files parse, whitespace
+checks pass, and `tts:try -- --help` works without synthesis. New tests use fake
+Fish WebSocket providers, injected registries and temporary outputs. Protected
+persona/moderation hashes match the task baseline. No dependencies or commits.
+Live listening, actual provider acceptance and GUI/browser/Electron rendering
+remain manual verification.
+
+Changed files (this task only; pre-existing prompt inputs are preserved):
+
+```text
+package.json
+server/llmChat.js
+server/providers/adapters/fishAudio.js
+server/providers/contracts.js
+server/settings/schema.js
+server/speechController.js
+server/speechStylePrompt.js
+server/ttsExpression.js
+server/ttsGenerate.js
+server/ttsTry.js
+server/tests/providersContract.test.js
+server/tests/providersRegistry.test.js
+server/tests/speechStyle.test.js
+server/tests/ttsExpression.test.js
+server/tests/ttsSettings.test.js
+server/tests/ttsTry.test.js
+src/i18n/en.json
+src/i18n/id.json
+src/settings/page.js
+src/settings/viewModel.js
+docs/providers.md
+docs/STATUS.md
+```
 
 ## Providers P3 (2026-11-01)
 
@@ -709,4 +980,5 @@ Manual check: run `npm.cmd run dev:all`, then `npm.cmd --prefix desktop-companio
 - Continuous capture requires active screen sharing and a connected monitor; selfie generation runs independently of conversation turns.
 
 ## Next
-P3 is complete in the working tree. Stop here; no subsequent phase has started.
+TTS expressiveness and the full Fish catalogue are implemented. Stop here;
+live listening and UI verification remain manual. No subsequent task has started.

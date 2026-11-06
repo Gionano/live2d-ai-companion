@@ -12,6 +12,7 @@
     "test": "node scripts/runTests.js",
     "check:privacy": "node scripts/checkPrivacy.js",
     "providers:test": "node server/providers/cli.js",
+    "tts:try": "node server/ttsTry.js",
     "settings:doctor": "node server/settings/doctorCli.js",
     "selfie:test": "node server/selfie/selfieTest.js",
     "selfie:test-b": "node scripts/runTests.js server/tests/planner.test.js",

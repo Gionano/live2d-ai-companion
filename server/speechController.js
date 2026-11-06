@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { stripSpeechTags, spokenSentenceCount } from './ttsExpression.js';
+import { normalizeSpeechEmotion } from './speechEmotionPrompt.js';
 
 export class SpeechController {
   constructor({ generateSpeech, isVoiceConfigured, safetyTimeoutMs = 30000 }) {
@@ -119,9 +121,10 @@ export class SpeechController {
       || Boolean(speech?.recipients.has(socket) && (!speech.ended || speech.pending.has(socket)));
   }
 
-  play({ text, emotion = 'sayang', recipients = null, produce = null, deferred = false, turnId = null }) {
+  play({ text, emotion = 'sayang', speechEmotion, recipients = null, produce = null, deferred = false, turnId = null }) {
     return new Promise((resolve) => {
-      this.queue.push({ text, emotion, recipients, produce, deferred, turnId, resolve });
+      this.queue.push({ text, emotion, speechEmotion: normalizeSpeechEmotion(speechEmotion),
+        recipients, produce, deferred, turnId, resolve });
       this.drain();
     });
   }
@@ -166,15 +169,28 @@ export class SpeechController {
 
   async run(speech, item) {
     let ok = true;
-    const say = async (text, emotion = item.emotion, onChunk = () => {}) => {
+    let sentenceIndex = 0;
+    const say = async (text, emotion = item.emotion, onChunk = () => {}, options = {}) => {
       if (speech.ended || !text) return;
+      const index = sentenceIndex;
+      sentenceIndex += spokenSentenceCount(text);
+      let endedRequest = false;
+      let pendingAudio = false;
       this.emit(speech, { type: 'emotion', emotion });
       try {
         if (this.isVoiceConfigured()) {
-          for await (const chunk of this.generateSpeech(text, emotion, { signal: speech.controller.signal })) {
+          let format = 'mp3';
+          for await (const chunk of this.generateSpeech(text, emotion, { signal: speech.controller.signal,
+            speechEmotion: Object.hasOwn(options, 'speechEmotion')
+              ? normalizeSpeechEmotion(options.speechEmotion) : item.speechEmotion,
+            sentenceIndex: index, onAudioFormat: value => { format = value; pendingAudio = true; },
+            onAudioEnd: () => {
+              endedRequest = true; pendingAudio = false;
+              if (!speech.ended) this.emit(speech, { type: 'audio_end', emotion });
+            } })) {
             if (speech.ended) break;
             speech.hasAudio = true;
-            this.emit(speech, { type: 'audio_output', data: chunk.toString('base64'), format: 'mp3' });
+            this.emit(speech, { type: 'audio_output', data: chunk.toString('base64'), format });
             onChunk();
           }
         }
@@ -182,13 +198,13 @@ export class SpeechController {
         ok = false;
         console.error('[tts:speech]', err.message);
       } finally {
-        if (!speech.ended) this.emit(speech, { type: 'audio_end', emotion });
+        if (!speech.ended && (!endedRequest || pendingAudio)) this.emit(speech, { type: 'audio_end', emotion });
       }
     };
     try {
       if (item.produce) await item.produce({ say, signal: speech.controller.signal });
       else {
-        this.emit(speech, { type: 'amika_replied', text: item.text, emotion: item.emotion });
+        this.emit(speech, { type: 'amika_replied', text: stripSpeechTags(item.text), emotion: item.emotion });
         await say(item.text, item.emotion);
       }
     } catch (err) {

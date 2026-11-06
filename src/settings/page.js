@@ -5,7 +5,7 @@ import setupGuide from '../../docs/setup.md?url';
 import { translator, detectLanguage } from './i18n.js';
 import { createSettingsClient } from './apiClient.js';
 import { node } from './dom.js';
-import { TAB_LABELS, SLOT_LABELS, STATUS_WARNING_KEYS, friendlyError, validateBaseUrl, originNeedsConfirmation, parseAdvanced, makeSlot, privacyFlows, withSecret } from './viewModel.js';
+import { TAB_LABELS, SLOT_LABELS, STATUS_WARNING_KEYS, DEFAULT_TTS_PARAMS, FISH_EMOTION_GROUPS, FISH_EMOTION_TAGS, emotionMapSelections, updateEmotionSelection, friendlyError, validateBaseUrl, originNeedsConfirmation, parseAdvanced, makeSlot, privacyFlows, withSecret } from './viewModel.js';
 import { WIZARD_STEPS, WIZARD_LABELS, WIZARD_STORAGE_KEY, needsWizard, readWizard, moveWizard, saveWizard } from './wizard.js';
 import './settings.css';
 
@@ -157,11 +157,91 @@ export async function mountSettings({ document = window.document, api = createSe
       } finally { busy = false; }
     }), form);
     const params = previous?.params || {};
-    const temperature = field(form, 'slot.temperature', params.temperature ?? '', { type: 'number', min: 0, max: 2, step: 0.1 });
+    const temperature = field(form, 'slot.temperature', params.temperature ?? (name === 'tts' ? DEFAULT_TTS_PARAMS.temperature : ''), { type: 'number', min: 0, max: 2, step: name === 'tts' ? 'any' : 0.1 });
     const maxTokens = field(form, 'slot.maxTokens', params.maxTokens ?? '', { type: 'number', min: 1, max: 1000000 });
     const extra = {};
+    const ttsFields = {};
     if (name === 'stt') extra.language = field(form, 'slot.language', params.language || 'id');
-    if (name === 'tts') { extra.voice = field(form, 'slot.voice', params.voice || ''); extra.format = field(form, 'slot.format', params.format || 'mp3'); }
+    if (name === 'tts') {
+      extra.voice = field(form, 'slot.voice', params.voice || '');
+      const formats = ['mp3', 'wav', 'opus', ...(params.format === 'pcm' ? ['pcm'] : [])];
+      extra.format = field(form, 'slot.format', params.format || 'mp3', { options: formats.map(format => [format, format.toUpperCase()]) });
+      const defaults = DEFAULT_TTS_PARAMS;
+      const expression = { ...defaults.expression, ...params.expression,
+        emotionTagMap: { ...defaults.expression.emotionTagMap, ...params.expression?.emotionTagMap } };
+      const merge = { ...defaults.expression.mergeShortSentences, ...params.expression?.mergeShortSentences };
+      const inline = { ...defaults.inlineTags, ...params.inlineTags };
+      ttsFields.topP = field(form, 'tts.topP', params.topP ?? defaults.topP, { type: 'number', min: 0, max: 1, step: 'any' });
+      ttsFields.latency = field(form, 'tts.latency', params.latency ?? defaults.latency, { options: [
+        ['normal', t('tts.latencyNormal')], ['balanced', t('tts.latencyBalanced')], ['low', t('tts.latencyLow')],
+      ] });
+      ttsFields.speed = field(form, 'tts.speed', params.prosody?.speed ?? defaults.prosody.speed, { type: 'number', min: 0.5, max: 2, step: 'any' });
+      ttsFields.volume = field(form, 'tts.volume', params.prosody?.volume ?? defaults.prosody.volume, { type: 'number', min: -20, max: 20, step: 'any' });
+      const expressionBox = details(form, 'tts.expression');
+      ttsFields.selection = field(expressionBox, 'tts.selection', expression.selection, { options: [
+        ['native', t('tts.selectionNative')], ['mapped', t('tts.selectionMapped')],
+      ] });
+      expressionBox.append(el('p', t('tts.selectionHelp')));
+      ttsFields.tagPlacement = field(expressionBox, 'tts.placement', expression.tagPlacement, { options: [
+        ['every-sentence', t('tts.everySentence')], ['first-only', t('tts.firstOnly')],
+      ] });
+      ttsFields.maxTagsPerSentence = field(expressionBox, 'tts.tagCap', expression.maxTagsPerSentence, { type: 'number', min: 0, max: 2, step: 1 });
+      const catalogueBox = details(expressionBox, 'tts.emotionPresets');
+      catalogueBox.append(el('p', t('tts.emotionPresetsHelp')));
+      const mappingBox = details(expressionBox, 'tts.customEmotionMap');
+      ttsFields.emotionTagMap = field(mappingBox, 'tts.emotionMap', JSON.stringify(expression.emotionTagMap, null, 2), { type: 'textarea', rows: 8, maxlength: 8192, spellcheck: 'false' });
+      const selectors = new Map();
+      const setTagOptions = (input, value) => {
+        input.replaceChildren(el('option', t('tts.noTag'), { value: '' }));
+        for (const group of FISH_EMOTION_GROUPS) {
+          const options = el('optgroup', undefined, { label: t(group.labelKey) });
+          for (const tag of group.tags) options.append(el('option', `${t(tag.labelKey)} ${tag.tag}`, { value: tag.tag }));
+          input.append(options);
+        }
+        if (value && !FISH_EMOTION_TAGS.some(tag => tag.tag === value)) {
+          input.append(el('option', t('tts.customTag', { tag: value }), { value }));
+        }
+        input.value = value;
+      };
+      const syncSelections = map => {
+        for (const [emotion, inputs] of selectors) {
+          const values = emotionMapSelections(map, emotion);
+          inputs.forEach((input, index) => setTagOptions(input, values[index]));
+        }
+      };
+      for (const emotion of Object.keys(defaults.expression.emotionTagMap)) {
+        const row = el('fieldset', undefined, { class: 'settings-emotion-row', 'data-avatar-emotion': emotion });
+        row.append(el('legend', t('tts.avatarEmotion', { emotion })));
+        catalogueBox.append(row);
+        const inputs = [field(row, 'tts.firstTag', '', { options: [] }), field(row, 'tts.secondTag', '', { options: [] })];
+        selectors.set(emotion, inputs);
+        inputs.forEach(input => input.addEventListener('change', () => {
+          try {
+            const map = JSON.parse(ttsFields.emotionTagMap.value);
+            ttsFields.emotionTagMap.value = JSON.stringify(updateEmotionSelection(map, emotion, inputs[0].value, inputs[1].value), null, 2);
+          } catch { fail({ code: 'INVALID_SETTINGS' }); }
+        }));
+      }
+      syncSelections(expression.emotionTagMap);
+      for (const event of ['input', 'change']) ttsFields.emotionTagMap.addEventListener(event, () => {
+        try {
+          const map = JSON.parse(ttsFields.emotionTagMap.value);
+          if (!map || typeof map !== 'object' || Array.isArray(map)) return;
+          syncSelections(map);
+        } catch { /* Keep current selections until the JSON editor contains a valid map. */ }
+      });
+      expressionBox.append(el('p', t('tts.neutralExperimental')));
+      ttsFields.mergeEnabled = checkbox(expressionBox, 'tts.mergeEnabled', merge.enabled);
+      ttsFields.minChars = field(expressionBox, 'tts.minChars', merge.minChars, { type: 'number', min: 1, max: 1000, step: 1 });
+      ttsFields.maxChars = field(expressionBox, 'tts.maxChars', merge.maxChars, { type: 'number', min: 1, max: 4000, step: 1 });
+      const styleBox = details(form, 'tts.speechStyle');
+      ttsFields.speechStyleEnabled = checkbox(styleBox, 'tts.speechStyleEnabled', params.speechStyle?.enabled ?? defaults.speechStyle.enabled);
+      ttsFields.inlineEnabled = checkbox(styleBox, 'tts.inlineEnabled', inline.enabled);
+      ttsFields.inlineAllowList = field(styleBox, 'tts.inlineAllowList', inline.allowList.join(', '), { maxlength: 2592 });
+      ttsFields.inlineMaxPerSentence = field(styleBox, 'tts.inlineCap', inline.maxPerSentence, { type: 'number', min: 0, max: 2, step: 1 });
+      ttsFields.debug = checkbox(styleBox, 'tts.debug', params.debug ?? defaults.debug);
+      styleBox.append(el('p', t('tts.debugHelp')));
+    }
     const advanced = details(form, 'slot.advanced');
     const timeouts = Object.fromEntries(['firstByteMs', 'idleMs', 'totalMs'].map((key, i) => [key,
       field(advanced, ['slot.firstByte', 'slot.idle', 'slot.total'][i], previous?.timeouts?.[key] ?? [20000, 20000, 60000][i], { type: 'number', min: 0, max: 300000 })]));
@@ -175,6 +255,8 @@ export async function mountSettings({ document = window.document, api = createSe
       const text = extras.value; extras.value = '';
       const slot = makeSlot({ profile: profile.value, model: model.value, temperature: temperature.value, maxTokens: maxTokens.value,
         advanced: text, ...Object.fromEntries(Object.entries(extra).map(([name, input]) => [name, input.value])),
+        ...(name === 'tts' && { tts: Object.fromEntries(Object.entries(ttsFields).map(([key, input]) =>
+          [key, input.type === 'checkbox' ? input.checked : input.value])) }),
         ...Object.fromEntries(Object.entries(timeouts).map(([name, input]) => [name, input.value])) }, previous || {});
       await change(async () => {
         await write('/slots/' + name, { slot });

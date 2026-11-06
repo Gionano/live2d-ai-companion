@@ -1,5 +1,9 @@
 import { validateBaseUrl } from '../../server/providers/baseUrl.js';
+import { DEFAULT_TTS_PARAMS } from '../../server/ttsExpression.js';
+import { FISH_EMOTION_GROUPS, FISH_EMOTION_NAMES, FISH_EMOTION_TAGS } from '../../server/fishEmotionTags.js';
 export { validateBaseUrl };
+export { DEFAULT_TTS_PARAMS };
+export { FISH_EMOTION_GROUPS, FISH_EMOTION_TAGS };
 export const SLOT_LABELS = { llm: 'slot.llm', vision: 'slot.vision', stt: 'slot.stt', tts: 'slot.tts', planner: 'slot.planner', visionFilter: 'slot.visionFilter' };
 export const TAB_LABELS = { connections: 'tab.connections', status: 'tab.status', privacy: 'tab.privacy', diagnostics: 'tab.diagnostics', language: 'tab.language' };
 export const ERROR_KEYS = { CONFLICT: 'error.conflict', ORIGIN_CHANGE: 'error.origin', IN_USE: 'error.inUse',
@@ -48,12 +52,69 @@ export function makeSlot(fields, previous = {}) {
     }
   }
   for (const key of ['language', 'voice', 'format']) if (fields[key] !== undefined) slot.params[key] = fields[key];
+  if (fields.format !== undefined && !['mp3', 'wav', 'pcm', 'opus'].includes(fields.format)) {
+    throw Object.assign(new Error(), { code: 'INVALID_SETTINGS' });
+  }
+  if (fields.tts) Object.assign(slot.params, makeTtsParams(fields.tts, previous.params));
   for (const key of ['firstByteMs', 'idleMs', 'totalMs']) {
     const value = Number(fields[key]);
     if (!Number.isFinite(value) || value < 0 || value > 300000) throw Object.assign(new Error(), { code: 'INVALID_SETTINGS' });
     slot.timeouts[key] = value;
   }
   return { ...slot, params: { ...slot.params, ...parseAdvanced(fields.advanced).value } };
+}
+export function makeTtsParams(fields, previous = {}) {
+  const invalid = () => { throw Object.assign(new Error(), { code: 'INVALID_SETTINGS' }); };
+  const numeric = (key, min, max, integer = false) => {
+    if (fields[key] === '' || fields[key] === undefined) invalid();
+    const value = Number(fields[key]);
+    if (!Number.isFinite(value) || value < min || value > max || integer && !Number.isSafeInteger(value)) invalid();
+    return value;
+  };
+  const topP = numeric('topP', 0, 1);
+  const selection = fields.selection === undefined
+    ? previous.expression?.selection ?? DEFAULT_TTS_PARAMS.expression.selection : fields.selection;
+  if (topP === 0 || !['normal', 'balanced', 'low'].includes(fields.latency)
+    || !['every-sentence', 'first-only'].includes(fields.tagPlacement)
+    || !['native', 'mapped'].includes(selection)) invalid();
+  let emotionTagMap;
+  try { emotionTagMap = JSON.parse(fields.emotionTagMap); } catch { invalid(); }
+  const emotions = new Set([...Object.keys(DEFAULT_TTS_PARAMS.expression.emotionTagMap), ...FISH_EMOTION_NAMES, 'shy', 'neutral']);
+  if (!emotionTagMap || typeof emotionTagMap !== 'object' || Array.isArray(emotionTagMap)
+    || Object.entries(emotionTagMap).some(([emotion, tags]) => !emotions.has(emotion)
+      || (Array.isArray(tags) ? tags : [tags]).length > 8
+      || (Array.isArray(tags) ? tags : [tags]).some(tag => typeof tag !== 'string' || tag.length > 256
+        || !/^(?:\[[^\[\]\x00-\x1f\x7f]{1,80}\]\s*)+$/.test(tag)))) invalid();
+  const minChars = numeric('minChars', 1, 1000, true);
+  const maxChars = numeric('maxChars', 1, 4000, true);
+  if (maxChars < minChars) invalid();
+  const allowList = String(fields.inlineAllowList || '').split(',').map(value => value.trim()).filter(Boolean);
+  if (allowList.length > 32 || allowList.some(value => value.length > 80 || !/^[a-z][a-z0-9 _-]*$/.test(value))) invalid();
+  for (const key of ['mergeEnabled', 'inlineEnabled', 'speechStyleEnabled', 'debug']) if (typeof fields[key] !== 'boolean') invalid();
+  return {
+    topP, latency: fields.latency,
+    prosody: { ...previous.prosody, speed: numeric('speed', 0.5, 2), volume: numeric('volume', -20, 20) },
+    expression: { ...previous.expression, selection, emotionTagMap, tagPlacement: fields.tagPlacement,
+      maxTagsPerSentence: numeric('maxTagsPerSentence', 0, 2, true),
+      mergeShortSentences: { enabled: fields.mergeEnabled, minChars, maxChars } },
+    inlineTags: { enabled: fields.inlineEnabled, allowList: [...new Set(allowList)],
+      maxPerSentence: numeric('inlineMaxPerSentence', 0, 2, true) },
+    speechStyle: { enabled: fields.speechStyleEnabled }, debug: fields.debug,
+  };
+}
+export function emotionMapSelections(map, emotion) {
+  const value = map[emotion] ?? DEFAULT_TTS_PARAMS.expression.emotionTagMap[emotion] ?? [];
+  const tags = (Array.isArray(value) ? value.join(' ') : String(value)).match(/\[[^\[\]\x00-\x1f\x7f]{1,80}\]/g) ?? [];
+  return [tags[0] ?? '', tags[1] ?? ''];
+}
+export function updateEmotionSelection(map, emotion, first, second) {
+  if (!map || typeof map !== 'object' || Array.isArray(map)
+    || !Object.hasOwn(DEFAULT_TTS_PARAMS.expression.emotionTagMap, emotion)
+    || [first, second].some(tag => typeof tag !== 'string' || tag && !/^\[[^\[\]\x00-\x1f\x7f]{1,80}\]$/.test(tag))) {
+    throw Object.assign(new Error(), { code: 'INVALID_SETTINGS' });
+  }
+  const tags = [first, second].filter(Boolean);
+  return { ...map, [emotion]: tags.length ? tags.join(' ') : [] };
 }
 export function privacyFlows(settings) {
   return [['privacy.microphone', 'stt', '#mic-status'], ['privacy.chat', 'llm', '#chat-form'],

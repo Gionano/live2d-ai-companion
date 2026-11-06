@@ -14,6 +14,8 @@ import { loadSelfieConfig, normalizeAutoCloseSeconds } from './config.js';
 import { createImageProvider } from './imageProvider.js';
 import { etaStore } from './etaStore.js';
 import { logSelfie } from './log.js';
+import { normalizeSpeechEmotion } from '../speechEmotionPrompt.js';
+import { stripSpeechTags } from '../ttsExpression.js';
 
 // Batas maksimal token yang disimpan dan TTL (24 jam).
 const TOKEN_MAX_ENTRIES = 100;
@@ -197,11 +199,12 @@ export class JobManager {
     }
   }
 
-  queueSpeech(text, emotion = 'sayang') {
+  queueSpeech(text, emotion = 'sayang', { speechEmotion } = {}) {
     if (!text) return;
     if (typeof this.speechHandler === 'function') {
       try {
-        this.speechHandler({ text, emotion });
+        const nativeEmotion = normalizeSpeechEmotion(speechEmotion);
+        this.speechHandler({ text, emotion, ...(nativeEmotion && { speechEmotion: nativeEmotion }) });
       } catch (err) {
         logSelfie(`[jobManager] Speech handler error: ${err.message}`, 'warn');
       }
@@ -319,6 +322,17 @@ export class JobManager {
       }
       // Read caller-owned fields before reserving; getters cannot strand a slot.
       plan = { ...plan, slots: { ...plan.slots } };
+      const displayCaption = stripSpeechTags(plan.caption);
+      if (!displayCaption.trim()) {
+        const reserved = admission?.allowed && this._findJob(admission.jobId);
+        if (reserved && !reserved.submitted) this._refundSubmission(reserved);
+        return { ok: false, reason: 'INVALID_PLAN' };
+      }
+      if (displayCaption !== plan.caption && !plan.captionSpeechText) plan.captionSpeechText = plan.caption;
+      plan.caption = displayCaption;
+      const speechEmotion = normalizeSpeechEmotion(plan.speechEmotion);
+      if (speechEmotion) plan.speechEmotion = speechEmotion;
+      else delete plan.speechEmotion;
       const admitted = admission || this.tryAdmit();
       if (!admitted.allowed) return { ...admitted, ok: false };
       jobData = this._findJob(admitted.jobId);
@@ -570,7 +584,7 @@ export class JobManager {
       this.broadcast(jobData.readyEvent);
 
       // Suara avatar membacakan caption dengan emotion sesuai
-      this.queueSpeech(plan.caption, plan.emotion);
+      this.queueSpeech(plan.captionSpeechText ?? plan.caption, plan.emotion, { speechEmotion: plan.speechEmotion });
 
     } catch (err) {
       failed = true;

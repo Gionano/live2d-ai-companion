@@ -9,6 +9,9 @@
 import { getProviderRegistry, UNAVAILABLE_MESSAGES } from './providers/registry.js';
 import { WAIFU_SYSTEM_PROMPT } from './personality.js';
 import { memoryManager } from './memoryManager.js';
+import { speechStylePrompt } from './speechStylePrompt.js';
+import { normalizeSpeechEmotion, speechEmotionPrompt } from './speechEmotionPrompt.js';
+import { resolveTtsParams, StreamingTagSanitizer, SentenceMerger } from './ttsExpression.js';
 export const HISTORY_MESSAGE_LIMIT = 8;
 export const HISTORY_TOKEN_LIMIT = 700;
 export const REPLY_EMOTIONS = new Set([
@@ -68,12 +71,70 @@ function normalizeEmotion(value) {
   return REPLY_EMOTIONS.has(value) ? value : 'netral';
 }
 
+function readJsonString(raw, start) {
+  for (let index = start + 1; index < raw.length; index++) {
+    if (raw[index] === '\\') { index++; continue; }
+    if (raw[index] !== '"') continue;
+    try { return { value: JSON.parse(raw.slice(start, index + 1)), end: index + 1 }; }
+    catch { return { value: undefined, end: index + 1 }; }
+  }
+  return null;
+}
+
+function readHeaderValue(raw, start) {
+  if (raw[start] === '"') return readJsonString(raw, start);
+  let depth = 0;
+  for (let index = start; index < raw.length; index++) {
+    const char = raw[index];
+    if (char === '"') {
+      const string = readJsonString(raw, index);
+      if (!string) return null;
+      index = string.end - 1;
+    } else if ('[{'.includes(char)) depth++;
+    else if (']}'.includes(char)) {
+      if (depth === 0) return { value: undefined, end: index };
+      if (--depth === 0) return { value: undefined, end: index + 1 };
+    } else if (char === ',' && depth === 0) return { value: undefined, end: index };
+  }
+  return null;
+}
+
+// Scan JSON members, not text patterns, so nested objects and quoted prose cannot
+// change reply metadata. Stop at the opening quote of the top-level text field.
+function scanReplyHeader(raw) {
+  const start = raw.indexOf('{');
+  const fields = [];
+  if (start < 0) return { fields };
+  let index = start + 1;
+  while (index < raw.length) {
+    while (/\s|,/.test(raw[index] ?? '') && index < raw.length) index++;
+    if (raw[index] !== '"') break;
+    const key = readJsonString(raw, index);
+    if (!key) break;
+    index = key.end;
+    while (/\s/.test(raw[index] ?? '') && index < raw.length) index++;
+    if (raw[index++] !== ':') break;
+    while (/\s/.test(raw[index] ?? '') && index < raw.length) index++;
+    if (key.value === 'text' && raw[index] === '"') return { fields, textStart: index + 1 };
+    const value = readHeaderValue(raw, index);
+    if (!value) break;
+    fields.push({ key: key.value, value: value.value });
+    index = value.end;
+    while (/\s/.test(raw[index] ?? '') && index < raw.length) index++;
+    if (raw[index] !== ',') break;
+    index++;
+  }
+  return { fields };
+}
+
 // Parse the ordered JSON object incrementally so emotion can reach the avatar
 // before the first complete sentence is sent to TTS. This preserves streaming.
 export class StructuredReplyParser {
   constructor() {
     this.raw = '';
     this.emotion = null;
+    this.speechEmotion = undefined;
+    this.speechEmotionSeen = false;
     this.textStarted = false;
     this.textFinished = false;
     this.scanAt = 0;
@@ -94,19 +155,26 @@ export class StructuredReplyParser {
       return events;
     }
 
-    if (!this.emotion) {
-      const hit = this.raw.match(/"emotion"\s*:\s*"([^"]+)"/);
-      if (hit) {
-        this.emotion = normalizeEmotion(hit[1]);
+    if (!this.textStarted) {
+      const header = scanReplyHeader(this.raw);
+      for (const field of header.fields) {
+        if (field.key === 'emotion' && !this.emotion) {
+          this.emotion = normalizeEmotion(field.value);
+          events.push({ type: 'emotion', emotion: this.emotion });
+        }
+        if (field.key === 'speechEmotion' && !this.speechEmotionSeen) {
+          this.speechEmotionSeen = true;
+          this.speechEmotion = normalizeSpeechEmotion(field.value);
+          if (this.speechEmotion) events.push({ type: 'speechEmotion', speechEmotion: this.speechEmotion });
+        }
+      }
+      if (header.textStart === undefined) return events;
+      this.textStarted = true;
+      this.scanAt = header.textStart;
+      if (!this.emotion) {
+        this.emotion = 'netral';
         events.push({ type: 'emotion', emotion: this.emotion });
       }
-    }
-
-    if (!this.textStarted) {
-      const hit = /"text"\s*:\s*"/.exec(this.raw);
-      if (!hit) return events;
-      this.textStarted = true;
-      this.scanAt = hit.index + hit[0].length;
     }
 
     let decoded = '';
@@ -156,7 +224,7 @@ export async function* generateReply(
   conversationHistory,
   userMessage,
   visionDescription,
-  { signal, registry = getProviderRegistry() } = {},
+  { signal, registry = getProviderRegistry(), includeSpeechText = false } = {},
 ) {
   signal?.throwIfAborted();
   if (!registry.getSlotStatus('llm').available) {
@@ -170,6 +238,14 @@ export async function* generateReply(
   const trimmedHistory = trimConversationHistory(rawHistory);
   const memoryContext = memoryManager.getMemoryPrompt();
   const systemParts = [WAIFU_SYSTEM_PROMPT, memoryContext];
+  const ttsParams = resolveTtsParams(registry.getTts?.()?.params);
+  const nativeSelection = registry.getSlotStatus('tts').available && ttsParams.expression.selection !== 'mapped';
+  if (registry.getSlotStatus('tts').available) {
+    const style = speechStylePrompt(ttsParams);
+    if (style) systemParts.push(style);
+    const selection = speechEmotionPrompt(ttsParams);
+    if (selection) systemParts.push(selection);
+  }
   if (visionDescription) {
     systemParts.push(`[User sedang menunjukkan: ${visionDescription}]`);
   }
@@ -193,6 +269,7 @@ export async function* generateReply(
 
   const stream = registry.getLlm().stream({ messages, json: true, signal });
   const parser = new StructuredReplyParser();
+  const sanitizer = new StreamingTagSanitizer(ttsParams);
   let gotText = false;
 
   for await (const chunk of stream) {
@@ -202,7 +279,11 @@ export async function* generateReply(
     for (const event of parser.push(delta)) {
       signal?.throwIfAborted();
       if (event.type === 'delta') gotText = true;
-      yield event;
+      if (event.type === 'delta') {
+        const { displayText, ttsText } = sanitizer.push(event.text);
+        if (displayText || includeSpeechText && ttsText) yield { type: 'delta', text: displayText,
+          ...(includeSpeechText && { speechText: ttsText }) };
+      } else if (event.type !== 'speechEmotion' || nativeSelection && includeSpeechText) yield event;
     }
   }
   if (!gotText) {
@@ -215,6 +296,9 @@ export async function* generateReply(
     signal?.throwIfAborted();
     yield event;
   }
+  const tail = sanitizer.finish();
+  if (tail.displayText || includeSpeechText && tail.ttsText) yield { type: 'delta', text: tail.displayText,
+    ...(includeSpeechText && { speechText: tail.ttsText }) };
 }
 
 // Ambil kalimat lengkap paling awal dari `buf`. Return { sentence, rest } atau
@@ -250,33 +334,46 @@ export async function* generateReplyStream(
   conversationHistory,
   userMessage,
   visionDescription,
-  { signal, registry } = {},
+  { signal, registry = getProviderRegistry() } = {},
 ) {
   let buf = '';
+  let speechEmotion;
+  const params = resolveTtsParams(registry.getTts?.()?.params);
+  if (!registry.getSlotStatus('tts').available) params.expression.mergeShortSentences.enabled = false;
+  const merger = new SentenceMerger(params);
   for await (const event of generateReply(
     conversationHistory,
     userMessage,
     visionDescription,
-    { signal, registry },
+    { signal, registry, includeSpeechText: true },
   )) {
     signal?.throwIfAborted();
     if (event.type === 'emotion') {
       yield event;
       continue;
     }
+    if (event.type === 'speechEmotion') {
+      speechEmotion = event.speechEmotion;
+      continue;
+    }
+    if (event.type !== 'delta') continue;
     const delta = event.text;
     yield { type: 'delta', text: delta };
-    buf += delta;
+    buf += event.speechText ?? delta;
     let hit;
     while ((hit = takeSentence(buf))) {
       signal?.throwIfAborted();
-      yield { type: 'sentence', text: hit.sentence };
+      for (const sentence of merger.push(hit.sentence)) yield { type: 'sentence', text: sentence,
+        ...(speechEmotion && { speechEmotion }) };
       buf = hit.rest;
     }
   }
   const tail = buf.trim();
   signal?.throwIfAborted();
-  if (tail) yield { type: 'sentence', text: tail };
+  if (tail) for (const sentence of merger.push(tail)) yield { type: 'sentence', text: sentence,
+    ...(speechEmotion && { speechEmotion }) };
+  for (const sentence of merger.finish()) yield { type: 'sentence', text: sentence,
+    ...(speechEmotion && { speechEmotion }) };
 }
 
 // Self-check parser: `node server/llmChat.js`
