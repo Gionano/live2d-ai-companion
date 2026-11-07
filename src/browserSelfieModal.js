@@ -68,6 +68,10 @@ function ensureModalContainer() {
         background: linear-gradient(90deg, #4facfe, #00f2fe);
         transition: width 0.3s ease;
       }
+      @keyframes b-indeterminate {
+        from { transform: translateX(-100%); }
+        to { transform: translateX(280%); }
+      }
       .b-meta {
         display: flex;
         justify-content: space-between;
@@ -149,7 +153,7 @@ function ensureModalContainer() {
       }
       @media (prefers-reduced-motion: reduce) {
         .b-selfie-card { animation: none; }
-        .b-img, .b-progress-fill { transition: none; }
+        .b-img, .b-progress-fill { transition: none; animation: none !important; }
       }
     </style>
     <div class="b-selfie-card" id="b-card" role="dialog" aria-modal="true" aria-label="Foto Amika" tabindex="-1"></div>
@@ -336,6 +340,16 @@ export function handleBrowserSelfieModal(msg, onCancel = null) {
       const fill = document.getElementById('b-fill');
       const step = document.getElementById('b-step');
       if (fill && step) {
+        const phaseText = { preparing: 'Menyiapkan foto...', generating: 'Sedang membuat foto...',
+          validating: 'Memeriksa hasil foto...', saving: 'Menyimpan foto...' }[msg.phase];
+        if (msg.percentage === null && phaseText) {
+          fill.style.width = '35%';
+          fill.style.animation = 'b-indeterminate 1.4s ease-in-out infinite alternate';
+          document.getElementById('b-progress')?.removeAttribute('aria-valuenow');
+          step.textContent = phaseText;
+          break;
+        }
+        fill.style.animation = '';
         const percentage = typeof msg.percentage === 'number' ? msg.percentage
           : typeof msg.value === 'number' && typeof msg.max === 'number' && msg.max > 0 ? msg.value / msg.max * 100 : 0;
         const pct = Number.isFinite(percentage) ? Math.round(Math.min(100, Math.max(0, percentage))) : 0;

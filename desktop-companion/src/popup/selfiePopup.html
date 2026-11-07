@@ -132,6 +132,13 @@
       border-radius: 3px;
       transition: width 0.3s ease;
     }
+    @keyframes cloud-progress {
+      from { transform: translateX(-100%); }
+      to { transform: translateX(280%); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .progress-bar-fill { animation: none !important; }
+    }
 
     .toast-meta {
       display: flex;
@@ -496,12 +503,22 @@
       stateReady.style.display = 'none';
       progressFill.style.width = '0%';
       progressText.textContent = 'Menyiapkan kamera...';
+      progressFill.style.animation = '';
       const eta = data.etaSeconds;
       etaText.textContent = Number.isFinite(eta) && eta >= 0 ? `Estimasi: ~${eta}s` : 'Estimasi belum tersedia';
     }
 
     function updateProgress(data) {
       if (currentState !== 'generating') return;
+      const phaseText = { preparing: 'Menyiapkan foto...', generating: 'Sedang membuat foto...',
+        validating: 'Memeriksa hasil foto...', saving: 'Menyimpan foto...' }[data.phase];
+      if (data.percentage === null && phaseText) {
+        progressFill.style.width = '35%';
+        progressFill.style.animation = 'cloud-progress 1.4s ease-in-out infinite alternate';
+        progressText.textContent = phaseText;
+        return;
+      }
+      progressFill.style.animation = '';
       const raw = Number.isFinite(data.percentage) ? data.percentage : (data.max > 0 ? Math.round((data.value / data.max) * 100) : 0);
       const pct = Number.isFinite(raw) ? Math.min(100, Math.max(0, raw)) : 0;
       progressFill.style.width = `${pct}%`;

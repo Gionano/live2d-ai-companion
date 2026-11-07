@@ -77,6 +77,7 @@ function createBrowser() {
 
     get innerHTML() { return this._html; }
     setAttribute(name, value) { this.attributes[name] = value; }
+    removeAttribute(name) { delete this.attributes[name]; }
     getAttribute(name) { return this.attributes[name]; }
     set src(value) {
       this.handlersInstalledBeforeSrc = typeof this.onload === 'function' && typeof this.onerror === 'function';
@@ -162,6 +163,17 @@ test('browser selfie progress keeps unknown ETA and clamps provider progress', (
   }
   browser.handle({ type: 'selfie_progress', jobId: 'job-a', value: 1, max: 0 });
   assert.equal(browser.element('b-fill').style.width, '0%');
+});
+
+test('browser cloud progress removes the numeric ARIA value and shows the current phase', () => {
+  const browser = createBrowser();
+  browser.handle(started('cloud'));
+  browser.handle({ type: 'selfie_progress', jobId: 'cloud', phase: 'generating', percentage: null });
+  assert.equal(browser.element('b-step').textContent, 'Sedang membuat foto...');
+  assert.equal(browser.element('b-progress').getAttribute('aria-valuenow'), undefined);
+  browser.handle({ type: 'selfie_progress', jobId: 'cloud', value: 1, max: 2 });
+  assert.equal(browser.element('b-progress').getAttribute('aria-valuenow'), '50');
+  assert.equal(browser.element('b-fill').style.animation, '');
 });
 
 test('browser ready caption stays text and actions use the validated token URL', async () => {

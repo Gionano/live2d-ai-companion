@@ -103,6 +103,17 @@ test('popup subscribes before handshake and restricts images to the configured l
   assert.match(remote.policies[0].content, /img-src http:\/\/127\.0\.0\.1:8787;/);
 });
 
+test('popup shows cloud phases without inventing percentages and resumes numeric local progress', () => {
+  const popup = createPopup();
+  start(popup);
+  popup.emit({ type: 'selfie_progress', jobId: 'first', phase: 'generating', percentage: null });
+  assert.equal(popup.element('progress-text').textContent, 'Sedang membuat foto...');
+  assert.match(popup.element('progress-fill').style.animation, /cloud-progress/);
+  popup.emit({ type: 'selfie_progress', jobId: 'first', value: 1, max: 2 });
+  assert.equal(popup.element('progress-text').textContent, 'Memproses foto... (50%)');
+  assert.equal(popup.element('progress-fill').style.animation, '');
+});
+
 test('accepted ready snapshots replace an old hidden popup job after feature reenable', () => {
   const popup = createPopup();
   start(popup, 'old');
