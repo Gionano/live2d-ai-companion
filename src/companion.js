@@ -19,6 +19,7 @@ const micLabelEl = document.getElementById('mic-label');
 const overlaySubtitleEl = document.getElementById('overlay-subtitle');
 import { tuning } from './tuningConfig.js';
 import { SpeechPlayback, TurnState } from './speechPlayback.js';
+import { analyzeSpeechRhythm } from './speechMotion.js';
 import { handleBrowserSelfieModal } from './browserSelfieModal.js';
 
 const isOverlay = new URLSearchParams(window.location.search).get('mode') === 'overlay';
@@ -361,7 +362,7 @@ let audioCtx = null;
 let analyser = null;
 let freqData = null;
 let playCursor = 0; // waktu AudioContext untuk kalimat berikutnya
-let pendingEmotion = 'netral';
+let previewSpeechController = null;
 let scheduledEmotionEnd = 0;
 
 let currentConversationState = 'idle'; // 'idle' | 'processing' | 'speaking'
@@ -375,6 +376,7 @@ const speechPlayback = new SpeechPlayback({
     }
   },
   onChange: () => updateUiForState(playbackState()),
+  onCancelled: (speechId) => cancelSpeechMotion(speechId),
 });
 
 function playbackState() {
@@ -447,29 +449,31 @@ function sampleMouth() {
   return Math.min(1, avg * gain);
 }
 
-// Debug audio sample: a short speech-like oscillator pattern routed through the
-// same AnalyserNode and playback state as Fish Audio.
-window.__waifuTestLipSync = async () => {
+function cancelSpeechMotion(speechId) {
+  window.dispatchEvent(new CustomEvent('waifu-speech-cancel', { detail: { speechId } }));
+}
+
+// Local preview uses the same scheduler as decoded TTS, without an AI request.
+window.__waifuTestSpeechMotion = async (emotion = 'netral') => {
+  previewSpeechController?.abort();
+  previewSpeechController = new AbortController();
+  const controller = previewSpeechController;
   ensureAudio();
   if (audioCtx.state === 'suspended') await audioCtx.resume();
-  const now = audioCtx.currentTime;
-  const oscillator = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  oscillator.type = 'triangle';
-  oscillator.frequency.setValueAtTime(170, now);
-  oscillator.frequency.linearRampToValueAtTime(235, now + 1.2);
-  oscillator.frequency.linearRampToValueAtTime(145, now + 2.7);
-  gain.gain.setValueAtTime(0.0001, now);
-  for (let i = 0; i < 12; i++) {
-    const at = now + i * 0.23;
-    gain.gain.linearRampToValueAtTime(0.11 + (i % 3) * 0.025, at + 0.05);
-    gain.gain.exponentialRampToValueAtTime(0.008, at + 0.19);
+  const buffer = audioCtx.createBuffer(1, Math.round(audioCtx.sampleRate * 5), audioCtx.sampleRate);
+  const samples = buffer.getChannelData(0);
+  for (let i = 0; i < samples.length; i++) {
+    const time = i / buffer.sampleRate;
+    const phase = time % 0.28 / 0.28;
+    const pause = time > 1.5 && time < 1.9 || time > 3.3 && time < 3.65;
+    samples[i] = pause ? 0 : Math.sin(time * 170 * Math.PI * 2)
+      * Math.sin(phase * Math.PI) ** 4 * (0.035 + 0.015 * Math.sin(time * 3));
   }
-  oscillator.connect(gain).connect(analyser);
-  oscillator.start(now);
-  oscillator.stop(now + 2.8);
-  playCursor = Math.max(playCursor, now + 2.8);
+  await playDecodedAudio(buffer, emotion, {
+    signal: controller.signal, speechId: 'preview-' + performance.now(),
+  });
 };
+window.__waifuTestLipSync = () => window.__waifuTestSpeechMotion('netral');
 
 function b64ToUint8(b64) {
   const bin = atob(b64);
@@ -478,7 +482,7 @@ function b64ToUint8(b64) {
   return arr;
 }
 
-async function playSentenceAudio(chunks, emotion = 'netral', { signal } = {}) {
+async function playSentenceAudio(chunks, emotion = 'netral', { signal, speechId, pauseBeforeMs = 0, segmentId } = {}) {
   if (signal?.aborted) return;
   ensureAudio();
   if (audioCtx.state === 'suspended') await audioCtx.resume();
@@ -496,48 +500,63 @@ async function playSentenceAudio(chunks, emotion = 'netral', { signal } = {}) {
   }
 
   let buffer;
+  let cancelDecode;
+  const cancelled = signal && new Promise(resolve => {
+    cancelDecode = () => resolve(null);
+    signal.addEventListener('abort', cancelDecode, { once: true });
+    if (signal.aborted) cancelDecode();
+  });
   try {
-    buffer = await audioCtx.decodeAudioData(merged.buffer);
+    const decoding = audioCtx.decodeAudioData(merged.buffer);
+    buffer = signal ? await Promise.race([decoding, cancelled]) : await decoding;
   } catch (err) {
     log(`Audio decode gagal: ${err.message}`, 'error');
+    cancelSpeechMotion(speechId);
     return;
+  } finally {
+    if (cancelDecode) signal.removeEventListener('abort', cancelDecode);
   }
 
+  if (!buffer || signal?.aborted) return;
+  return playDecodedAudio(buffer, emotion, { signal, speechId, pauseBeforeMs, segmentId });
+}
+
+async function playDecodedAudio(buffer, emotion, { signal, speechId, pauseBeforeMs = 0, segmentId }) {
   if (signal?.aborted) return;
+  const rhythm = analyzeSpeechRhythm(buffer);
   const src = audioCtx.createBufferSource();
   src.buffer = buffer;
   src.connect(analyser);
   const startAt = Math.max(audioCtx.currentTime, playCursor);
   const endAt = startAt + buffer.duration;
+  let resolvePlayed;
+  const played = new Promise(resolve => { resolvePlayed = resolve; });
   const onAbort = () => {
-    src.stop();
+    cancelSpeechMotion(speechId);
+    try { src.stop(); } catch {}
     playCursor = audioCtx.currentTime;
     scheduledEmotionEnd = audioCtx.currentTime;
+    resolvePlayed();
   };
-  const played = new Promise((resolve, reject) => {
-    activeAudioSources.add(src);
-    src.onended = () => {
-      activeAudioSources.delete(src);
-      resolve();
-    };
-    try {
-      src.start(startAt);
-    } catch (err) {
-      activeAudioSources.delete(src);
-      reject(err);
-    }
-  });
-  playCursor = endAt; // dipakai VAD untuk tahu amika masih bicara
-  scheduledEmotionEnd = Math.max(scheduledEmotionEnd, endAt);
-  window.dispatchEvent(new CustomEvent('waifu-emotion-cue', {
-    detail: { emotion, startAt, endAt },
-  }));
+  src.onended = resolvePlayed;
   signal?.addEventListener('abort', onAbort, { once: true });
-  if (signal?.aborted) onAbort();
+  activeAudioSources.add(src);
   try {
+    if (signal?.aborted) return;
+    src.start(startAt);
+    playCursor = endAt;
+    scheduledEmotionEnd = Math.max(scheduledEmotionEnd, endAt);
+    window.dispatchEvent(new CustomEvent('waifu-speech-cue', {
+      detail: { speechId, segmentId, emotion, startAt, endAt, rhythm },
+    }));
     await played;
+  } catch (error) {
+    cancelSpeechMotion(speechId);
+    throw error;
   } finally {
     signal?.removeEventListener('abort', onAbort);
+    activeAudioSources.delete(src);
+    src.disconnect();
   }
 }
 
@@ -630,10 +649,11 @@ function connectWS() {
         break;
       case 'emotion':
         speechPlayback.handle(msg);
-        pendingEmotion = msg.emotion || 'netral';
-        window.dispatchEvent(new CustomEvent('waifu-emotion-cue', {
-          detail: { emotion: pendingEmotion },
-        }));
+        if (!speechPlayback.busy) {
+          window.dispatchEvent(new CustomEvent('waifu-emotion-cue', {
+            detail: { emotion: msg.emotion || 'netral' },
+          }));
+        }
         break;
       case 'speech_start':
       case 'speech_end':
@@ -641,9 +661,6 @@ function connectWS() {
       case 'audio_output':
       case 'audio_end':
         speechPlayback.handle(msg);
-        if (msg.type === 'audio_end') {
-          window.dispatchEvent(new CustomEvent('waifu-sentence-break'));
-        }
         break;
       case 'request_screen_capture': {
         // Backend meminta satu frame layar (intent "lihat layar"). Hanya relevan di Electron.
@@ -733,7 +750,10 @@ function connectWS() {
     currentConversationState = 'idle';
     turnState.handle({ type: 'conversation_state', state: 'idle' });
     speechPlayback.reset();
-    for (const source of activeAudioSources) source.stop();
+    previewSpeechController?.abort();
+    cancelSpeechMotion();
+    playCursor = scheduledEmotionEnd = audioCtx?.currentTime ?? 0;
+    for (const source of activeAudioSources) { try { source.stop(); } catch {} }
     updateUiForState('idle');
     setTimeout(connectWS, 1500);
   }); // sambung ulang

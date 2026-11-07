@@ -7,15 +7,16 @@
 import { tuning } from './tuningConfig.js';
 
 const GROUP_LABELS = {
-  idle:      '🫁 Idle & Breathing',
-  tracking:  '👀 Synthetic Face Tracking',
-  talking:   '🗣️ Talking Gesture & Audio-Reactive',
+  idle:      '🫁 Gerak diam & napas',
+  tracking:  '👀 Gerak kepala & pandangan',
+  talking:   '🗣️ Gestur saat bicara',
   vad:       '🎤 VAD & STT Threshold',
-  vision:    '🖥️ Vision & Screen Monitor',
+  vision:    '👁️ Layar & kamera',
+  conversation: '💬 Obrolan saat hening',
   models:    '🤖 Model & Voice Settings',
 };
 
-const GROUP_ORDER = ['idle', 'tracking', 'talking', 'vad', 'vision', 'models'];
+const GROUP_ORDER = ['idle', 'tracking', 'talking', 'vad', 'vision', 'conversation', 'models'];
 
 let panelEl = null;
 let isOpen = false;
@@ -37,19 +38,28 @@ export function initTuningPanel() {
 
   panelEl = document.createElement('div');
   panelEl.id = 'tuning-panel';
+  panelEl.setAttribute('role', 'region');
+  panelEl.setAttribute('aria-label', 'Animasi & Vision');
   panelEl.innerHTML = `
     <div class="tp-header">
       <div class="tp-title">
-        <h3>⚙️ Live2D Tuning Panel</h3>
-        <span class="tp-subtitle">VTube Studio style runtime parameter tuning</span>
+        <h3>⚙️ Animasi & Vision</h3>
+        <span class="tp-subtitle">Gerak avatar, kamera, layar, dan obrolan</span>
       </div>
       <div class="tp-header-btns">
-        <button class="tp-btn tp-save" title="Simpan ke animationConfig.json">💾 Save</button>
+        <button class="tp-btn tp-save" title="Simpan pengaturan">💾 Simpan</button>
         <button class="tp-btn tp-reset" title="Kembalikan semua ke default awal">🔄 Reset</button>
-        <button class="tp-btn tp-close" title="Tutup panel">✕</button>
+        <button class="tp-btn tp-close" title="Tutup panel" aria-label="Tutup Animasi & Vision">✕</button>
       </div>
     </div>
     <div class="tp-body"></div>
+    <div class="tp-preview" style="padding: 12px; display: flex; gap: 8px; flex-wrap: wrap">
+      <select class="tp-select" aria-label="Emosi pratinjau" id="speech-motion-preview-emotion">
+        <option value="netral">Netral</option><option value="kagum">Bersemangat</option><option value="sedih">Tenang / sedih</option>
+      </select>
+      <button class="tp-btn" id="speech-motion-preview">▶ Pratinjau gerak</button>
+      <small style="width: 100%">Nada uji selama 5 detik untuk melihat gestur tanpa meminta suara AI.</small>
+    </div>
   `;
 
   injectStyles();
@@ -69,12 +79,27 @@ export function initTuningPanel() {
   panelEl.querySelector('.tp-close').addEventListener('click', () => togglePanel(false));
   panelEl.querySelector('.tp-save').addEventListener('click', saveSettings);
   panelEl.querySelector('.tp-reset').addEventListener('click', resetSettings);
+  panelEl.querySelector('#speech-motion-preview').addEventListener('click', async () => {
+    try {
+      await window.__waifuTestSpeechMotion?.(panelEl.querySelector('#speech-motion-preview-emotion').value);
+    } catch (error) {
+      console.warn('[TuningPanel] Speech preview failed:', error);
+      showToast('Pratinjau gerak gagal diputar.');
+    }
+  });
 
   // Load saved settings on init from server or localStorage
   loadSettings();
 
   // Start hidden
   panelEl.classList.add('tp-hidden');
+  panelEl.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      togglePanel(false);
+      document.getElementById('tuning-toggle-btn')?.focus();
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -284,6 +309,7 @@ export function togglePanel(show) {
   if (show === undefined) show = !isOpen;
   isOpen = show;
   panelEl?.classList.toggle('tp-hidden', !isOpen);
+  document.getElementById('tuning-toggle-btn')?.setAttribute('aria-expanded', String(isOpen));
 }
 
 // ---------------------------------------------------------------------------

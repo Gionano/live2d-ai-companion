@@ -4,7 +4,11 @@ const canvas = document.getElementById('app');
 const status = document.getElementById('status');
 const companion = new Live2DCompanion(canvas, status);
 
-// Emotion cue dari companion.js (via CustomEvent).
+// Speech cues are scheduled against the audio playback clock.
+window.addEventListener('waifu-speech-cue', (event) => companion.queueSpeechCue(event.detail));
+window.addEventListener('waifu-speech-cancel', (event) => companion.cancelSpeechCue(event.detail?.speechId));
+
+// Early expression cues are only shown while no speech is queued.
 window.addEventListener('waifu-emotion-cue', (event) => {
   companion.setEmotionCue(event.detail?.emotion ?? 'netral', event.detail?.endAt ?? 0);
 });

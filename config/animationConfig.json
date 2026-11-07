@@ -109,8 +109,8 @@
       "desc": "Durasi satu siklus kembang kempis dada"
     },
     "chestWeight": {
-      "value": 1.0,
-      "default": 1.0,
+      "value": 1,
+      "default": 1,
       "min": 0,
       "max": 1,
       "step": 0.05,
@@ -147,8 +147,8 @@
       "desc": "Kecepatan noise gerakan kepala atas-bawah"
     },
     "headNoiseSpeedZ": {
-      "value": 0.10,
-      "default": 0.10,
+      "value": 0.1,
+      "default": 0.1,
       "min": 0.01,
       "max": 0.5,
       "step": 0.01,
@@ -156,35 +156,35 @@
       "desc": "Kecepatan noise gerakan kepala miring (tilt)"
     },
     "headRangeX": {
-      "value": 15,
-      "default": 15,
+      "value": 3,
+      "default": 3,
       "min": 0,
-      "max": 30,
+      "max": 6,
       "step": 1,
-      "label": "Head X Range (deg)",
+      "label": "Gerak kepala kiri-kanan",
       "desc": "Jangkauan sudut tolehan kepala kiri-kanan"
     },
     "headRangeY": {
-      "value": 15,
-      "default": 15,
+      "value": 2,
+      "default": 2,
       "min": 0,
-      "max": 30,
+      "max": 6,
       "step": 1,
-      "label": "Head Y Range (deg)",
+      "label": "Gerak kepala atas-bawah",
       "desc": "Jangkauan sudut anggukan kepala atas-bawah"
     },
     "headRangeZ": {
-      "value": 15,
-      "default": 15,
+      "value": 2,
+      "default": 2,
       "min": 0,
-      "max": 30,
+      "max": 6,
       "step": 1,
-      "label": "Head Z Range (deg)",
+      "label": "Kemiringan kepala",
       "desc": "Jangkauan sudut kemiringan kepala"
     },
     "eyeSaccadeMin": {
-      "value": 2.0,
-      "default": 2.0,
+      "value": 2,
+      "default": 2,
       "min": 0.5,
       "max": 10,
       "step": 0.5,
@@ -192,8 +192,8 @@
       "desc": "Jeda waktu paling cepat sebelum mata melirik ke titik baru"
     },
     "eyeSaccadeMax": {
-      "value": 5.0,
-      "default": 5.0,
+      "value": 5,
+      "default": 5,
       "min": 1,
       "max": 15,
       "step": 0.5,
@@ -201,39 +201,39 @@
       "desc": "Jeda waktu paling lama sebelum mata melirik ke titik baru"
     },
     "eyeGazeRangeX": {
-      "value": 0.7,
-      "default": 0.7,
+      "value": 0.25,
+      "default": 0.25,
       "min": 0.1,
-      "max": 1,
+      "max": 0.4,
       "step": 0.05,
-      "label": "Eye Gaze Range X",
+      "label": "Jarak pandangan horizontal",
       "desc": "Jangkauan lirik mata horizontal (kiri-kanan)"
     },
     "eyeGazeRangeY": {
-      "value": 0.5,
-      "default": 0.5,
+      "value": 0.15,
+      "default": 0.15,
       "min": 0.1,
-      "max": 1,
+      "max": 0.3,
       "step": 0.05,
-      "label": "Eye Gaze Range Y",
+      "label": "Jarak pandangan vertikal",
       "desc": "Jangkauan lirik mata vertikal (atas-bawah)"
     },
     "eyeLerpSpeed": {
-      "value": 12.0,
-      "default": 12.0,
+      "value": 5,
+      "default": 5,
       "min": 1,
       "max": 30,
       "step": 1,
-      "label": "Eye Snap Speed",
+      "label": "Kecepatan pandangan",
       "desc": "Kecepatan gerakan bola mata saat melirik (makin besar makin cepat snap)"
     },
     "browNoiseAmp": {
-      "value": 0.15,
-      "default": 0.15,
+      "value": 0.06,
+      "default": 0.06,
       "min": 0,
       "max": 0.5,
       "step": 0.01,
-      "label": "Brow Amplitude",
+      "label": "Gerak alis",
       "desc": "Amplitudo naik-turun halus alis saat idle"
     },
     "browNoiseSpeed": {
@@ -247,130 +247,13 @@
     }
   },
   "talking": {
-    "l1AttackMs": {
-      "value": 50,
-      "default": 50,
-      "min": 10,
-      "max": 200,
-      "step": 5,
-      "label": "L1 Attack (ms)",
-      "desc": "Kecepatan reaksi goyangan tubuh saat suara mulai terdengar"
-    },
-    "l1ReleaseMs": {
-      "value": 250,
-      "default": 250,
-      "min": 50,
-      "max": 600,
-      "step": 10,
-      "label": "L1 Release (ms)",
-      "desc": "Kehalusan tubuh melambat kembali ke posisi netral saat suara berhenti"
-    },
-    "l1BodyXRange": {
-      "value": 10,
-      "default": 10,
-      "min": 0,
-      "max": 30,
-      "step": 1,
-      "label": "Body X Sway Range",
-      "desc": "Jarak goyang badan kiri-kanan saat berbicara"
-    },
-    "l1BodyYRange": {
-      "value": 5,
-      "default": 5,
-      "min": 0,
-      "max": 20,
-      "step": 1,
-      "label": "Body Y Bounce Range",
-      "desc": "Jarak goyang badan atas-bawah (pantulan napas bicara)"
-    },
-    "l1AngleYOutRange": {
-      "value": 30,
-      "default": 30,
-      "min": 0,
-      "max": 45,
-      "step": 1,
-      "label": "Angle Y Tilt Range",
-      "desc": "Jarak goyang kepala atas-bawah saat berbicara"
-    },
-    "l1AngleYLimitMin": {
-      "value": -30,
-      "default": -30,
-      "min": -45,
-      "max": 0,
-      "step": 1,
-      "label": "Angle Y Limit Min",
-      "desc": "Batas sudut bawah goyang kepala"
-    },
-    "l1AngleYLimitMax": {
-      "value": 12,
-      "default": 12,
-      "min": 0,
-      "max": 45,
-      "step": 1,
-      "label": "Angle Y Limit Max",
-      "desc": "Batas sudut atas goyang kepala (mencegah mendongak berlebihan)"
-    },
-    "l1SineFreqX": {
-      "value": 4.3,
-      "default": 4.3,
-      "min": 1,
-      "max": 10,
-      "step": 0.1,
-      "label": "Sine Freq X (rad/s)",
-      "desc": "Frekuensi ritme goyang badan kiri-kanan (~0.68 Hz)"
-    },
-    "l1SineFreqY": {
-      "value": 3.1,
-      "default": 3.1,
-      "min": 1,
-      "max": 10,
-      "step": 0.1,
-      "label": "Sine Freq Y (rad/s)",
-      "desc": "Frekuensi ritme pantulan badan atas-bawah (~0.49 Hz)"
-    },
-    "l1SineFreqAngle": {
-      "value": 2.7,
-      "default": 2.7,
-      "min": 1,
-      "max": 10,
-      "step": 0.1,
-      "label": "Sine Freq Angle (rad/s)",
-      "desc": "Frekuensi ritme anggukan kepala saat berbicara (~0.43 Hz)"
-    },
-    "l1PhaseX": {
-      "value": 0,
-      "default": 0,
-      "min": 0,
-      "max": 6.28,
-      "step": 0.1,
-      "label": "Phase X (rad)",
-      "desc": "Offset fase goyang badan X agar gerakan tidak simetris monoton"
-    },
-    "l1PhaseY": {
-      "value": 1.7,
-      "default": 1.7,
-      "min": 0,
-      "max": 6.28,
-      "step": 0.1,
-      "label": "Phase Y (rad)",
-      "desc": "Offset fase goyang badan Y"
-    },
-    "l1PhaseAngle": {
-      "value": 3.3,
-      "default": 3.3,
-      "min": 0,
-      "max": 6.28,
-      "step": 0.1,
-      "label": "Phase Angle (rad)",
-      "desc": "Offset fase anggukan kepala"
-    },
     "lipSyncSmoothing": {
       "value": 14,
       "default": 14,
       "min": 2,
       "max": 30,
       "step": 1,
-      "label": "Lip-Sync Smoothing",
+      "label": "Kehalusan gerak mulut",
       "desc": "Kecepatan respons mulut terhadap audio (makin tinggi makin lincah)"
     },
     "lipSyncGain": {
@@ -379,62 +262,53 @@
       "min": 0.5,
       "max": 4,
       "step": 0.1,
-      "label": "Lip-Sync Gain",
+      "label": "Kepekaan gerak mulut",
       "desc": "Pengali kepekaan buka mulut (makin besar makin lebar membuka)"
     },
-    "l2ProbTinggi": {
-      "value": 0.85,
-      "default": 0.85,
+    "gestureStrength": {
+      "value": 1,
+      "default": 1,
       "min": 0,
-      "max": 1,
+      "max": 2,
       "step": 0.05,
-      "label": "Gesture Prob (High Emotion)",
-      "desc": "Peluang memicu motion klip khusus di jeda kalimat saat emosi tinggi"
+      "label": "Kekuatan gerak",
+      "desc": "Besar anggukan, kemiringan kepala, dan respons terhadap penekanan suara"
     },
-    "l2ProbSedang": {
-      "value": 0.55,
-      "default": 0.55,
+    "bodyGestureStrength": {
+      "value": 1,
+      "default": 1,
       "min": 0,
-      "max": 1,
-      "step": 0.05,
-      "label": "Gesture Prob (Med Emotion)",
-      "desc": "Peluang memicu motion klip khusus di jeda kalimat saat emosi sedang"
-    },
-    "l2ProbRendah": {
-      "value": 0.30,
-      "default": 0.30,
-      "min": 0,
-      "max": 1,
-      "step": 0.05,
-      "label": "Gesture Prob (Low Emotion)",
-      "desc": "Peluang memicu motion klip khusus di jeda kalimat saat emosi rendah"
-    },
-    "intensityTinggi": {
-      "value": 1.6,
-      "default": 1.6,
-      "min": 0.5,
-      "max": 3,
-      "step": 0.1,
-      "label": "Multiplier High Emotion",
-      "desc": "Pengali ekspresi dan gerakan saat emosi tinggi (marah, terkejut, dll)"
-    },
-    "intensitySedang": {
-      "value": 1.0,
-      "default": 1.0,
-      "min": 0.3,
       "max": 2,
       "step": 0.1,
-      "label": "Multiplier Med Emotion",
-      "desc": "Pengali ekspresi dan gerakan baseline (normal)"
+      "label": "Kekuatan gestur badan",
+      "desc": "Besar gestur torso saat berbicara untuk model dengan kontrol badan; terpisah dari gerak kepala"
     },
-    "intensityRendah": {
-      "value": 0.5,
-      "default": 0.5,
-      "min": 0.1,
-      "max": 1.5,
+    "gestureFrequency": {
+      "value": 1,
+      "default": 1,
+      "min": 0,
+      "max": 2,
       "step": 0.1,
-      "label": "Multiplier Low Emotion",
-      "desc": "Pengali ekspresi dan gerakan saat emosi halus (sedih, malu, dll)"
+      "label": "Frekuensi gestur",
+      "desc": "Seberapa sering gestur dimulai; 0 menonaktifkan gestur bicara"
+    },
+    "gestureSmoothingMs": {
+      "value": 140,
+      "default": 140,
+      "min": 40,
+      "max": 600,
+      "step": 10,
+      "label": "Kehalusan gerak (ms)",
+      "desc": "Waktu peralihan pose; nilai lebih besar membuat gerak lebih lembut"
+    },
+    "bodyLeanStrength": {
+      "value": 1,
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "label": "Kemiringan seluruh model",
+      "desc": "Kemiringan kecil seluruh model untuk model tanpa kontrol torso; 0 menonaktifkannya"
     }
   },
   "vad": {

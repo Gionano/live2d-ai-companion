@@ -1,8 +1,9 @@
 export class SpeechPlayback {
-  constructor({ playAudio, onFinished, onChange = () => {} }) {
+  constructor({ playAudio, onFinished, onChange = () => {}, onCancelled = () => {} }) {
     this.playAudio = playAudio;
     this.onFinished = onFinished;
     this.onChange = onChange;
+    this.onCancelled = onCancelled;
     this.speeches = new Map();
     this.chain = Promise.resolve();
   }
@@ -27,6 +28,7 @@ export class SpeechPlayback {
       speech.ended = true;
       speech.chunks = [];
       speech.controller.abort();
+      this.onCancelled(speechId);
       this.checkFinished(speech);
       return;
     }
@@ -47,11 +49,12 @@ export class SpeechPlayback {
     const chunks = speech.chunks;
     speech.chunks = [];
     speech.pending++;
+    const options = { signal: speech.controller.signal, speechId: speech.speechId };
     this.chain = this.chain.then(async () => {
       if (this.speeches.get(speech.speechId) !== speech) return;
       try {
         if (!speech.controller.signal.aborted) {
-          await this.playAudio(chunks, emotion, { signal: speech.controller.signal });
+          await this.playAudio(chunks, emotion, options);
         }
       } catch (err) {
         console.error('[playback]', err.message);
@@ -70,7 +73,10 @@ export class SpeechPlayback {
   }
 
   reset() {
-    for (const speech of this.speeches.values()) speech.controller.abort();
+    for (const speech of this.speeches.values()) {
+      speech.controller.abort();
+      this.onCancelled(speech.speechId);
+    }
     this.speeches.clear();
     this.onChange();
   }

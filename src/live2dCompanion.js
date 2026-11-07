@@ -1,9 +1,7 @@
 // ---------------------------------------------------------------------------
 // live2dCompanion.js  (browser-side)
 // Official Live2D Cubism Web Framework adapter for this companion.
-// Supports: emotion-driven expressions, hybrid talking animation
-// (Layer 1: procedural audio-reactive, Layer 2: discrete motion clips),
-// and synthetic face tracking (Simplex noise head/eye/brow).
+// Supports emotion expressions, speech-timed gesture banks and subtle idle movement.
 // ---------------------------------------------------------------------------
 import { CubismFramework, LogLevel, Option } from '@framework/live2dcubismframework';
 import { CubismModelSettingJson } from '@framework/cubismmodelsettingjson';
@@ -12,7 +10,9 @@ import { CubismEyeBlink } from '@framework/effect/cubismeyeblink';
 import { BreathParameterData, CubismBreath } from '@framework/effect/cubismbreath';
 import { CubismMatrix44 } from '@framework/math/cubismmatrix44';
 import { CubismMotionManager } from '@framework/motion/cubismmotionmanager';
-import { EMOTION_MAP, INTENSITY_MULTIPLIER } from './expressionMap.js';
+import { EMOTION_MAP } from './expressionMap.js';
+import { SpeechMotionController, resolveMotionParameters, resolveModelCapabilities, applyMotionOffsets, bodyLeanTransform, bodyLeanMargin } from './speechMotion.js';
+import { BodyMotionController, resolvePhysicsBodyParameters, prepareBodyPhysics } from './bodyMotion.js';
 import { SyntheticTracker } from './syntheticTracking.js';
 import { tuning } from './tuningConfig.js';
 
@@ -39,44 +39,6 @@ const SHADER_PATH = '/vendor/live2d/shaders/';
 const PRIORITY_IDLE = 1;
 const PRIORITY_TALKING = 3;
 
-// Helper fungsi untuk mapping ala VTube Studio
-function mapVTS(value, config, multiplier = 1.0) {
-  // Normalize input ke 0..1 berdasarkan inMin dan inMax
-  const t = (value - config.inMin) / (config.inMax - config.inMin);
-  // Lerp ke range output
-  const out = config.outMin + t * (config.outMax - config.outMin);
-  // Kalikan dengan intensitas emosi, lalu clamp ke limitMin dan limitMax
-  const finalValue = out * multiplier;
-  return Math.max(config.limitMin, Math.min(config.limitMax, finalValue));
-}
-
-// --- Layer 1 tuning knobs ---------------------------------------------------
-// EMA smoothing: attack cepat supaya responsif, release lambat supaya halus.
-const L1_ATTACK_MS = 50;
-const L1_RELEASE_MS = 250;
-
-// Konfigurasi Mapping VTube Studio untuk Layer 1 (Audio Reactive)
-// Input berupa (audio_envelope * sine_wave) yang nilainya berkisar antara -1.0 sampai 1.0
-const L1_BODY_X_CONFIG = { inMin: -1, inMax: 1, outMin: -10, outMax: 10, limitMin: -10, limitMax: 10 };
-const L1_BODY_Y_CONFIG = { inMin: -1, inMax: 1, outMin: -5,  outMax: 5,  limitMin: -10, limitMax: 10 };
-const L1_ANGLE_Y_CONFIG = { inMin: -1, inMax: 1, outMin: -30, outMax: 30, limitMin: -30, limitMax: 12 };
-// Noise offsets agar gerakan tidak terlalu simetris.
-const L1_PHASE_X = 0;
-const L1_PHASE_Y = 1.7;
-const L1_PHASE_ANGLE = 3.3;
-
-// --- Layer 2 tuning ---------------------------------------------------------
-// Probabilitas trigger motion di jeda kalimat, per intensity.
-const L2_TRIGGER_PROB = { tinggi: 0.85, sedang: 0.55, rendah: 0.3 };
-
-// Debug logging throttle for Layer 1 magnitude.
-let lastL1LogTime = 0;
-const L1_LOG_INTERVAL_MS = 2000;
-
-// Combined layer debug log (all layers together).
-let lastCombinedLogTime = 0;
-const COMBINED_LOG_INTERVAL_MS = 5000;
-
 function fetchBuffer(url) {
   return fetch(url).then((response) => {
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${url}`);
@@ -102,11 +64,6 @@ function initializeCubism() {
   option.loggingLevel = LogLevel.LogLevel_Warning;
   CubismFramework.startUp(option);
   CubismFramework.initialize();
-}
-
-// EMA helper: compute alpha from target time constant and frame delta.
-function emaAlpha(timeConstantMs, deltaSec) {
-  return 1 - Math.exp((-deltaSec * 1000) / timeConstantMs);
 }
 
 class CompanionCubismModel extends CubismUserModel {
@@ -143,19 +100,19 @@ class CompanionCubismModel extends CubismUserModel {
     this.currentEmotion = 'netral';
     this.currentIntensity = 'sedang';
 
-    // --- Layer 1: procedural audio-reactive ---
-    this.l1Envelope = 0;       // smoothed audio level 0..1
-    this.l1BodyX = 0;
-    this.l1BodyY = 0;
-    this.l1AngleY = 0;
-    this.l1Time = 0;           // running timer for slight phase variation
-    this.bodyXIndex = -1;
-    this.bodyYIndex = -1;
-    this.angleYIndex = -1;
-
-    // --- Layer 2: discrete motion pool ---
-    this.talkMotionPool = [];  // filled after motions load
-    this.lastL2MotionKey = null;
+    this.motionParameters = {};
+    this.physicsOutputs = new Set();
+    this.bodyMotion = null;
+    this.speechPose = {};
+    this.speechBounds = { minX: -0.5, maxX: 0.5, minY: -0.2, maxY: 0.65 };
+    this.speechMotion = new SpeechMotionController({ getOptions: () => ({
+      strength: tuning.get('talking.gestureStrength'),
+      frequency: tuning.get('talking.gestureFrequency'),
+      smoothingMs: tuning.get('talking.gestureSmoothingMs'),
+    }) });
+    this._unsubscribeTuning = tuning.onChange((group) => {
+      if (group === 'idle' && this.ready) this.setupBreath();
+    });
 
     // --- Synthetic face tracking (always-on) ---
     this.syntheticTracker = new SyntheticTracker();
@@ -181,7 +138,7 @@ class CompanionCubismModel extends CubismUserModel {
     const count = this._model.getParameterCount();
     for (let i = 0; i < count; i++) {
       const idHandle = this._model.getParameterId(i);
-      const idStr = idHandle.getString().s;
+      const idStr = idHandle.getString();
       const min = this._model.getParameterMinimumValue(i);
       const max = this._model.getParameterMaximumValue(i);
       const def = this._model.getParameterDefaultValue(i);
@@ -213,13 +170,16 @@ class CompanionCubismModel extends CubismUserModel {
       this.loadMotionGroups(),
     ]);
 
-    const blinkIds = [];
+    const declaredBlinkIds = [];
     for (let i = 0; i < this.setting.getEyeBlinkParameterCount(); i++) {
-      const pId = this.setting.getEyeBlinkParameterId(i);
-      if (this.hasParameter(pId.getString().s)) {
-        blinkIds.push(pId);
-      }
+      declaredBlinkIds.push(this.setting.getEyeBlinkParameterId(i).getString());
     }
+    const capabilities = resolveModelCapabilities(this.availableParams, {
+      blinkIds: declaredBlinkIds,
+      wingExpressionRegistered: this.expressions.has(this.wingExpressionName),
+    });
+    const idMgr = CubismFramework.getIdManager();
+    const blinkIds = capabilities.blinkIds.map(id => idMgr.getId(id));
     if (blinkIds.length) {
       this.eyeBlink = CubismEyeBlink.create(this.setting);
       this.eyeBlink.setParameterIds(blinkIds);
@@ -230,33 +190,21 @@ class CompanionCubismModel extends CubismUserModel {
 
     this.setupBreath();
 
-    const idMgr = CubismFramework.getIdManager();
-    const mouthId = idMgr.getId('ParamMouthOpenY');
-    this.mouthParameterIndex = this._model.getParameterIndex(mouthId);
+    this.mouthParameterIndex = this.availableParams.get('ParamMouthOpenY')?.index ?? -1;
     if (this.mouthParameterIndex >= 0) {
       console.log('[Live2D] Mouth parameter: ParamMouthOpenY aktif.');
     } else {
       console.warn('[Live2D] Model ini tidak punya ParamMouthOpenY, fitur lip-sync mulut dinonaktifkan.');
     }
 
-    // Resolve Layer 1 parameter indices & issue one-time warnings (Requirement 4)
-    this.bodyXIndex = this._model.getParameterIndex(idMgr.getId('ParamBodyX'));
-    this.bodyYIndex = this._model.getParameterIndex(idMgr.getId('ParamBodyY'));
-    this.angleYIndex = this._model.getParameterIndex(idMgr.getId('ParamAngleY'));
-    console.log(`[Live2D] Layer 1 params: BodyX=${this.bodyXIndex}, BodyY=${this.bodyYIndex}, AngleY=${this.angleYIndex}`);
-
-    if (this.bodyXIndex < 0) {
-      console.warn('[Live2D] Model ini tidak punya ParamBodyX, fitur body sway horizontal dinonaktifkan.');
-    }
-    if (this.bodyYIndex < 0) {
-      console.warn('[Live2D] Model ini tidak punya ParamBodyY, fitur body sway vertikal dinonaktifkan.');
-    }
-    if (this.angleYIndex < 0) {
-      console.warn('[Live2D] Model ini tidak punya ParamAngleY, fitur head sway dinonaktifkan.');
-    }
+    this.motionParameters = resolveMotionParameters(this.availableParams, this.physicsOutputs);
+    this.hasRiggedBody = capabilities.hasBodyRig;
+    console.log('[Live2D] Speech motion controls:', Object.fromEntries(
+      Object.entries(this.motionParameters).map(([key, param]) => [key, param?.id ?? null]),
+    ));
 
     // Resolve wing parameter (Param41 / 翅膀.exp3.json) & half-body hidden leg parts for overlay mode
-    this.wingParamIndex = this._model.getParameterIndex(idMgr.getId('Param41'));
+    this.wingParamIndex = capabilities.wingParameterIndex;
     this.hiddenHalfBodyPartIndices = [];
     for (const partIdStr of this.hiddenHalfBodyPartIds) {
       const pIdx = this._model.getPartIndex(idMgr.getId(partIdStr));
@@ -265,15 +213,14 @@ class CompanionCubismModel extends CubismUserModel {
       }
     }
 
-    // Resolve synthetic tracking parameter indices (with one-time warnings)
-    this.syntheticTracker.resolveIndices(this._model, idMgr, this.availableParams);
-
     this._model.saveParameters();
 
     if (this.isOverlay) {
       this.measureRestPoseOverlayBounds();
     }
 
+    this._model.update();
+    this.speechBounds = this.measureVisibleBounds();
     this.createRenderer(this.canvas.width, this.canvas.height);
     this.getRenderer().startUp(this.gl);
     this.getRenderer().setIsPremultipliedAlpha(true);
@@ -307,6 +254,11 @@ class CompanionCubismModel extends CubismUserModel {
       const buffer = await fetchBuffer(`${this.homeDir}${file}`);
       const json = JSON.parse(new TextDecoder().decode(buffer));
       const settings = json.PhysicsSettings ?? [];
+      this.physicsOutputs = new Set(settings.flatMap(item => (item.Output ?? []).map(output => output.Destination?.Id)));
+      const bodyParameters = resolvePhysicsBodyParameters(this.availableParams, this.physicsOutputs);
+      this.bodyMotion = new BodyMotionController(bodyParameters, { getOptions: () => ({
+        strength: tuning.get('talking.bodyGestureStrength'),
+      }) });
       this.physicsStats = {
         file,
         rigs: settings.length,
@@ -314,7 +266,8 @@ class CompanionCubismModel extends CubismUserModel {
         outputs: settings.reduce((sum, item) => sum + (item.Output?.length ?? 0), 0),
         particles: settings.reduce((sum, item) => sum + (item.Vertices?.length ?? 0), 0),
       };
-      this.loadPhysics(buffer, buffer.byteLength);
+      const prepared = new TextEncoder().encode(JSON.stringify(prepareBodyPhysics(json, bodyParameters)));
+      this.loadPhysics(prepared.buffer, prepared.byteLength);
       if (!this._physics) throw new Error('CubismPhysics.create() returned null');
       console.log(
         `[Live2D] Physics loaded: ${file} | ${this.physicsStats.rigs} rigs,` +
@@ -322,24 +275,27 @@ class CompanionCubismModel extends CubismUserModel {
           ` ${this.physicsStats.particles} particles`,
       );
     } catch (error) {
+      this.physicsOutputs.clear();
+      this.bodyMotion = null;
       console.error(`[Live2D] Physics load failed: ${file}`, error);
     }
   }
 
   setupBreath() {
     const id = (name) => CubismFramework.getIdManager().getId(name);
+    const value = (key, fallback) => tuning.get(`idle.${key}`) ?? fallback;
     const breathParams = [];
     if (this.hasParameter('ParamAngleX')) {
-      breathParams.push(new BreathParameterData(id('ParamAngleX'), 0, 8, 6.5345, 0.35));
+      breathParams.push(new BreathParameterData(id('ParamAngleX'), 0, value('angleXPeak', 8), value('angleXCycle', 6.5345), value('angleXWeight', 0.35)));
     }
     if (this.hasParameter('ParamAngleY')) {
-      breathParams.push(new BreathParameterData(id('ParamAngleY'), 0, 5, 3.5345, 0.3));
+      breathParams.push(new BreathParameterData(id('ParamAngleY'), 0, value('angleYPeak', 5), value('angleYCycle', 3.5345), value('angleYWeight', 0.3)));
     }
     if (this.hasParameter('ParamAngleZ')) {
-      breathParams.push(new BreathParameterData(id('ParamAngleZ'), 0, 6, 5.5345, 0.3));
+      breathParams.push(new BreathParameterData(id('ParamAngleZ'), 0, value('angleZPeak', 6), value('angleZCycle', 5.5345), value('angleZWeight', 0.3)));
     }
     if (this.hasParameter('ParamBreath')) {
-      breathParams.push(new BreathParameterData(id('ParamBreath'), 0.5, 0.5, 3.2345, 1));
+      breathParams.push(new BreathParameterData(id('ParamBreath'), value('chestOffset', 0.5), value('chestPeak', 0.5), value('chestCycle', 3.2345), value('chestWeight', 1)));
     }
 
     if (breathParams.length > 0) {
@@ -373,14 +329,6 @@ class CompanionCubismModel extends CubismUserModel {
     await Promise.all(jobs);
     console.log('[Live2D] Motion groups:', Object.fromEntries(this.motionGroups));
 
-    // Build Layer 2 talk motion pool from Special group only (to avoid hand movements).
-    for (const group of ['special']) {
-      const keys = this.motionGroups.get(group) ?? [];
-      for (const key of keys) {
-        if (this.motions.has(key)) this.talkMotionPool.push(key);
-      }
-    }
-    console.log('[Live2D] Layer 2 talk motion pool:', this.talkMotionPool);
   }
 
   async loadTextures() {
@@ -423,7 +371,11 @@ class CompanionCubismModel extends CubismUserModel {
       hasEyeBlink: Boolean(this.eyeBlink),
       hasBreath: Boolean(this.breath),
       hasLipSync: this.mouthParameterIndex >= 0,
-      hasBodySway: this.bodyXIndex >= 0 || this.bodyYIndex >= 0,
+      hasBodySway: this.hasRiggedBody,
+      hasBodyLean: !this.hasRiggedBody,
+      hasBodyFollow: Boolean(this.bodyMotion && Object.values(this.bodyMotion.parameters).some(Boolean)),
+      speechMotion: { emotion: this.speechPose.emotion, gesture: this.speechPose.gesture,
+        active: this.speechPose.active, energy: this.speechPose.energy },
     };
   }
 
@@ -432,6 +384,9 @@ class CompanionCubismModel extends CubismUserModel {
    */
   dispose() {
     this.ready = false;
+    this.speechMotion.reset();
+    this.bodyMotion?.reset();
+    this._unsubscribeTuning?.();
 
     // 1. Stop and release all motion managers
     try {
@@ -457,7 +412,6 @@ class CompanionCubismModel extends CubismUserModel {
     this.expressions.clear();
     this.motions.clear();
     this.motionGroups.clear();
-    this.talkMotionPool = [];
     this.availableParams?.clear();
     this.parametersList = [];
 
@@ -508,11 +462,6 @@ class CompanionCubismModel extends CubismUserModel {
     }
   }
 
-  getCurrentIntensityMultiplier() {
-    const key = `talking.intensity${this.currentIntensity.charAt(0).toUpperCase() + this.currentIntensity.slice(1)}`;
-    return tuning.get(key) ?? INTENSITY_MULTIPLIER[this.currentIntensity] ?? 1.0;
-  }
-
   // ---------------------------------------------------------------------------
   // Motion control
   // ---------------------------------------------------------------------------
@@ -560,116 +509,16 @@ class CompanionCubismModel extends CubismUserModel {
   }
 
   // ---------------------------------------------------------------------------
-  // Layer 2: trigger a discrete motion clip at sentence breaks.
-  // ---------------------------------------------------------------------------
-  triggerTalkMotion() {
-    if (this.talkMotionPool.length === 0) return;
-
-    // Bias: intensity rendah → sering skip; tinggi → hampir selalu trigger.
-    const probKey = `talking.l2Prob${this.currentIntensity.charAt(0).toUpperCase() + this.currentIntensity.slice(1)}`;
-    const prob = tuning.get(probKey) ?? L2_TRIGGER_PROB[this.currentIntensity] ?? 0.55;
-    if (Math.random() > prob) {
-      console.log(`[Live2D L2] Skip motion (prob ${prob.toFixed(2)}, intensity: ${this.currentIntensity})`);
-      return;
-    }
-
-    // Pick random, avoid repeating the last one.
-    let candidates = this.talkMotionPool.filter((k) => k !== this.lastL2MotionKey);
-    if (candidates.length === 0) candidates = this.talkMotionPool;
-    const key = candidates[Math.floor(Math.random() * candidates.length)];
-    const motion = this.motions.get(key);
-    if (!motion) return;
-
-    motion.setLoop(false);
-    motion.setFadeInTime(0.25);
-    motion.setFadeOutTime(0.35);
-    this.actionMotionManager.startMotionPriority(motion, false, PRIORITY_TALKING);
-    this.lastL2MotionKey = key;
-    console.log(`[Live2D L2] Triggered sentence-break motion: ${key} (intensity: ${this.currentIntensity})`);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Layer 1: procedural audio-reactive body movement.
-  // Smooths the mouth level with asymmetric EMA (fast attack, slow release),
-  // then drives ParamBodyX/Y and ParamAngleY with small, natural offsets.
-  // ---------------------------------------------------------------------------
-  updateLayer1(delta, mouthLevel) {
-    // Asymmetric EMA: use fast alpha when level is rising, slow when falling.
-    const target = Math.max(0, Math.min(1, mouthLevel));
-    const rising = target > this.l1Envelope;
-    const attackMs = tuning.get('talking.l1AttackMs') ?? L1_ATTACK_MS;
-    const releaseMs = tuning.get('talking.l1ReleaseMs') ?? L1_RELEASE_MS;
-    const alpha = emaAlpha(rising ? attackMs : releaseMs, delta);
-    this.l1Envelope += (target - this.l1Envelope) * alpha;
-
-    this.l1Time += delta;
-    const env = this.l1Envelope;
-    const mult = this.getCurrentIntensityMultiplier();
-
-    // Read sine frequencies and phases from tuning config
-    const freqX = tuning.get('talking.l1SineFreqX') ?? 4.3;
-    const freqY = tuning.get('talking.l1SineFreqY') ?? 3.1;
-    const freqAngle = tuning.get('talking.l1SineFreqAngle') ?? 2.7;
-    const phaseX = tuning.get('talking.l1PhaseX') ?? L1_PHASE_X;
-    const phaseY = tuning.get('talking.l1PhaseY') ?? L1_PHASE_Y;
-    const phaseAngle = tuning.get('talking.l1PhaseAngle') ?? L1_PHASE_ANGLE;
-
-    const sineX = Math.sin(this.l1Time * freqX + phaseX);
-    const sineY = Math.sin(this.l1Time * freqY + phaseY);
-    const sineAngle = Math.sin(this.l1Time * freqAngle + phaseAngle);
-
-    // Build VTS configs from tuning
-    const bodyXRange = tuning.get('talking.l1BodyXRange') ?? 10;
-    const bodyYRange = tuning.get('talking.l1BodyYRange') ?? 5;
-    const angleYOutRange = tuning.get('talking.l1AngleYOutRange') ?? 30;
-    const bodyXConfig = { inMin: -1, inMax: 1, outMin: -bodyXRange, outMax: bodyXRange, limitMin: -bodyXRange, limitMax: bodyXRange };
-    const bodyYConfig = { inMin: -1, inMax: 1, outMin: -bodyYRange, outMax: bodyYRange, limitMin: -10, limitMax: 10 };
-    const angleYConfig = { inMin: -1, inMax: 1, outMin: -angleYOutRange, outMax: angleYOutRange, limitMin: tuning.get('talking.l1AngleYLimitMin') ?? -30, limitMax: tuning.get('talking.l1AngleYLimitMax') ?? 12 };
-
-    const bodyX = mapVTS(env * sineX, bodyXConfig, mult);
-    const bodyY = mapVTS(env * sineY, bodyYConfig, mult);
-    const angleY = mapVTS(env * sineAngle, angleYConfig, mult);
-
-    this.l1BodyX = bodyX;
-    this.l1BodyY = bodyY;
-    this.l1AngleY = angleY;
-
-    // Apply additively AFTER breath (which also touches AngleY).
-    if (this.bodyXIndex >= 0) {
-      const cur = this._model.getParameterValueByIndex(this.bodyXIndex);
-      this._model.setParameterValueByIndex(this.bodyXIndex, cur + bodyX);
-    }
-    if (this.bodyYIndex >= 0) {
-      const cur = this._model.getParameterValueByIndex(this.bodyYIndex);
-      this._model.setParameterValueByIndex(this.bodyYIndex, cur + bodyY);
-    }
-    if (this.angleYIndex >= 0) {
-      const cur = this._model.getParameterValueByIndex(this.angleYIndex);
-      this._model.setParameterValueByIndex(this.angleYIndex, cur + angleY);
-    }
-
-    // Throttled debug log.
-    const now = performance.now();
-    if (now - lastL1LogTime > L1_LOG_INTERVAL_MS && env > 0.01) {
-      lastL1LogTime = now;
-      console.log(
-        `[Live2D L1] env=${env.toFixed(3)} mult=${mult.toFixed(1)}` +
-        ` | bodyX=${bodyX.toFixed(2)} bodyY=${bodyY.toFixed(2)} angleY=${angleY.toFixed(2)}` +
-        ` | emotion=${this.currentEmotion} (${this.currentIntensity})`,
-      );
-    }
-  }
-
-  // ---------------------------------------------------------------------------
   // Main update loop
   // ---------------------------------------------------------------------------
-  update(delta, mouthLevel, speaking) {
+  update(delta, mouthLevel, speaking, audioTime) {
     if (!this.ready) return;
-    if (speaking !== this.talking) {
-      this.talking = speaking;
-      // We no longer trigger looping talking motions (which cause hand waving)
-      // because we rely purely on Layer 1 (procedural sway) and Layer 2 (sentence-break clips).
+    this.talking = speaking;
+    this.speechPose = this.speechMotion.update(audioTime, delta);
+    if (this.speechPose.active || this._speechWasActive) {
+      if (this.currentEmotion !== this.speechPose.emotion) this.setEmotion(this.speechPose.emotion);
     }
+    this._speechWasActive = this.speechPose.active;
 
     this._model.loadParameters();
 
@@ -709,32 +558,10 @@ class CompanionCubismModel extends CubismUserModel {
       this._model.setParameterValueByIndex(this.mouthParameterIndex, this.smoothedMouth);
     }
 
-    // Layer 1: procedural audio-reactive body sway (only while speaking).
-    if (speaking) {
-      this.updateLayer1(delta, mouthLevel);
-    } else if (this.l1Envelope > 0.001) {
-      // Decay to zero when not speaking.
-      this.updateLayer1(delta, 0);
-    }
-
-    // Synthetic face tracking: always active (idle + talking), additive.
-    this.syntheticTracker.update(this._model, delta);
-
-    // Combined layer debug log (throttled).
-    const now = performance.now();
-    if (now - lastCombinedLogTime > COMBINED_LOG_INTERVAL_MS) {
-      lastCombinedLogTime = now;
-      const st = this.syntheticTracker.lastOutputs;
-      const l1Active = this.l1Envelope > 0.01;
-      console.log(
-        `[Live2D Layers] emotion=${this.currentEmotion}(${this.currentIntensity})` +
-        ` | breath=active` +
-        ` | tracking: head(${st.headX?.toFixed(1) ?? '-'},${st.headY?.toFixed(1) ?? '-'},${st.headZ?.toFixed(1) ?? '-'})` +
-        ` eye(${st.eyeX?.toFixed(2) ?? '-'},${st.eyeY?.toFixed(2) ?? '-'})` +
-        ` brow(${st.browL?.toFixed(3) ?? '-'},${st.browR?.toFixed(3) ?? '-'})` +
-        ` | talking-L1=${l1Active ? `env=${this.l1Envelope.toFixed(3)}` : 'off'}`,
-      );
-    }
+    // Compose head, gaze and brows once, after expressions and before physics.
+    const idle = this.syntheticTracker.sample(delta, this.speechPose.active);
+    applyMotionOffsets(this._model, this.motionParameters, this.speechPose, idle);
+    this.bodyMotion?.update(this._model, this.speechPose, delta);
 
     if (this._physics) {
       this._physics.evaluate(this._model, delta);
@@ -949,10 +776,11 @@ class CompanionCubismModel extends CubismUserModel {
       bottom: 0.010,
     };
 
-    const fitMinX = restBounds.minX - (margin.left || 0);
-    const fitMaxX = restBounds.maxX + (margin.right || 0);
-    const fitMinY = restBounds.minY - (margin.bottom || 0);
-    const fitMaxY = restBounds.maxY + (margin.top || 0);
+    const leanMargin = this.hasRiggedBody ? { x: 0, y: 0 } : bodyLeanMargin(restBounds);
+    const fitMinX = restBounds.minX - (margin.left || 0) - leanMargin.x;
+    const fitMaxX = restBounds.maxX + (margin.right || 0) + leanMargin.x;
+    const fitMinY = restBounds.minY - (margin.bottom || 0) - leanMargin.y;
+    const fitMaxY = restBounds.maxY + (margin.top || 0) + leanMargin.y;
 
     const boundsWidth = Math.max(0.01, fitMaxX - fitMinX);
     const boundsHeight = Math.max(0.01, fitMaxY - fitMinY);
@@ -1005,6 +833,20 @@ class CompanionCubismModel extends CubismUserModel {
     return projection;
   }
 
+  measureVisibleBounds() {
+    const drawables = this._model?._model?.drawables;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let i = 0; i < (drawables?.count ?? 0); i++) {
+      if (drawables.opacities[i] <= 0.01 || !Live2DCubismCore.Utils.hasIsVisibleBit(drawables.dynamicFlags[i])) continue;
+      const vertices = drawables.vertexPositions[i];
+      for (let j = 0; j < vertices.length; j += 2) {
+        minX = Math.min(minX, vertices[j]); maxX = Math.max(maxX, vertices[j]);
+        minY = Math.min(minY, vertices[j + 1]); maxY = Math.max(maxY, vertices[j + 1]);
+      }
+    }
+    return Number.isFinite(minX) ? { minX, maxX, minY, maxY } : this.speechBounds;
+  }
+
   setFraming(scale = 1.0, x = 0.0, y = 0.0, immediate = false) {
     this.targetFraming = { scale, x, y };
     if (immediate || !this.currentFraming) {
@@ -1052,6 +894,12 @@ class CompanionCubismModel extends CubismUserModel {
       projection.multiplyByMatrix(this.getModelMatrix());
     }
 
+    if (!this.hasRiggedBody) {
+      const bounds = this.isOverlay ? this.measuredPresetBounds.get(this.overlayPresetId) ?? this.speechBounds : this.speechBounds;
+      const lean = new CubismMatrix44();
+      lean.setMatrix(bodyLeanTransform(bounds, this.speechPose, tuning.get('talking.bodyLeanStrength')));
+      projection.multiplyByMatrix(lean);
+    }
     const renderer = this.getRenderer();
     renderer.setMvpMatrix(projection);
     renderer.setRenderState(null, [0, 0, width, height]);
@@ -1109,10 +957,14 @@ class CompanionCubismModel extends CubismUserModel {
       }
     }
 
-    const leftNdc = +projection.transformX(minX).toFixed(4);
-    const rightNdc = +projection.transformX(maxX).toFixed(4);
-    const bottomNdc = +projection.transformY(minY).toFixed(4);
-    const topNdc = +projection.transformY(maxY).toFixed(4);
+    const matrix = projection.getArray();
+    const corners = [[minX, minY], [minX, maxY], [maxX, minY], [maxX, maxY]];
+    const xs = corners.map(([x, y]) => matrix[0] * x + matrix[4] * y + matrix[12]);
+    const ys = corners.map(([x, y]) => matrix[1] * x + matrix[5] * y + matrix[13]);
+    const leftNdc = +Math.min(...xs).toFixed(4);
+    const rightNdc = +Math.max(...xs).toFixed(4);
+    const bottomNdc = +Math.min(...ys).toFixed(4);
+    const topNdc = +Math.max(...ys).toFixed(4);
 
     const diagPayload = {
       phase: 'AFTER_FIX_FIT_TO_BOUNDS',
@@ -1244,13 +1096,6 @@ export class Live2DCompanion {
     }
 
     window.__live2dCompanion = this;
-
-    // Listen for sentence break events from companion.js (Layer 2 trigger).
-    window.addEventListener('waifu-sentence-break', () => {
-      if (this.model?.talking) {
-        this.model.triggerTalkMotion();
-      }
-    });
 
     requestAnimationFrame((time) => this.frame(time));
 
@@ -1521,7 +1366,7 @@ export class Live2DCompanion {
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     this.gl.clearColor(0, 0, 0, 0);
     this.gl.clear(this.gl.COLOR_BUFFER_BIT);
-    this.model?.update(delta, mouth, speaking);
+    this.model?.update(delta, mouth, speaking, audioTime);
     this.model?.draw();
     requestAnimationFrame((next) => this.frame(next));
   }
@@ -1532,8 +1377,18 @@ export class Live2DCompanion {
   }
 
   setEmotionCue(emotion, endAt) {
+    if (this.model?.speechMotion.cues.length) return;
     this.emotionEndsAt = endAt || 0;
     this.model?.setEmotion(emotion);
+  }
+
+  queueSpeechCue(cue) {
+    this.emotionEndsAt = 0;
+    this.model?.speechMotion.queue(cue);
+  }
+
+  cancelSpeechCue(speechId) {
+    this.model?.speechMotion.cancel(speechId);
   }
 
   setExpression(name) {

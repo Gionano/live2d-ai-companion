@@ -28,7 +28,14 @@ class TuningStore {
     const [group, key] = dottedKey.split('.');
     const param = this.schema[group]?.[key];
     if (!param) return;
-    param.value = param.type === 'select' ? String(value) : Number(value);
+    const raw = value && typeof value === 'object' ? value.value : value;
+    if (param.type === 'select') {
+      if (!param.options?.includes(String(raw))) return;
+      param.value = String(raw);
+    } else {
+      if (raw === null || raw === undefined || raw === '' || !Number.isFinite(Number(raw))) return;
+      param.value = Math.max(param.min ?? -Infinity, Math.min(param.max ?? Infinity, Number(raw)));
+    }
     this._notify(group, key, param.value);
   }
 
@@ -106,11 +113,11 @@ class TuningStore {
     if (!data || typeof data !== 'object') return;
     for (const [group, entries] of Object.entries(data)) {
       if (!this.schema[group]) continue;
+      if (!entries || typeof entries !== 'object') continue;
       for (const [key, val] of Object.entries(entries)) {
         const param = this.schema[group][key];
         if (param) {
-          param.value = param.type === 'select' ? String(val) : Number(val);
-          this._notify(group, key, param.value);
+          this.set(`${group}.${key}`, val);
         }
       }
     }
