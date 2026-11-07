@@ -1,5 +1,6 @@
 import { validateBaseUrl, validateProviderHeaders } from '../providers/baseUrl.js';
 import { FISH_EMOTION_NAMES } from '../fishEmotionTags.js';
+import { validateImageSettings } from './imageFields.js';
 
 export const SETTINGS_LIMIT = 64 * 1024;
 export const SLOT_NAMES = ['llm', 'planner', 'vision', 'visionFilter', 'stt', 'tts'];
@@ -228,7 +229,7 @@ export function validateSlot(value, { allowSecrets = false } = {}) {
 export const emptySettings = () => ({ schemaVersion: 1, version: 0, profiles: {}, slots: {}, ui: { language: 'id' } });
 export function validateDocument(value, { persisted = false } = {}) {
   bounded(value);
-  object(value, persisted ? ['schemaVersion', 'version', 'profiles', 'slots', 'ui'] : ['schemaVersion', 'profiles', 'slots', 'ui']);
+  object(value, persisted ? ['schemaVersion', 'version', 'profiles', 'slots', 'ui', 'images'] : ['schemaVersion', 'profiles', 'slots', 'ui', 'images']);
   if (value.schemaVersion !== 1) invalid();
   if (persisted && (!Number.isSafeInteger(value.version) || value.version < 0)) invalid();
   if (!isObject(value.profiles) || Object.keys(value.profiles).length > 32) invalid();
@@ -246,5 +247,6 @@ export function validateDocument(value, { persisted = false } = {}) {
   });
   object(value.ui, ['language']);
   if (!['id', 'en'].includes(value.ui.language)) invalid();
+  if (value.images !== undefined) validateImageSettings(value.images);
   return structuredClone(value);
 }

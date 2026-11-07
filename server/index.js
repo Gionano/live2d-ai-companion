@@ -31,6 +31,7 @@ import { generateSpeech, isSpeechConfigured as isVoiceConfigured } from './ttsGe
 import { getProviderRegistry, getSlotStatus, UNAVAILABLE_MESSAGES } from './providers/registry.js';
 import { getSettingsService } from './settings/service.js';
 import { installSettingsRoutes } from './settings/routes.js';
+import { ImageSettingsService } from './settings/imageSettingsService.js';
 import { SpeechController } from './speechController.js';
 import { stripSpeechTags } from './ttsExpression.js';
 import {
@@ -57,7 +58,8 @@ import { watchSelfieConfig } from './selfie/config.js';
 
 const app = express();
 const providerSettings = getSettingsService();
-installSettingsRoutes(app, { service: providerSettings, registry: getProviderRegistry(), imageStatus: () => jobManager.getProviderStatus() });
+const imageSettings = new ImageSettingsService({ service: providerSettings, manager: jobManager });
+installSettingsRoutes(app, { service: providerSettings, registry: getProviderRegistry(), imageStatus: () => jobManager.getProviderStatus(), imageService: imageSettings });
 installSelfieImagePolicy(app, jobManager);
 // Frame base64 bisa lumayan besar — naikkan limit body JSON.
 app.use(express.json({ limit: '12mb' }));
@@ -299,11 +301,11 @@ function broadcastToCompanions(obj) {
 // Hubungkan broadcaster JobManager ke semua socket companion
 jobManager.setBroadcaster(broadcastToCompanions);
 providerSettings.setBroadcaster(broadcastToCompanions);
-void jobManager.refreshProviderStatus({ force: true }).catch((err) => {
+void imageSettings.reload().catch((err) => {
   console.warn(`[selfie] Provider startup check failed: ${err.message}`);
 });
 const stopSelfieConfigWatch = watchSelfieConfig(
-  config => void jobManager.updateConfig(config).catch((err) => {
+  () => void imageSettings.reload().catch((err) => {
     console.warn(`[selfie] Provider config refresh failed: ${err.message}`);
   }),
   { onError: err => console.warn(`[selfie] Config watch failed: ${err.message}`) },
@@ -1047,7 +1049,7 @@ wss.on('connection', (socket, req) => {
 });
 
 // Install after role assignment so monitor sockets do not receive selfie snapshots.
-installSelfieLifecycle({ manager: jobManager, server, wss });
+installSelfieLifecycle({ manager: jobManager, server, wss, beforeShutdown: () => imageSettings.shutdown() });
 server.once('close', stopSelfieConfigWatch);
 server.once('close', () => {
   proactiveConversation.dispose();

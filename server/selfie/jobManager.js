@@ -16,6 +16,7 @@ import { etaStore } from './etaStore.js';
 import { logSelfie } from './log.js';
 import { normalizeSpeechEmotion } from '../speechEmotionPrompt.js';
 import { stripSpeechTags } from '../ttsExpression.js';
+import { acquireRuntimeLease } from '../../setup/setupLock.js';
 
 // Batas maksimal token yang disimpan dan TTL (24 jam).
 const TOKEN_MAX_ENTRIES = 100;
@@ -39,6 +40,9 @@ export class JobManager {
     this._lastReleasePromise = null;
     this._readyEvent = null;
     this._statusController = new AbortController();
+    this.admissionBlocks = new Set();
+    this._runtimeLease = null;
+    this._runtimeReleaseTask = null;
     this.limitsStorePath = this.config.limitsStorePath === undefined
       ? path.resolve('data/selfie-limits.json') : this.config.limitsStorePath;
     this._loadLimits();
@@ -78,7 +82,7 @@ export class JobManager {
       logSelfie(
         `[provider] No image provider is ready: comfyui=${status.reasons?.comfyui || 'unknown'}; `
         + `comfyui-managed=${status.reasons?.['comfyui-managed'] || 'unknown'}; `
-        + `sdcpp=${status.reasons?.sdcpp || 'unknown'}`,
+        + `sdcpp=${status.reasons?.sdcpp || 'unknown'}; cloud=${status.reasons?.cloud || 'unknown'}`,
         'warn',
       );
     }
@@ -88,7 +92,7 @@ export class JobManager {
   getProviderStatus() {
     return this.provider?.getPublicStatus?.() || {
       active: null,
-      reasons: { comfyui: 'Not checked.', 'comfyui-managed': 'Not checked.', sdcpp: 'Not checked.' },
+      reasons: { comfyui: 'Not checked.', 'comfyui-managed': 'Not checked.', sdcpp: 'Not checked.', cloud: 'Not checked.' },
     };
   }
 
@@ -241,6 +245,8 @@ export class JobManager {
 
   _checkAdmission() {
     if (this._shuttingDown) return { allowed: false, reason: 'SHUTDOWN' };
+    if (this.admissionBlocks.size) return { allowed: false, reason: 'BUSY',
+      text: 'Pengaturan foto sedang disiapkan, tunggu sebentar ya sayang.', emotion: 'netral' };
     const reservations = [this.activeJob, ...this.queue].filter(job => job?.reserved).length;
     const limits = this._checkLimits(reservations);
     if (!limits.allowed) return limits;
@@ -385,6 +391,27 @@ export class JobManager {
       if (index >= 0) this.queue.splice(index, 1);
     }
     this._pumpQueue();
+    void this._releaseIdleRuntime();
+  }
+
+  async _releaseIdleRuntime(finishingTask = false) {
+    if (this.activeJob || this.queue.length || !this._runtimeLease) return;
+    if (!finishingTask && this._runTasks.size) {
+      await Promise.allSettled([...this._runTasks]);
+      return this._releaseIdleRuntime();
+    }
+    if (this._runtimeReleaseTask) return this._runtimeReleaseTask;
+    const lease = this._runtimeLease;
+    this.admissionBlocks.add('runtime-release');
+    this._runtimeReleaseTask = Promise.resolve().then(async () => {
+      try { await (await lease)(); }
+      catch (error) { logSelfie(`[jobManager] Runtime lease cleanup failed: ${error.code || 'FAILED'}`, 'warn'); }
+      finally {
+        if (this._runtimeLease === lease) this._runtimeLease = null;
+        this.admissionBlocks.delete('runtime-release');
+      }
+    }).finally(() => { this._runtimeReleaseTask = null; });
+    return this._runtimeReleaseTask;
   }
 
   _launchJob(jobData) {
@@ -468,6 +495,11 @@ export class JobManager {
       prov = await this._untilCancelled(jobData, this.getProvider());
       jobData.imageProvider = prov;
       this._throwIfCancelled(jobData);
+      if (prov.usesLocalRuntime && this.config.localDir) {
+        this._runtimeLease ||= acquireRuntimeLease(this.config.localDir);
+        await this._runtimeLease;
+        this._throwIfCancelled(jobData);
+      }
       if (!await this._untilCancelled(jobData, prov.isAvailable(jobData.abortController.signal))) {
         throw Object.assign(new Error('No image provider is ready.'), {
           code: 'PROVIDER_UNAVAILABLE',
@@ -525,14 +557,14 @@ export class JobManager {
 
       const result = await prov.generate(
         genParams,
-        ({ value, max }) => {
+        ({ value, max, phase }) => {
           if (jobData.abortController.signal.aborted || jobData.readyEvent) return;
-          const percentage = max > 0 ? Math.round((value / max) * 100) : 0;
+          const cloudPhase = ['preparing', 'generating', 'validating', 'saving'].includes(phase) ? phase : null;
+          const percentage = cloudPhase ? null : max > 0 ? Math.round((value / max) * 100) : 0;
           jobData.lastProgress = {
             type: 'selfie_progress',
             jobId,
-            value,
-            max,
+            ...(cloudPhase ? { phase: cloudPhase } : { value, max }),
             percentage,
           };
           this.broadcast(jobData.lastProgress);
@@ -615,6 +647,7 @@ export class JobManager {
       if (this.queue.length) prov?.onJobAdmitted?.();
       if (this.activeJob === jobData) this.activeJob = null;
       this._pumpQueue();
+      await this._releaseIdleRuntime(true);
     }
   }
 
@@ -636,6 +669,7 @@ export class JobManager {
       else this.queue.splice(this.queue.indexOf(job), 1);
       this._notifyCancelled(job);
       this._pumpQueue();
+      await this._releaseIdleRuntime();
     } else if (!job.cancelPromise) {
       job.cancelPromise = Promise.resolve().then(() => job.imageProvider?.cancel()).catch((err) => {
         logSelfie(`[jobManager] Provider cancel failed: ${err.message}`, 'warn');
@@ -690,6 +724,7 @@ export class JobManager {
       }
       this.activeJob = null;
       this.queue = [];
+      await this._releaseIdleRuntime();
     });
     return this._shutdownPromise;
   }

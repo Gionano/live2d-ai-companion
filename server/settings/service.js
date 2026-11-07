@@ -4,6 +4,7 @@ import { validateBaseUrl } from '../providers/baseUrl.js';
 import { settingsDoctor } from './doctor.js';
 import { SettingsStore } from './store.js';
 import { EnvSecretStore, SecretStore, validateSecretValues } from './secretStore.js';
+import { CLOUD_IMAGE_ORIGIN, CLOUD_IMAGE_SECRET_ID, validateImageSettings } from './imageFields.js';
 import { bounded, CAPABILITIES, FLAGS, headerName, identifier, invalid, isObject, looksLikeLocalPath,
   looksLikeSecret, MODEL_FIELDS, object, PARAMS, PROFILE_FIELDS, SettingsError, SLOT_NAMES, splitExtras, validateDocument,
   validateProfile, validateSlot } from './schema.js';
@@ -129,6 +130,7 @@ function publicLayer(layer = {}) {
 
 function exportDocument(config) {
   const data = { schemaVersion: 1, profiles: {}, slots: {}, ui: config.ui || { language: 'id' } };
+  if (config.images !== undefined) data.images = structuredClone(config.images);
   for (const [id, profile] of Object.entries(config.profiles || {})) {
     if (!profile || !originOf(profile)) continue;
     try { data.profiles[id] = validateProfile(profile).profile; } catch { /* Unsupported developer extension. */ }
@@ -157,6 +159,8 @@ export class SettingsService {
   #loadLayers;
   #privateStrings = [];
   #doctorOptions;
+  #imageObserver;
+  #imageValidator;
   constructor({ repoRoot, localDir, env = process.env, layers, secretStore, platform, runner, allowPlaintext } = {}) {
     const paths = createLocalPaths({ repoRoot, env });
     this.#doctorOptions = { localDir: localDir || paths.localDir, platform, runner,
@@ -176,15 +180,15 @@ export class SettingsService {
     const dev = publicLayer(deepMerge(this.#layers.defaults, this.#layers.dev));
     // The developer file is trusted input, but credential values never enter registry config.
     this.#devSecrets = dev.secrets;
-    const { profiles, slots, ui } = this.#document;
-    this.#config = deepMerge(dev.config, { profiles, slots, ui });
+    const { profiles, slots, ui, images } = this.#document;
+    this.#config = deepMerge(dev.config, { profiles, slots, ui, ...(images !== undefined && { images }) });
     for (const [name, slot] of Object.entries(slots)) {
       if (slot?.followLlm) this.#config.slots[name] = { followLlm: true };
       else if (slot?.profile) delete this.#config.slots[name].followLlm;
     }
     const declared = sourcesFor(defaults.config, 'default');
     sourcesFor(publicLayer(this.#layers.dev).config, 'dev-file', '', declared);
-    sourcesFor({ profiles, slots, ui }, 'settings', '', declared);
+    sourcesFor({ profiles, slots, ui, ...(images !== undefined && { images }) }, 'settings', '', declared);
     this.#sources = Object.fromEntries(Object.keys(sourcesFor(this.#config, '')).map(key => [key, declared[key] || 'default']));
     if (this.#document.version === 0) this.#sources['ui.language'] = 'default';
     const stored = this.secrets.snapshot();
@@ -210,6 +214,8 @@ export class SettingsService {
       profileSecrets: (id, profile, slot) => values(id, profile, slot),
     };
     this.#privateStrings = Object.values(developer).flatMap(entry => secretStrings(entry.values));
+    if (this.#env.CLOUDFLARE_API_TOKEN) this.#privateStrings.push(this.#env.CLOUDFLARE_API_TOKEN);
+    try { this.#privateStrings.push(...secretStrings(stored(CLOUD_IMAGE_SECRET_ID, CLOUD_IMAGE_ORIGIN))); } catch { /* Failed closed. */ }
     for (const [id, profile] of Object.entries(config.profiles || {})) {
       if (profile?.apiKeyEnv && environment.has(profile.apiKeyEnv)) this.#privateStrings.push(environment.get(profile.apiKeyEnv));
       this.#privateStrings.push(...secretStrings(values(id, profile)), ...SLOT_NAMES.flatMap(slot => secretStrings(values(id, profile, slot))));
@@ -228,7 +234,22 @@ export class SettingsService {
   resolver() { return this.#resolver; }
   attach(registry, broadcast) { this.#registry = registry; if (broadcast) this.#broadcast = broadcast; }
   setBroadcaster(broadcast) { this.#broadcast = broadcast; }
-  #changed() {
+  setImageObserver(observer, validator) { this.#imageObserver = observer; this.#imageValidator = validator; }
+  imageOverrides() { return structuredClone(this.#document.images || {}); }
+  imageCredentialResolver(accountId = '') {
+    const saved = this.secrets.snapshot();
+    const environmentToken = this.#env.CLOUDFLARE_API_TOKEN;
+    const account = accountId || this.#document.images?.cloud?.accountId || this.#env.CLOUDFLARE_ACCOUNT_ID || '';
+    return async () => ({ accountId: account,
+      token: environmentToken || saved(CLOUD_IMAGE_SECRET_ID, CLOUD_IMAGE_ORIGIN)?.apiKey || '' });
+  }
+  imageSecretStatus() {
+    let stored = false;
+    try { stored = Boolean(this.secrets.get(CLOUD_IMAGE_SECRET_ID, CLOUD_IMAGE_ORIGIN)?.apiKey); } catch { /* Environment may still work. */ }
+    return { hasKey: Boolean(this.#env.CLOUDFLARE_API_TOKEN || stored),
+      source: this.#env.CLOUDFLARE_API_TOKEN ? 'env' : stored ? 'settings' : null };
+  }
+  #changed(imagesChanged = false) {
     this.refresh();
     if (this.#registry) {
       this.#registry.secretResolver = this.#resolver;
@@ -236,6 +257,9 @@ export class SettingsService {
     }
     // A disconnected client must not turn an already durable update into a failure.
     try { this.#broadcast?.({ type: 'settings_changed', slots: [...SLOT_NAMES] }); } catch { /* Best-effort notification. */ }
+    if (imagesChanged) {
+      try { this.#imageObserver?.(); } catch { /* Durable selection remains pending on reload failure. */ }
+    }
   }
   effective() {
     const secrets = {};
@@ -263,7 +287,7 @@ export class SettingsService {
         ...Object.values(slots).flatMap(slot => slot.warnings || [])] });
   }
 
-  #update(version, change) {
+  #update(version, change, imagesChanged = false) {
     let rollback;
     let result;
     try {
@@ -275,7 +299,7 @@ export class SettingsService {
       rollback?.();
       throw error;
     }
-    this.#changed();
+    this.#changed(imagesChanged);
     return { version: result.version };
   }
   #hasCredentials(id, profile) {
@@ -290,6 +314,7 @@ export class SettingsService {
   }
   putProfile(id, request) {
     identifier(id);
+    if (id === CLOUD_IMAGE_SECRET_ID) invalid();
     object(request, ['version', 'profile', 'secrets', 'confirmDeleteSecrets']);
     if (request.confirmDeleteSecrets !== undefined && typeof request.confirmDeleteSecrets !== 'boolean') invalid();
     const checked = validateProfile(request.profile, { allowSecrets: true });
@@ -339,6 +364,7 @@ export class SettingsService {
   }
   deleteProfile(id, request) {
     identifier(id);
+    if (id === CLOUD_IMAGE_SECRET_ID) invalid();
     object(request, ['version', 'force']);
     if (request.force !== undefined && typeof request.force !== 'boolean') invalid();
     return this.#update(request.version, current => {
@@ -354,6 +380,7 @@ export class SettingsService {
   }
   putSecret(id, request) {
     identifier(id);
+    if (id === CLOUD_IMAGE_SECRET_ID) invalid();
     object(request, ['version', 'values']);
     const values = validateSecretValues(request.values);
     if (!secretStrings(values).some(Boolean)) invalid();
@@ -370,6 +397,7 @@ export class SettingsService {
   }
   deleteSecret(id, request) {
     identifier(id);
+    if (id === CLOUD_IMAGE_SECRET_ID) invalid();
     object(request, ['version']);
     return this.#update(request.version, current => {
       if (this.secrets.has(id)) this.secrets.delete(id);
@@ -382,12 +410,40 @@ export class SettingsService {
     if (!['id', 'en'].includes(request.ui.language)) invalid();
     return this.#update(request.version, current => { current.ui = structuredClone(request.ui); return current; });
   }
+  putImages(request) {
+    object(request, ['version', 'images']);
+    const images = validateImageSettings(request.images);
+    this.#imageValidator?.(images);
+    return this.#update(request.version, current => {
+      current.images = images;
+      this.#validatePublic(current);
+      return current;
+    }, true);
+  }
+  putImageSecret(request) {
+    object(request, ['version', 'key']);
+    const values = validateSecretValues({ apiKey: request.key });
+    return this.#update(request.version, current => {
+      this.#validatePublic(current, values);
+      this.secrets.set(CLOUD_IMAGE_SECRET_ID, CLOUD_IMAGE_ORIGIN, values);
+      return current;
+    }, true);
+  }
+  deleteImageSecret(request) {
+    object(request, ['version']);
+    return this.#update(request.version, current => {
+      if (this.secrets.has(CLOUD_IMAGE_SECRET_ID)) this.secrets.delete(CLOUD_IMAGE_SECRET_ID);
+      return current;
+    }, true);
+  }
   export() {
     return exportDocument(this.#redact(this.#config));
   }
   import(request) {
     object(request, ['version', 'settings']);
     const input = validateDocument(request.settings);
+    if (Object.hasOwn(input.profiles, CLOUD_IMAGE_SECRET_ID)) invalid();
+    this.#imageValidator?.(input.images || {});
     return this.#update(request.version, current => {
       this.refresh();
       const next = { ...input, profiles: { ...input.profiles }, version: current.version };
@@ -406,7 +462,7 @@ export class SettingsService {
       for (const slot of Object.values(next.slots)) if (slot && !slot.followLlm && !effective.profiles[slot.profile]) invalid();
       this.#validatePublic(next);
       return next;
-    });
+    }, true);
   }
   legacy() {
     const dev = this.#layers.dev || {};

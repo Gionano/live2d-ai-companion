@@ -9,6 +9,25 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { JobManager } from '../selfie/jobManager.js';
 import { installSelfieLifecycle, prepareSelfieJob } from '../selfie/backendLifecycle.js';
 
+test('installer shutdown failures still release the PAP manager before exit', async t => {
+  const server = new EventEmitter();
+  const wss = new EventEmitter();
+  const signals = new EventEmitter();
+  server.close = () => server.emit('close');
+  wss.clients = new Set(); wss.close = () => {};
+  let releases = 0;
+  let completed;
+  const exited = new Promise(resolve => { completed = resolve; });
+  const lifecycle = installSelfieLifecycle({ server, wss, signals, warn() {},
+    manager: { shutdown: async () => { releases++; } },
+    beforeShutdown: async () => { throw new Error('Fixture installer shutdown failure'); },
+    exit: completed });
+  t.after(() => lifecycle.dispose());
+  signals.emit('SIGTERM');
+  assert.equal(await exited, 1);
+  assert.equal(releases, 1);
+});
+
 const plan = {
   slots: {},
   positivePrompt: 'portrait',

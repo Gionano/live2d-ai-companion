@@ -87,11 +87,15 @@ export function installSelfieLifecycle({
   signals = process,
   exit = code => process.exit(code),
   warn = message => console.warn(message),
+  beforeShutdown,
 }) {
   let shutdownPromise = null;
   let signalled = false;
   const shutdown = () => {
-    if (!shutdownPromise) shutdownPromise = Promise.resolve().then(() => manager.shutdown());
+    if (!shutdownPromise) shutdownPromise = Promise.resolve().then(async () => {
+      try { await beforeShutdown?.(); }
+      finally { await manager.shutdown(); }
+    });
     return shutdownPromise;
   };
   const onConnection = (socket) => {

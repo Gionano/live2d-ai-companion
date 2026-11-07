@@ -51,7 +51,8 @@ function base64(value) {
 }
 
 function validateRecords(records) {
-  if (!isObject(records) || Object.keys(records).length > 32) invalid();
+  if (!isObject(records) || Object.keys(records).length > 33
+    || Object.keys(records).filter(id => id !== 'pap-cloudflare').length > 32) invalid();
   const result = {};
   for (const [id, entry] of Object.entries(records)) {
     identifier(id);

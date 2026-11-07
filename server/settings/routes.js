@@ -35,7 +35,7 @@ export function isSettingsRequestAllowed(req) {
 }
 
 export function installSettingsRoutes(app, { service = getSettingsService(), registry,
-  probe = testSlot, models = listModels, imageStatus = () => null, now = Date.now, testLimit = 5, testWindowMs = 60000, testTimeoutMs = 20000 } = {}) {
+  probe = testSlot, models = listModels, imageStatus = () => null, imageService = null, now = Date.now, testLimit = 5, testWindowMs = 60000, testTimeoutMs = 20000 } = {}) {
   registry ||= new ProviderRegistry({ config: service.config(), secretResolver: service.resolver() });
   service.attach(registry);
   const token = randomBytes(32).toString('hex');
@@ -74,15 +74,66 @@ export function installSettingsRoutes(app, { service = getSettingsService(), reg
   const respond = operation => (req, res, next) => {
     try { res.json(operation(req)); } catch (error) { next(error); }
   };
+  const respondAsync = operation => async (req, res, next) => {
+    try { res.json(await operation(req)); } catch (error) { next(error); }
+  };
+  const requireImages = () => {
+    if (!imageService) throw new SettingsError('NOT_FOUND', 404);
+    return imageService;
+  };
   router.get('/bootstrap', respond(() => ({ token })));
   router.get('/', respond(() => service.effective()));
   router.get('/status', respond(() => service.status()));
   router.get('/legacy', respond(() => service.legacy()));
-  router.get('/images', respond(() => {
+  router.get('/images', respondAsync(() => {
+    if (imageService) return imageService.status();
     const current = imageStatus();
-    const provider = ['comfyui', 'comfyui-managed', 'sdcpp'].includes(current?.active) ? current.active : null;
+    const provider = ['comfyui', 'comfyui-managed', 'sdcpp', 'cloud'].includes(current?.active) ? current.active : null;
     return { ready: Boolean(provider), provider };
   }));
+  router.put('/images', respondAsync(async req => {
+    const result = service.putImages(req.body);
+    return imageService ? { ...await imageService.status(), ...result } : result;
+  }));
+  router.put('/images/secret', respond(req => service.putImageSecret(req.body)));
+  router.delete('/images/secret', respond(req => service.deleteImageSecret(req.body)));
+  router.post('/images/install/plan', respondAsync(req => {
+    object(req.body, ['provider', 'variant']);
+    return requireImages().plan(req.body);
+  }));
+  router.post('/images/install', respondAsync(req => {
+    object(req.body, ['planId', 'acceptedLicenses']);
+    return requireImages().installer.start(req.body);
+  }));
+  router.get('/images/install/:id', respondAsync(async req => {
+    identifier(req.params.id);
+    const job = await requireImages().installer.get(req.params.id);
+    if (!job) throw new SettingsError('NOT_FOUND', 404);
+    return job;
+  }));
+  router.post('/images/install/:id/cancel', respondAsync(req => {
+    identifier(req.params.id);
+    object(req.body, []);
+    return requireImages().installer.cancel(req.params.id);
+  }));
+  router.post('/images/test', async (req, res, next) => {
+    let ownsTest = false;
+    let timer;
+    const controller = new AbortController();
+    const disconnected = () => { if (!res.writableEnded) controller.abort(); };
+    try {
+      object(req.body, ['provider', 'timeoutMs']);
+      const timeoutMs = timeoutFor(req.body.timeoutMs);
+      take(); ownsTest = true;
+      res.on('close', disconnected);
+      const deadline = new Promise((_, reject) => {
+        timer = setTimeout(() => { controller.abort(); reject(new SettingsError('TIMEOUT', 504)); }, timeoutMs);
+      });
+      const result = await Promise.race([requireImages().test({ provider: req.body.provider, signal: controller.signal }), deadline]);
+      if (!res.destroyed) res.json(result);
+    } catch (error) { next(error); }
+    finally { clearTimeout(timer); controller.abort(); res.removeListener('close', disconnected); if (ownsTest) testing = false; }
+  });
   router.put('/profiles/:id', respond(req => service.putProfile(req.params.id, req.body)));
   router.delete('/profiles/:id', respond(req => service.deleteProfile(req.params.id, req.body)));
   router.put('/slots/:slot', respond(req => service.putSlot(req.params.slot, req.body)));
@@ -179,7 +230,9 @@ export function installSettingsRoutes(app, { service = getSettingsService(), reg
   });
   router.use((_req, _res, next) => next(new SettingsError('NOT_FOUND', 404)));
   router.use((error, _req, res, _next) => {
-    const safe = error instanceof SettingsError ? error
+    const installCodes = { CONFLICT: 409, IN_USE: 409, LOCK_BUSY: 409, NOT_FOUND: 404, STORAGE: 503, INVALID_SETTINGS: 400 };
+    const safe = error instanceof SettingsError ? error : Object.hasOwn(installCodes, error.code)
+      ? new SettingsError(error.code, installCodes[error.code])
       : new SettingsError(error.type === 'entity.too.large' ? 'TOO_LARGE' : 'INVALID_SETTINGS', error.type === 'entity.too.large' ? 413 : 400);
     if (!res.headersSent) res.status(safe.status).json({ error: { code: safe.code, message: safe.message } });
   });
