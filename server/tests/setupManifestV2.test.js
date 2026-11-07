@@ -65,7 +65,7 @@ async function fixture(t, data = manifest(), routes = {}) {
   return { directory, data, manifestPath, requests, lines, options };
 }
 
-test('committed v2 metadata checks runtime isolation, roles, pins and unresolved node fields', () => {
+test('committed v2 metadata checks runtime isolation, roles and verified pins', () => {
   const shipped = readManifest(new URL('../../setup/manifest.json', import.meta.url));
   assert.equal(shipped.schemaVersion, 2);
   assert.deepEqual(shipped.components['sd-cli'].map((component) => component.variant), ['cuda12', 'vulkan']);
@@ -78,18 +78,10 @@ test('committed v2 metadata checks runtime isolation, roles, pins and unresolved
     const urlPin = component.id === 'cudart' ? shipped.components['sd-cli'].find(entry => entry.variant === 'cuda12').version
       : component.version || component.commit;
     assert.ok(component.url.includes(urlPin));
-    if (component.id === 'comfyui-gguf-node') {
-      assert.match(component.sha256, /TODO/);
-      assert.equal(component.sizeBytes, null);
-    } else {
-      assert.match(component.sha256, /^[a-f0-9]{64}$/);
-      assert.ok(Number.isSafeInteger(component.sizeBytes) && component.sizeBytes > 0);
-    }
+    assert.match(component.sha256, /^[a-f0-9]{64}$/);
+    assert.ok(Number.isSafeInteger(component.sizeBytes) && component.sizeBytes > 0);
   }
-  assert.deepEqual(validateManifest(shipped).errors.map(error => error.split(':')[0]), [
-    'components.comfyui-gguf-node.sha256',
-    'components.comfyui-gguf-node.sizeBytes',
-  ]);
+  assert.equal(validateManifest(shipped).valid, true, validateManifest(shipped).errors.join('\n'));
   // Every component must reject incomplete metadata independently of local files.
   const placeholders = structuredClone(shipped);
   for (const group of Object.values(placeholders.components)) {

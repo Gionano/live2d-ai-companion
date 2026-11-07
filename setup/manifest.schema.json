@@ -299,6 +299,9 @@
         "models"
       ],
       "properties": {
+        "7zip-extractor": {
+          "$ref": "#/$defs/component1"
+        },
         "comfyui-portable": {
           "$ref": "#/$defs/component1"
         },
@@ -333,6 +336,9 @@
         "models"
       ],
       "properties": {
+        "7zip-extractor": {
+          "$ref": "#/$defs/component2"
+        },
         "comfyui-portable": {
           "$ref": "#/$defs/component2"
         },

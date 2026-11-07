@@ -15,7 +15,7 @@ export function readManifest(manifestPath) {
 export function listComponents(manifest) {
   const components = manifest?.components || {};
   const result = [];
-  for (const id of [...COMPONENT_IDS, 'constraints']) {
+  for (const id of [...COMPONENT_IDS, 'constraints', '7zip-extractor']) {
     if (!components[id]) continue;
     const entries = Array.isArray(components[id]) ? components[id] : [components[id]];
     for (const component of entries) result.push({ ...component, id: Array.isArray(components[id]) ? `${id}:${component?.variant}` : id });
@@ -119,7 +119,7 @@ export function validateManifest(manifest, { selectedIds } = {}) {
     errors.push('components: an object is required');
   } else {
     for (const id of Object.keys(manifest.components)) {
-      if (![...COMPONENT_IDS, 'models', 'constraints'].includes(id)) errors.push(`components.${id}: unknown component group`);
+      if (![...COMPONENT_IDS, 'models', 'constraints', '7zip-extractor'].includes(id)) errors.push(`components.${id}: unknown component group`);
     }
     for (const id of COMPONENT_IDS) {
       if (!manifest.components[id]) errors.push(`components.${id}: required component definition is missing`);
@@ -182,7 +182,7 @@ export function selectComponents(manifest, { command = 'plan', engine, variant, 
     if (manifest.schemaVersion === 2 && !(variant && component.variant) && component.when?.gpuVendor === 'nvidia' && gpuVendor !== 'nvidia') return false;
     if (command === 'models') return component.id.startsWith('models[');
     if (command === 'sdcli') return component.id === 'sd-cli' || component.id.startsWith('sd-cli:') || component.id === 'cudart';
-    if (command === 'comfyui') return component.id.startsWith('comfyui') || component.id === 'constraints';
+    if (command === 'comfyui') return component.id.startsWith('comfyui') || component.id === 'constraints' || component.id === '7zip-extractor';
     return true;
   });
 }

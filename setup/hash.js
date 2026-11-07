@@ -2,14 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
-export async function hashFile(filePath) {
+export async function hashFile(filePath, { signal } = {}) {
+  signal?.throwIfAborted();
   if (typeof filePath !== 'string' || !filePath.trim()) throw new Error('setup:hash requires an existing file path');
   const resolved = path.resolve(filePath);
   const stat = await fs.promises.stat(resolved);
   if (!stat.isFile()) throw new Error(`setup:hash requires a regular file: ${resolved}`);
   const hash = createHash('sha256');
   let sizeBytes = 0;
-  for await (const chunk of fs.createReadStream(resolved)) {
+  for await (const chunk of fs.createReadStream(resolved, signal ? { signal } : undefined)) {
     hash.update(chunk);
     sizeBytes += chunk.length;
   }

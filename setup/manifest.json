@@ -2,6 +2,21 @@
   "$schema": "./manifest.schema.json",
   "schemaVersion": 2,
   "components": {
+    "7zip-extractor": {
+      "name": "7-Zip portable extractor",
+      "version": "26.06",
+      "url": "https://github.com/ip7z/7zip/releases/download/26.06/7zr.exe",
+      "sha256": "e80db2dad715a6c5adabe292d31ed54e11f4e9b99ca349827b50573b175891bc",
+      "sizeBytes": 600064,
+      "licenseName": "GNU Lesser General Public License v2.1 or later (7-Zip)",
+      "licenseUrl": "https://github.com/ip7z/7zip/blob/26.06/DOC/License.txt",
+      "kind": "extractor",
+      "destination": "runtime/tools/7zip",
+      "required": false,
+      "engines": ["comfyui"],
+      "role": "runtime_library",
+      "when": { "gpuVendor": "any", "os": "win32" }
+    },
     "comfyui-portable": {
       "name": "ComfyUI portable",
       "version": "v0.42.1",
@@ -25,8 +40,8 @@
     "comfyui-gguf-node": {
       "name": "ComfyUI-GGUF custom node (leejet fork)",
       "url": "https://github.com/leejet/ComfyUI-GGUF/archive/373048b8403a7820620065210a691263d4da0a61.zip",
-      "sha256": "TODO verified SHA-256",
-      "sizeBytes": null,
+      "sha256": "692c367072b6c1ec87ac9f3410c8e2563dfb8c0bb7f4abead09a8d6515c67169",
+      "sizeBytes": 38557,
       "licenseName": "Apache-2.0",
       "licenseUrl": "https://github.com/leejet/ComfyUI-GGUF/blob/373048b8403a7820620065210a691263d4da0a61/LICENSE",
       "kind": "custom-node",
