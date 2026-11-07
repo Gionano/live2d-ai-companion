@@ -1,7 +1,8 @@
 # Selfie module (pap)
 
-The avatar takes a photo on request. The cloud LLM plans the scene; a local image provider
-generates it. API keys and provider access stay in the backend.
+The avatar takes a photo on request. The configured LLM plans the scene; a local
+image provider or Cloudflare Workers AI generates it. API keys and provider access
+stay in the backend.
 
 See [Local setup](setup.md) for the ignored `local/` layout, verified download manifest,
 dry-run setup commands, license consent, offline doctor, and reuse of existing models.
@@ -34,7 +35,8 @@ directly. Custom references are excluded from Git.
 
 ## 4. Configuration
 Tuning lives in `selfie.config.json`; ignored `selfie.config.local.json` deep-merges over it
-for machine settings, and CLI overrides take precedence. `${LOCAL}` expands to
+for machine settings. Saved **Foto / PAP** settings override these files, and explicit
+CLI overrides take precedence. `${LOCAL}` expands to
 `WAIFU_LOCAL_DIR` or `<repo>/local`. Output defaults to `local/outputs`, logs to `local/logs`.
 Shared settings include provider order, availability cache, timeouts,
 presets, output folder, cooldown, and daily quota. ComfyUI Desktop commonly uses
@@ -44,7 +46,7 @@ presets, output folder, cooldown, and daily quota. ComfyUI Desktop commonly uses
 ```
 npm run selfie:test -- --provider=auto --preset=cepat
 ```
-Use `auto`, `comfyui`, `comfyui-managed`, or `sdcpp`. The command prints provider reasons,
+Use `auto`, `comfyui`, `comfyui-managed`, `sdcpp`, or `cloud`. The command prints provider reasons,
 readiness time, the provider used, generation timings, seed, and output file. Managed runs also
 print the profile, cold-start time separately from generation, and available memory peaks.
 Successful timings update ETA history.
@@ -53,11 +55,38 @@ Successful timings update ETA history.
 
 `provider: "auto"` selects the first ready provider in
 `autoOrder: ["comfyui", "comfyui-managed", "sdcpp"]`.
-Explicit `comfyui`, `comfyui-managed`, or `sdcpp` checks only that provider. Readiness is checked at backend startup,
+Explicit `comfyui`, `comfyui-managed`, `sdcpp`, or `cloud` checks only that provider. Cloud selection does not initialize local engines. Readiness is checked at backend startup,
 before requests/jobs, and after changes to either selfie config file. `availabilityCacheMs` defaults to
 30000; config changes invalidate the cache. No provider or model is downloaded automatically.
 Provider settings and presets reload while the backend runs. Changes to `outputDir` and
 `limitsStoreFile` require a backend restart so existing image tokens and quota persistence remain valid.
+
+### Guided setup and Cloudflare
+
+Open **Foto / PAP** in host settings or its first-run wizard step to save a provider.
+The selection persists across refreshes. Local setup first shows missing components,
+sizes, licenses, and blockers; **Unduh & siapkan** is the explicit download action.
+CLI installations and shared models are reused. Installation status survives page
+refresh, cancellation retains resumable downloads, and interrupted work requires
+an explicit retry after backend restart. See [Settings GUI](settings-gui.md#foto--pap).
+
+Cloud generation uses the user's own Cloudflare account and token with
+`@cf/black-forest-labs/flux-2-klein-9b`. The backend resizes one whitelisted reference
+to at most 480 pixels, strips metadata, and sends it alongside an identity-preserving
+scene prompt. The original reference is not changed. Output is one 1024×1024 image;
+the model uses four fixed steps and ignores local negative-prompt, CFG, and step
+settings. Captions, Fish Audio, popup/gallery, and PAP quotas use the existing flow.
+
+For dashboard locations, token creation, required **Workers AI Read/Edit** permissions,
+and the app's save/check sequence, follow
+[Cloudflare Account ID and API token](settings-gui.md#cloudflare-account-id-and-api-token).
+
+Cloudflare credentials never appear in public settings, exports, or browser storage.
+The settings connection check performs no generation. Charges and free allocation
+depend on the user's account; see [Cloudflare pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/).
+Cancelling stops local waiting and discards late results, but remote work may still
+complete. An uncertain submitted request is never automatically retried or failed
+over, avoiding duplicate generation and charges.
 
 ComfyUI checks `/system_stats` and `/object_info` with `healthTimeoutMs` (1500 by default).
 Every workflow node and its configured UNet/VAE/CLIP/reference filename must be listed by ComfyUI.
@@ -364,10 +393,11 @@ npm test
 npm run build
 ```
 
-Live generation still requires an installed compatible sd-cli/ComfyUI and local model/reference files.
+Live local generation requires an installed compatible sd-cli/ComfyUI and model/reference files.
+Cloud generation requires a configured Cloudflare account/token and a whitelisted reference instead.
 
 # Selfie module — remaining phases
-Rules: cloud LLM for chat/planner; local image provider only (ImageProvider interface); keys backend-only; don't change existing WS contract except selfie_* messages; tuning constants in selfie.config.json; stop after each phase and update docs/STATUS.md.
+Rules: configured LLM for chat/planner; local or Cloudflare image providers use the ImageProvider interface; keys stay backend-only; preserve existing WS contracts except compatible selfie_* additions; tuning lives in selfie.config.json with local/UI overrides; update docs/STATUS.md with implementation evidence.
 
 ## PHASE C — job manager, events, avatar speech
 1. Job manager: one active job, queue max = config.maxQueue, cooldown, daily limit. Persist cooldown/daily counters to a file (local date). If a request arrives during a job or cooldown, avatar replies in character (Indonesian, e.g. "masih fotoin yang tadi ya"); no new job.

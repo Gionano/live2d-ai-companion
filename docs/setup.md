@@ -1,6 +1,6 @@
 # Local setup
 
-Use Node.js 18 or newer and the repository's existing npm dependencies. Engine code,
+Use Node.js 18.17 or newer and the repository's existing npm dependencies. Engine code,
 model weights, generated images, and private references stay outside Git. Setup commands
 do not download, install, extract, or write files unless `--yes` is supplied. Tests use
 loopback HTTP fixtures and temporary directories; they never install engine dependencies.
@@ -18,12 +18,17 @@ amika-live2d-companion/
   local/                          # Ignored; WAIFU_LOCAL_DIR can replace this root
     accepted-licenses.json
     installed.json                # Verified download provenance and active runtime variant
+    image-install-job.json        # UI setup journal; restart marks active jobs interrupted
+    setup-request.lock            # Serializes UI/CLI requests while PAP jobs drain
+    setup.lock                    # Held only while installing shared runtime/model files
+    runtime.lock                  # Active backend local-PAP ownership
     .downloads/                   # Verified archive cache and resumable .part files
     models/
       diffusion_models/
       vae/
       text_encoders/
     runtime/
+      tools/7zip/7zr.exe           # Pinned portable extractor when system 7-Zip is absent
       sdcpp/
         cuda12/                   # CUDA binary and matching REQUIRED cudart libraries
         vulkan/                   # Vulkan binary; kept separate from CUDA files
@@ -78,12 +83,13 @@ published SHA-256 and exact byte counts. See [Pinned sources](setup-sources.md) 
 compatibility and license inheritance. Model filenames match the current shared config
 and ComfyUI workflow. The sd-cli CUDA12 build uses matching CUDA 12.8.1 libraries.
 
-The publisher-recommended `leejet/ComfyUI-GGUF` fork is pinned for `qwen_image21` support,
-but its generated source ZIP has no published SHA-256 or byte count. Only that entry's
-`sha256` and `sizeBytes` remain TODO/null. `setup:comfyui --yes` refuses until those are
-measured from a verified local copy, including when `--skip-pip` is used. Engine-filtered
-model/sd-cli metadata validates independently. Do not replace missing information with
-guessed values. A normal application start never fetches missing files.
+The publisher-recommended `leejet/ComfyUI-GGUF` fork is pinned for `qwen_image21` support.
+Its exact generated ZIP was measured from both GitHub's archive URL and its official
+codeload redirect: 38,557 bytes, SHA-256
+`692c367072b6c1ec87ac9f3410c8e2563dfb8c0bb7f4abead09a8d6515c67169`.
+Missing or invalid metadata still blocks real setup, including when `--skip-pip` is used.
+Do not replace missing information with guessed values. A normal application start never
+fetches missing files.
 
 Diffusion, VAE and the ComfyUI encoder use the Qwen Research License Agreement, which
 permits non-commercial research/evaluation and requires separate commercial permission.
@@ -139,6 +145,32 @@ with an untyped runtime. Shared models remain in `local/models`.
 
 ## Install selected groups
 
+The **Foto / PAP** settings tab and first-run wizard can prepare managed ComfyUI or sd.cpp
+without CLI commands. Selecting a provider does not download anything. Review the
+missing-only component list, exact download sizes, available disk space, and license links,
+then use **Unduh & siapkan** with the displayed license acceptances. External ComfyUI
+checks its configured server; cloud only needs account credentials and has no local setup.
+Bundled managed ComfyUI targets Windows/NVIDIA; other GPUs can use sd.cpp Vulkan or cloud.
+
+Setup reports download bytes and structured preparation, verification, extraction, and
+dependency phases. Browser refresh reconnects to the same background job. Cancellation
+stops pending downloads/processes and retains resumable partial files. Backend restart
+marks unfinished jobs interrupted; review and retry explicitly rather than automatically
+restarting a large download.
+
+Valid CLI installations are reused. Earlier records without extracted-file hashes are
+adopted only when their source checksum and destination match the pinned component,
+the tree contains required runtime files and no links, and any retained source archive
+verifies. Current file fingerprints are then recorded without overwriting the installation.
+Unrecorded, incompatible, or changed runtimes remain blocked for explicit repair.
+
+UI and CLI requests share a reservation lease. The UI pauses new PAP admission while
+already admitted work drains; only then does it acquire the publication lease and stop its
+owned managed process. CLI setup refuses an active runtime lease or a still-running managed
+child, preserving unrelated processes. Archive publication records its checksum-matching
+files so an interrupted transaction can be safely retried. Both setup leases release before
+PAP admission resumes.
+
 First inspect each command without flags:
 
 ```sh
@@ -170,9 +202,10 @@ staging and are checked for unsafe paths and links. Allow disk space for both do
 and extracted files; the plan's byte count is the compressed download size, so actual
 extraction may require more space.
 
-Portable ComfyUI `.7z` extraction requires an already installed 7-Zip (`7z`/`7zz`) or
-`bsdtar`. Setup detects it and gives a clear error when absent; it does not install the
-extractor. After installing the pinned ComfyUI-GGUF archive, setup uses the portable's
+Portable ComfyUI `.7z` extraction reuses installed 7-Zip (`7z`/`7zz`) or `bsdtar`.
+When absent, the reviewed setup includes the official portable 7-Zip 26.06 `7zr.exe`
+(600,064 bytes, pinned SHA-256), placed in `local/runtime/tools/7zip/`. It does not
+install system software or modify PATH. After installing the pinned ComfyUI-GGUF archive, setup uses the portable's
 embedded Python for `-s -m pip install -r requirements.txt`. This pip step may access
 the network, and runs only after the same explicit setup and license gates. The full pip
 command is logged. `--skip-pip` suppresses this step; doctor still checks the runtime and

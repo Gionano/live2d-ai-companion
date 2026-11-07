@@ -11,6 +11,7 @@ remote access.
 | Screen | Contents |
 | --- | --- |
 | Connections | Provider list, add/edit/delete form, presets, write-only credentials and capability flags. LLM, Vision, STT and TTS editors; planner/visionFilter appear under Advanced. |
+| Foto / PAP | Persistent image-provider selection, connection checks, Cloudflare credentials, and reviewed local setup with licenses, progress, and cancellation. |
 | Status | Per-slot availability with an icon and text, storage backend/version and transport/storage warnings. |
 | Privacy | Current origin-only destinations for microphone audio, chat/memory text, camera/screen frames and spoken text; local image-provider disclosure and links back to existing feature controls. |
 | Diagnostics | Backend name, safe file-location labels, writability, permission notes, locks, backup count and a dummy-key self-test. |
@@ -30,8 +31,8 @@ The wizard starts when no slot is assigned or Chat is unassigned. Its order is:
 3. Voice: configure TTS voice ID/format or skip for text-only replies.
 4. Hearing: configure STT, initially Indonesian, or skip and type messages.
 5. Vision: optionally assign an image-capable model, or skip.
-6. Images: inspect cached provider readiness and download the existing setup guide;
-   this step does not configure or generate images.
+6. Images: use the same **Foto / PAP** controls as the settings tab. Choose and save
+   a provider, check its connection, or review missing local components before setup.
 7. Privacy: review which configured hosts receive each kind of data.
 8. Finish: close the wizard and return to Connections or the companion.
 
@@ -73,6 +74,81 @@ error with its code. Probe timeout defaults to 20 seconds, adjustable from 1 to
 60 seconds. The slow-TTFT warning threshold defaults to 5 seconds and is adjustable
 in the form; these two test controls reset on rerender. Tests and discovery may
 consume provider quota and share the API's rate limit with diagnostics.
+
+## Foto / PAP
+
+Choose **ComfyUI**, **ComfyUI Managed**, **sd.cpp**, or **Cloud**, then use
+**Simpan & gunakan** to persist the selection in backend settings. Changing the
+dropdown only updates the form; it does not start an installation or generation.
+Existing automatic configurations keep their local-only provider order until a
+new selection is saved. Changes wait for admitted photo jobs and cleanup to finish.
+
+ComfyUI connects to a server the user already runs. Managed ComfyUI bundles a
+Windows/NVIDIA runtime; sd.cpp recommends CUDA12 for NVIDIA and Vulkan otherwise.
+**Tinjau penyiapan** shows missing components, download and disk sizes, license
+links, and any blockers. Accept the displayed licenses and press **Unduh & siapkan**
+to start. Valid CLI installations, model files, and resumable downloads are reused.
+An existing archive extractor is reused; otherwise managed setup includes a pinned
+portable extractor in the app's local runtime folder.
+
+Installation progress survives page refresh. **Batalkan penyiapan** retains partial
+downloads. After a backend restart, interrupted work stays stopped until the user
+reviews setup and explicitly starts again. Selecting a different provider does not
+allow a finishing installation to overwrite that choice.
+
+Cloud uses the user's own Cloudflare Account ID and API token. The backend sends
+the planned prompt and one resized character reference to Cloudflare Workers AI
+using `@cf/black-forest-labs/flux-2-klein-9b`. Output is one 1024×1024 image with
+four fixed steps; local sampling presets do not change cloud parameters. The
+original reference remains unchanged. Review the linked Cloudflare pricing for
+account-specific charges and free allocation.
+
+Cloud tokens are write-only in the form and clear before transport. They are
+stored separately from public settings and never included in exports. Connection
+checks do not generate images or prove that a paid generation will succeed.
+
+### Cloudflare Account ID and API token
+
+Create or sign in to your own [Cloudflare account](https://dash.cloudflare.com/).
+Select the account you want to use for PAP; the Account ID and token must refer
+to that same account. A domain and a deployed Worker are not required.
+
+1. Open [Workers AI](https://dash.cloudflare.com/?to=/:account/ai/workers-ai)
+   in the Cloudflare dashboard and select **Use REST API**.
+2. Under **Get Account ID**, copy **Account ID**. This is the 32-character account
+   identifier. You can also press **Ctrl+K** in the dashboard, search for
+   **Copy account ID**, and select that command.
+3. Select **Create a Workers AI API Token**, review the prefilled permissions and
+   account scope, then select **Create API Token** and **Copy API Token**.
+   Copy the token secret when it is shown; it cannot be retrieved later.
+4. Ensure the token grants **Workers AI - Read** and **Workers AI - Edit** for the
+   selected account. Read permits the app's model/connection check; Edit permits
+   image generation. The token is used as a Bearer API token.
+5. In Amika, open **Settings > Foto / PAP**, choose **Cloud**, paste the Account ID
+   and token into their respective fields, then press **Simpan & gunakan**.
+   Wait for any pending photo job/configuration update to finish, then press
+   **Periksa penyedia tersimpan**. This check does not generate an image.
+
+If the Workers AI shortcut is unavailable, open
+[My Profile > API Tokens](https://dash.cloudflare.com/profile/api-tokens/), select
+**Create Token**, and create a custom token named for Amika PAP. Use an **Account**
+policy with **Workers AI / Read** and **Workers AI / Edit** permissions, scope it
+to the specific account whose ID you copied, review the summary, and create it.
+Use this API token in the form; the Global API Key is a different credential.
+
+An `AUTH` result usually means the token is invalid/expired, its account scope
+does not match the Account ID, or the required permissions are missing. A ready
+connection confirms access to the model listing; generation still depends on
+Workers AI access, account quota, and any applicable billing requirements.
+When environment credentials are configured, `CLOUDFLARE_API_TOKEN` takes
+precedence over the saved token. Store the secret only in the app's token field
+or backend environment, and keep it out of chat, screenshots, and shared files.
+If replacing the saved token does not fix authentication, update or remove the
+environment token and restart the backend so the new credentials take effect.
+
+Official instructions: [Workers AI REST API setup](https://developers.cloudflare.com/workers-ai/get-started/rest-api/),
+[find your Account ID](https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/),
+and [create an API token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/).
 
 ## Diagnostics and security
 

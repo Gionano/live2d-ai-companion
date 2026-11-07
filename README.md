@@ -2,7 +2,7 @@
 
 ![Amika Live2D AI companion with chat and selfie preview](docs/amikaHeader.png)
 
-Amika is a browser and Windows desktop companion with an official Live2D Cubism avatar, voice and typed chat, webcam/screen perception, persistent memory, and local PAP/selfie generation.
+Amika is a browser and Windows desktop companion with an official Live2D Cubism avatar, voice and typed chat, webcam/screen perception, persistent memory, and local or Cloudflare PAP/selfie generation.
 
 > **Unrestricted / Uncensored Edition.** The chat persona uses an uncensored model through Experiential Labs. PAP requests and image prompts have separate moderation, and regression checks verify an adult character persona.
 
@@ -17,7 +17,7 @@ Amika is a browser and Windows desktop companion with an official Live2D Cubism 
 - **Diagnostic logs:** chat/vision/speech and monitor-bridge diagnostics use Jakarta timestamps with milliseconds. Conversation messages and captions display plain text.
 - **Persistent memory:** background extraction stores user facts and episodic recall in the ignored `data/` directory.
 - **Windows desktop overlay:** transparent avatar, click-through/edit modes, saved display presets, tray controls, configurable global shortcuts, and protected direct screen capture.
-- **PAP / selfies:** voice or typed requests such as "pap dong" use a character whitelist, prompt planning, local reference images, and automatic selection of external ComfyUI, managed ComfyUI, or sd.cpp.
+- **PAP / selfies:** voice or typed requests such as "pap dong" use a character whitelist, prompt planning, and reference images. **Foto / PAP** settings select external ComfyUI, managed ComfyUI, sd.cpp, or Cloudflare Workers AI; legacy automatic selection remains local-only.
 - **Selfie lifecycle:** one active job, a bounded queue, persistent cooldown/daily limits, progress, history-based ETA, cancellation, reconnect snapshots, and shared result auto-close settings.
 - **Selfie interfaces:** the protected Electron popup provides **Simpan**, **Salin**, and **Folder**. The browser dialog provides **Simpan** and **Salin Link**, keyboard focus control, and Escape dismissal. Tray **Pap feature (Fitur Pap)** and **Pap gallery (Galeri Pap)** settings persist.
 - **Portable local engines:** one local path resolver, ignored machine overrides, manifest-driven setup tools, offline diagnostics, GPU/memory readiness checks, and a privacy guard for committable text.
@@ -31,7 +31,7 @@ Amika is a browser and Windows desktop companion with an official Live2D Cubism 
 | Webcam and screen vision | Groq | `qwen/qwen3.8-27b` |
 | Commentary filter and quiet-conversation topics | 9inference | `deepseek-v4.1-flash` |
 | Streaming speech | Fish Audio | `s2.1-pro-free` |
-| Image generation | Local providers | ComfyUI ? managed ComfyUI ? sd.cpp |
+| Image generation | Local providers or Cloudflare Workers AI | ComfyUI, managed ComfyUI, sd.cpp, or FLUX.2 Klein 9B |
 
 `EXPLABS_MODEL` overrides the chat/planner model. API keys remain in the backend environment.
 
@@ -71,7 +71,7 @@ Vite serves the browser frontend on port `5173`. The Express/WebSocket backend b
 
 ## Install and run
 
-Use **Node.js 18 or newer**. Install dependencies in the root and in each optional package you use.
+Use **Node.js 18.17 or newer**. Install dependencies in the root and in each optional package you use.
 
 ### Main companion
 
@@ -148,6 +148,12 @@ Mute falls back to `Ctrl+Alt+Shift+F9`, then `Ctrl+Alt+Shift+F10`, when registra
 
 ## Local PAP / selfie setup
 
+Use **Foto / PAP** in host settings or the first-run wizard to save a provider.
+Local setup shows missing components, sizes, disk requirements, and licenses before
+**Unduh & siapkan** starts. Existing CLI installations and partial downloads are
+reused. Cloud requires only the user's Cloudflare account and token. See the
+[PAP settings guide](docs/settings-gui.md#foto--pap).
+
 ### Portable paths and machine overrides
 
 `${LOCAL}` expands to `WAIFU_LOCAL_DIR`, or `<repo>/local` when unset. Relative values of `WAIFU_LOCAL_DIR` resolve from the repository root. `server/selfie/localPaths.js` resolves provider models, runtimes, reference/output directories, logs, and Electron gallery configuration.
@@ -157,7 +163,8 @@ Configuration merges in this order:
 1. Backend defaults.
 2. Shared `selfie.config.json`.
 3. Ignored sibling `selfie.config.local.json`.
-4. Explicit CLI or in-memory overrides.
+4. Saved image settings from the host UI.
+5. Explicit CLI or in-memory overrides.
 
 Nested objects merge recursively; arrays, scalar values, and `null` replace earlier values. Keep machine-specific installation paths and tuning in `selfie.config.local.json`. Path expansion follows the merge. A valid installed local runtime takes precedence over a configured legacy installation; an incomplete runtime falls back with diagnostics.
 
@@ -222,8 +229,9 @@ See [Local setup](docs/setup.md) for engine selection, license flags, extractor 
 - **External ComfyUI:** the shared `comfyUrl` is `http://127.0.0.1:8188`. Set a different local URL in the ignored config if your installation uses another port.
 - **Managed ComfyUI:** the backend owns the configured Python process, waits for health readiness, stops idle instances, and joins cancellation/shutdown cleanup. A portable local installation needs embedded Python and `ComfyUI/main.py`.
 - **sd.cpp:** readiness checks the selected sd-cli binary, required model files, supported arguments, GPU backend, and matching runtime libraries. Memory preflight is heuristic; telemetry records bounded per-job peaks. GPU/insufficient-memory overrides are explicit. Runtime CPU fallback terminates generation when CPU execution is disabled.
+- **Cloud:** the backend calls Cloudflare Workers AI `@cf/black-forest-labs/flux-2-klein-9b` with one resized reference and a planned prompt. Output is one 1024×1024 image with four fixed steps. Tokens remain backend-only; charges and free allocation depend on the user's account. Explicit cloud selection does not initialize local engines.
 
-Use an exported ComfyUI API workflow in `workflows/selfie.api.json` and configure roles in `selfie.mapping.json`. Add private PNG/JPG/WebP references under ignored `assets/references/`, then set `defaultReference` to an existing filename. Both image providers use the same reference whitelist. ComfyUI uploads references before validating workflow image choices.
+Use an exported ComfyUI API workflow in `workflows/selfie.api.json` and configure roles in `selfie.mapping.json`. Add private PNG/JPG/WebP references under ignored `assets/references/`, then set `defaultReference` to an existing filename. Image providers use the same reference whitelist. ComfyUI uploads references before validating workflow image choices.
 
 | Setting | Shared value / behavior |
 | --- | --- |
@@ -284,7 +292,7 @@ Use `npm run selfie:test-b` or `npm run selfie:test-c` for focused planner/job-m
 
 ## Verification limits
 
-Managed ComfyUI, sd.cpp hardening, setup tools, and browser/Electron flows have automated regression coverage. Live image quality, native capture behavior, real engine installation, and the Windows installer still need manual verification. The cloud image provider remains an unavailable stub. Detailed implementation evidence and remaining work are in [docs/STATUS.md](docs/STATUS.md).
+Managed ComfyUI, sd.cpp hardening, setup tools, Cloudflare request handling, and browser/Electron flows have automated regression coverage. Live image quality, native capture behavior, real engine installation, and the Windows installer still need manual verification. Cloud PAP uses each user's own Cloudflare account with FLUX.2 Klein 9B; connection checks do not generate images. Detailed implementation evidence and remaining work are in [docs/STATUS.md](docs/STATUS.md).
 
 ## License
 

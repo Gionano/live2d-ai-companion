@@ -65,12 +65,21 @@ recommend the maintained `leejet/ComfyUI-GGUF` fork for native `qwen_image21` su
 The manifest pins [commit 373048b8403a7820620065210a691263d4da0a61](https://github.com/leejet/ComfyUI-GGUF/tree/373048b8403a7820620065210a691263d4da0a61).
 Its loader accepts `qwen_image21`; its license is Apache-2.0.
 
-Only this node archive's `sha256` and `sizeBytes` remain unresolved: upstream has no
-release asset checksum, and its generated source ZIP HEAD response has no Content-Length.
-Do not substitute the Git commit, Git tree hash, uncompressed source size or a rounded
-HTML size. When a verified copy of that exact source ZIP is available locally, run
-`npm run setup:hash -- <file>` and fill the two remaining fields. Until then,
-`setup:comfyui --yes` deliberately refuses, even with `--skip-pip`.
+The exact pinned ZIP was read in memory from both its GitHub archive URL and official
+codeload redirect on 2026-11-08. Both yielded 38,557 bytes and SHA-256
+`692c367072b6c1ec87ac9f3410c8e2563dfb8c0bb7f4abead09a8d6515c67169`.
+This measures the distributed archive itself; it is not a Git commit/tree hash or an
+uncompressed source size. Setup independently validates these bytes before extraction.
+
+## Portable archive extractor
+
+When system 7-Zip/bsdtar is absent, setup selects the official
+[7-Zip 26.06 `7zr.exe` release asset](https://github.com/ip7z/7zip/releases/tag/26.06).
+Upstream release metadata reports 600,064 bytes and SHA-256
+`e80db2dad715a6c5adabe292d31ed54e11f4e9b99ca349827b50573b175891bc`.
+It is installed only inside the application local runtime, after the displayed
+[LGPL v2.1 or later license](https://github.com/ip7z/7zip/blob/26.06/DOC/License.txt)
+is accepted. The binary is not committed, executed, or installed by tests.
 
 Pinned source code does not pin transitive pip dependencies; no constraints file was
 invented. Native generation, archive contents and end-to-end installs remain unverified.
