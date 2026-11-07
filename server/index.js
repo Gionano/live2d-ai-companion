@@ -16,7 +16,8 @@ import {
   detectVisionIntent,
   resolveVisionSource,
 } from './visionCapture.js';
-import { streamingVisionManager } from './streamingVisionManager.js';
+import { StreamingVisionManager, streamingVisionManager } from './streamingVisionManager.js';
+import { VisionMonitorPresence } from './visionMonitorPresence.js';
 import {
   generateReply,
   generateReplyStream,
@@ -270,6 +271,12 @@ const MONITOR_ONLY_TYPES = new Set(['monitor_frame']);
 const sharingSockets = new Set();
 // Socket Vision Monitor yang terhubung (untuk conditional continuous capture).
 const monitorSockets = new Set();
+const visionSessions = new Map();
+const visionMonitorPresence = new VisionMonitorPresence(active => {
+  streamingVisionManager.setMonitorConnected(active);
+  for (const manager of visionSessions.values()) manager.setMonitorConnected(active);
+  broadcastToCompanions({ type: 'vision_monitor_status', active });
+});
 // Pesan audio/avatar/selfie khusus companion — tidak perlu sampai ke Vision Monitor.
 const COMPANION_ONLY_TYPES = new Set([
   'audio_output', 'audio_end', 'speech_start', 'speech_end', 'stop_speech', 'emotion', 'amika_replied', 'vision',
@@ -315,15 +322,17 @@ jobManager.setSpeechHandler(({ text, emotion, speechEmotion }) => {
 });
 streamingVisionManager.setSpeechHandler((text, emotion, options) => enqueueSpeech(text, emotion, options));
 
-function sendVisionInit(sock) {
+function sendVisionInit(sock, manager = [...visionSessions.values()].at(-1) || streamingVisionManager) {
   if (sock.readyState !== WebSocket.OPEN) return;
   sock.send(JSON.stringify({
     type: 'init_vision_state',
-    active: streamingVisionManager.isScreenShareActive,
-    settings: streamingVisionManager.settings,
-    stats: streamingVisionManager.stats,
-    bufferCount: streamingVisionManager.buffer.length,
-    sync: streamingVisionManager.syncInfo(),
+    monitorActive: visionMonitorPresence.active,
+    active: Object.values(manager.getSourceSnapshot()).some(source => source.active),
+    settings: manager.settings,
+    stats: manager.stats,
+    sources: manager.getSourceSnapshot(),
+    bufferCount: manager.buffer.length,
+    sync: manager.syncInfo(),
   }));
 }
 
@@ -340,14 +349,9 @@ wss.on('connection', (socket, req) => {
     // Observer saja: tanpa sesi percakapan, tanpa history, tanpa keepalive.
     socket.isMonitor = true;
     monitorSockets.add(socket);
-    streamingVisionManager.setMonitorConnected(true);
+    visionMonitorPresence.add(socket);
     console.log(`[monitor] Vision Monitor bridge terhubung (total: ${monitorSockets.size})`);
     sendVisionInit(socket);
-
-    // Monitor baru konek & share aktif → mulai continuous capture di companion
-    if (monitorSockets.size === 1 && sharingSockets.size > 0) {
-      broadcastToCompanions({ type: 'continuous_capture_control', enabled: getSlotStatus('vision').available });
-    }
 
     socket.on('message', (raw) => {
       let msg;
@@ -356,22 +360,22 @@ wss.on('connection', (socket, req) => {
       } catch {
         return;
       }
-      if (msg.type === 'update_vision_config') {
+      if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'monitor_presence') {
+        visionMonitorPresence.update(socket, msg.active);
+      } else if (msg.type === 'update_vision_config') {
         streamingVisionManager.updateSettings(msg.settings || msg);
+        for (const manager of visionSessions.values()) manager.updateSettings(msg.settings || msg);
       } else if (msg.type === 'reset_stats') {
         streamingVisionManager.resetStats();
+        for (const manager of visionSessions.values()) manager.resetStats();
       }
     });
     socket.once('close', () => {
       monitorSockets.delete(socket);
-      const stillHasMonitor = monitorSockets.size > 0;
-      streamingVisionManager.setMonitorConnected(stillHasMonitor);
+      visionMonitorPresence.remove(socket);
       console.log(`[monitor] Vision Monitor bridge terputus (sisa: ${monitorSockets.size})`);
 
-      // Monitor terakhir pergi & share masih aktif → stop continuous capture
-      if (!stillHasMonitor && sharingSockets.size > 0) {
-        broadcastToCompanions({ type: 'continuous_capture_control', enabled: false });
-      }
     });
     return;
   }
@@ -382,8 +386,19 @@ wss.on('connection', (socket, req) => {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(obj));
   };
   speechController.register(socket, send);
+  const history = []; // Conversation and visual caches belong to this connection.
+  const visionManager = new StreamingVisionManager();
+  visionManager.setMonitorConnected(visionMonitorPresence.active);
+  visionSessions.set(socket, visionManager);
+  socket.visionSessionId = randomUUID();
+  socket.captureSessions = { screen: { sessionId: null, active: false }, webcam: { sessionId: null, active: false } };
+  socket.explicitVisionControllers = new Map();
 
   socket.once('close', () => {
+    for (const controller of socket.explicitVisionControllers.values()) controller.abort();
+    socket.explicitVisionControllers.clear();
+    visionManager.dispose();
+    visionSessions.delete(socket);
     speechController.unregister(socket);
     companionSessionClosed();
     for (const pending of pendingCaptures.values()) {
@@ -396,8 +411,6 @@ wss.on('connection', (socket, req) => {
       streamingVisionManager.setScreenShareStatus(false);
     }
   });
-
-  const history = []; // Conversation history remains per connection.
 
   // Minta satu frame layar ke klien desktop. Selalu resolve (tidak pernah reject):
   //   { ok:true, dataUrl, width, height } | { ok:false, code, spoken }
@@ -463,8 +476,19 @@ wss.on('connection', (socket, req) => {
     }
   };
 
-  streamingVisionManager.setBroadcaster(broadcastToAll);
-  streamingVisionManager.setHistoryRef(history);
+  visionManager.setBroadcaster((obj) => {
+    const event = { ...obj, conversationId: socket.visionSessionId };
+    if (!MONITOR_ONLY_TYPES.has(obj.type)) send(event);
+    const json = JSON.stringify(event);
+    for (const monitor of monitorSockets) {
+      if (monitor.readyState === WebSocket.OPEN && !COMPANION_ONLY_TYPES.has(obj.type)) monitor.send(json);
+    }
+  });
+  visionManager.setHistoryRef(history);
+  visionManager.setSpeechHandler((text, emotion, { speechEmotion, signal } = {}) => {
+    if (signal?.aborted) return;
+    return speechController.play({ text, emotion, speechEmotion, signal, recipients: [socket], deferred: true, origin: 'vision' });
+  });
 
   // Kirim status awal percakapan ke client
   send({
@@ -473,7 +497,7 @@ wss.on('connection', (socket, req) => {
   });
 
   // Kirim status awal vision streaming ke client yang baru terhubung
-  sendVisionInit(socket);
+  sendVisionInit(socket, visionManager);
 
   const handleSelfieFeature = installSelfieFeatureControl({ socket, manager: jobManager, send });
   socket.on('message', async (raw) => {
@@ -516,7 +540,26 @@ wss.on('connection', (socket, req) => {
     }
 
     if (msg.type === 'continuous_frame') {
-      streamingVisionManager.handleContinuousFrame(msg.image);
+      void visionManager.handleContinuousFrame(msg.image, msg).catch(error => {
+        console.warn('[vision] Continuous capture failed:', error.message);
+      });
+      return;
+    }
+
+    if (msg.type === 'vision_capture_status') {
+      if (!['screen', 'webcam'].includes(msg.source) || typeof msg.active !== 'boolean'
+        || typeof msg.sessionId !== 'string' || !msg.sessionId.trim() || msg.sessionId.length > 128) return;
+      const previous = socket.captureSessions[msg.source];
+      socket.captureSessions[msg.source] = { sessionId: msg.sessionId, active: msg.active };
+      if (previous.sessionId !== msg.sessionId || previous.active !== msg.active) {
+        socket.explicitVisionControllers.get(msg.source)?.abort();
+      }
+      return;
+    }
+
+    if (msg.type === 'vision_source_status') {
+      if (!['screen', 'webcam'].includes(msg.source) || typeof msg.active !== 'boolean') return;
+      visionManager.setSourceStatus(msg.source, msg.active, msg.sessionId);
       return;
     }
 
@@ -524,16 +567,15 @@ wss.on('connection', (socket, req) => {
     if (msg.type === 'screen_share_status') {
       if (msg.active) sharingSockets.add(socket);
       else sharingSockets.delete(socket);
-      streamingVisionManager.setScreenShareStatus(sharingSockets.size > 0);
-      // Continuous capture hanya jalan jika ada monitor terhubung
-      const enableCapture = msg.active && monitorSockets.size > 0 && getSlotStatus('vision').available;
+      visionManager.setScreenShareStatus(Boolean(msg.active));
+      const enableCapture = msg.active && visionMonitorPresence.active && getSlotStatus('vision').available;
       send({ type: 'continuous_capture_control', enabled: enableCapture });
       return;
     }
 
     // 3. Update konfigurasi vision (interval, maxTokens, buffer) dari Vision Monitor
     if (msg.type === 'update_vision_config') {
-      streamingVisionManager.updateSettings(msg.settings || msg);
+      visionManager.updateSettings(msg.settings || msg);
       return;
     }
 
@@ -554,8 +596,8 @@ wss.on('connection', (socket, req) => {
         history.splice(0, history.length - HISTORY_MESSAGE_LIMIT);
       }
 
-      broadcastToAll({ type: 'vision', text: `[Spontan] ${displayText}` });
-      await enqueueSpeech(text, emotion, { speechEmotion });
+      send({ type: 'vision', text: `[Spontan] ${displayText}` });
+      await speechController.play({ text, emotion, speechEmotion, recipients: [socket], deferred: true, origin: 'vision' });
       return;
     }
 
@@ -667,12 +709,14 @@ wss.on('connection', (socket, req) => {
       }
 
       // 2) Vision — periksa intent & pisahkan source (screen vs webcam)
-      let vision = null;
+      let vision = visionManager.getConversationContext();
       if (detectVisionIntent(text) && !getSlotStatus('vision').available) {
         await playSpokenMessage(UNAVAILABLE_MESSAGES.vision, 'netral', socket, turn.turnId);
         return;
       }
       if (detectVisionIntent(text)) {
+        // Explicit inspection must never fall back to the automatic scene cache.
+        vision = null;
         // Klien Electron: layar "aktif" = Screen Vision di tray ON; frame diminta
         // on-demand lewat request_screen_capture (bukan Share Screen browser).
         const isDesktop = msg.desktop === true;
@@ -713,26 +757,55 @@ wss.on('connection', (socket, req) => {
         } else {
           let frame = source === 'screen' ? screenImage : image;
           const label = source === 'screen' ? 'Layar' : 'Kamera';
+          const initialSource = visionManager.getSourceSnapshot()[source];
+          const captureSessionId = initialSource?.active ? initialSource.sessionId : null;
+          const inputCaptureSessions = msg.captureSessions;
+          const hasCaptureToken = inputCaptureSessions && typeof inputCaptureSessions === 'object'
+            && !Array.isArray(inputCaptureSessions) && Object.hasOwn(inputCaptureSessions, source);
+          const inputCaptureToken = hasCaptureToken ? inputCaptureSessions[source] : null;
+          const sourceController = new AbortController();
+          socket.explicitVisionControllers.get(source)?.abort();
+          socket.explicitVisionControllers.set(source, sourceController);
+          const sourceSignals = [turn.signal, sourceController.signal];
+          const unlinkSignals = [];
+          let observationSignal;
+          if (typeof AbortSignal.any === 'function') {
+            observationSignal = AbortSignal.any(sourceSignals);
+          } else {
+            const combinedController = new AbortController();
+            for (const signal of sourceSignals) {
+              const abort = () => combinedController.abort(signal.reason);
+              if (signal.aborted) abort();
+              else {
+                signal.addEventListener('abort', abort, { once: true });
+                unlinkSignals.push(() => signal.removeEventListener('abort', abort));
+              }
+            }
+            observationSignal = combinedController.signal;
+          }
+          const requireCurrentSource = () => {
+            const actualCapture = socket.captureSessions[source];
+            const currentSource = captureSessionId ? visionManager.getSourceSnapshot()[source] : null;
+            if (sourceController.signal.aborted || hasCaptureToken && (typeof inputCaptureToken !== 'string'
+              || !actualCapture?.active || actualCapture.sessionId !== inputCaptureToken)
+              || !hasCaptureToken && captureSessionId && (!currentSource?.active
+                || currentSource.sessionId !== captureSessionId)) {
+              const error = new Error('The capture source changed during inspection.');
+              error.code = 'VISION_SOURCE_RETIRED';
+              throw error;
+            }
+          };
           try {
+            requireCurrentSource();
             const tVisStart = performance.now();
             let desc;
             let captureFailure = null;
-
-            // Smart routing: kalau sumber = layar DAN monitor terhubung,
-            // ambil deskripsi dari buffer continuous capture (jauh lebih cepat,
-            // tanpa API call tambahan). Kalau buffer kosong → fallback one-shot.
-            if (source === 'screen' && monitorSockets.size > 0) {
-              const bufferDesc = streamingVisionManager.getLatestDescriptions();
-              if (bufferDesc) {
-                desc = bufferDesc;
-                console.log(`[vision] Menggunakan buffer monitor (${streamingVisionManager.buffer.length} entri)`);
-              }
-            }
 
             // Electron: minta frame layar langsung ke klien (timeout 5 dtk)
             if (!desc && source === 'screen' && !frame && desktopScreenOn) {
               const cap = await requestScreenCapture();
               if (!isCurrent()) return;
+              requireCurrentSource();
               if (cap.ok) frame = cap.dataUrl;
               else captureFailure = cap;
             }
@@ -742,10 +815,11 @@ wss.on('connection', (socket, req) => {
               vision = `LAYAR_GAGAL: user meminta kamu melihat layarnya, tetapi layar tidak berhasil ditangkap (${captureFailure.code}). Sampaikan dengan natural, kurang lebih: "${captureFailure.spoken}". Jangan pura-pura melihat dan jangan menyebut Share Screen.`;
               send({ type: 'vision', text: captureFailure.spoken });
             } else {
-              // Fallback one-shot: buffer kosong atau sumber = kamera
+              requireCurrentSource();
               if (!desc) {
-                desc = await describeFrame(frame, source, { signal: turn.signal });
+                desc = await describeFrame(frame, source, { signal: observationSignal });
                 if (!isCurrent()) return;
+                requireCurrentSource();
               }
 
               console.log(`[timing] vision (${source}): ${ms(tVisStart)}ms (t+${ms(tPipe)})`);
@@ -755,8 +829,17 @@ wss.on('connection', (socket, req) => {
             }
           } catch (err) {
             if (!isCurrent()) return;
-            console.error(`[vision:${source}] error:`, err);
-            send({ type: 'error', message: `Vision ${label.toLowerCase()} gagal: ${err.message}` });
+            if (err?.code === 'VISION_SOURCE_RETIRED' || sourceController.signal.aborted) {
+              vision = `VISION_SOURCE_RETIRED: ${label} dimatikan atau sumbernya diganti saat pengamatan berlangsung. Pengamatan tadi tidak berlaku. Jangan mengaku melihat keadaan saat ini atau memakai deskripsi sebelumnya. Minta user mengulang pertanyaannya setelah sumber siap.`;
+              send({ type: 'vision', text: `${label} berubah saat sedang dilihat. Coba tanyakan sekali lagi ya.` });
+            } else {
+              console.error(`[vision:${source}] error:`, err);
+              vision = `VISION_FRESH_FAILED: Pengamatan baru dari ${label.toLowerCase()} gagal. Tidak ada deskripsi baru yang berhasil diverifikasi. Jangan mengaku melihat keadaan saat ini atau memakai deskripsi sebelumnya. Sampaikan bahwa pengamatan gagal dan minta user mencoba lagi.`;
+              send({ type: 'error', message: `Vision ${label.toLowerCase()} gagal. Coba sekali lagi ya.` });
+            }
+          } finally {
+            for (const unlink of unlinkSignals) unlink();
+            if (socket.explicitVisionControllers.get(source) === sourceController) socket.explicitVisionControllers.delete(source);
           }
         }
       }
@@ -837,6 +920,7 @@ wss.on('connection', (socket, req) => {
 
       history.push({ role: 'user', content: text });
       history.push({ role: 'assistant', content: full });
+      visionManager.setAssistantContext(full);
       if (history.length > HISTORY_MESSAGE_LIMIT) {
         history.splice(0, history.length - HISTORY_MESSAGE_LIMIT);
       }
@@ -856,6 +940,9 @@ wss.on('connection', (socket, req) => {
 // Install after role assignment so monitor sockets do not receive selfie snapshots.
 installSelfieLifecycle({ manager: jobManager, server, wss });
 server.once('close', stopSelfieConfigWatch);
+server.once('close', () => {
+  for (const manager of visionSessions.values()) manager.dispose();
+});
 
 const PORT = process.env.PORT || 8787;
 server.listen(PORT, '127.0.0.1', () => {

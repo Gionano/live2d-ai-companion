@@ -183,7 +183,8 @@ test('actual chat handler forwards each queued sentence choice into say options'
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   const run = new AsyncFunction('socket', 'speechController', 'transcribeAudio', 'generateReplyStream',
     'history', 'msg', 'extFromMime', 'detectSelfieIntent', 'detectVisionIntent',
-    'markConversationActivity', 'HISTORY_MESSAGE_LIMIT', 'memoryManager', 'getSlotStatus', source.slice(start, end));
+    'markConversationActivity', 'HISTORY_MESSAGE_LIMIT', 'memoryManager', 'getSlotStatus',
+    'proactiveConversation', 'visionManager', 'visionSessions', source.slice(start, end));
   const calls = [];
   const h = speechHarness(t, async function* (text, emotion, options) {
     calls.push([text, emotion, options.speechEmotion]);
@@ -198,10 +199,14 @@ test('actual chat handler forwards each queued sentence choice into say options'
     await run(h.socket, h.controller, () => {}, (previous, text, vision, options) =>
       generateReplyStream(previous, text, vision, { ...options, registry }), history,
     { type: 'text_input', text: 'Halo' }, () => 'webm', () => ({ isSelfie: false }), () => false,
-    () => {}, 8, { recordTurnAndExtract() {} }, () => ({ available: true }));
+    () => {}, 8, { recordTurnAndExtract() {} }, () => ({ available: true }),
+    { updateSettings() {}, setUserActive() {} },
+    { getConversationContext: () => null, setAssistantContext() {} }, new Map());
   }
   assert.deepEqual(calls, [['Aku di sini.', 'sayang', 'compassionate'], ['Tenang, ya!', 'sayang', 'compassionate'],
     ['Aku di sini.', 'sayang', 'nostalgic'], ['Tenang, ya!', 'sayang', 'nostalgic']]);
   assert.ok(h.events.filter(event => event.type === 'emotion').every(event => event.emotion === 'sayang'));
+  assert.equal(h.events.some(event => event.type === 'error'), false);
+  assert.equal(history.filter(turn => turn.role === 'assistant').length, 2);
   assert.ok(history.filter(turn => turn.role === 'assistant').every(turn => turn.content === 'Aku di sini. Tenang, ya!'));
 });

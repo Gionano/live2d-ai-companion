@@ -20,6 +20,7 @@ const overlaySubtitleEl = document.getElementById('overlay-subtitle');
 import { tuning } from './tuningConfig.js';
 import { SpeechPlayback, TurnState } from './speechPlayback.js';
 import { analyzeSpeechRhythm } from './speechMotion.js';
+import { ContinuousVisionCapture, captureSignature } from './continuousVision.js';
 import { handleBrowserSelfieModal } from './browserSelfieModal.js';
 
 const isOverlay = new URLSearchParams(window.location.search).get('mode') === 'overlay';
@@ -81,8 +82,21 @@ function setMicStatus(live, label, stateClass = '') {
 }
 
 let currentFacingMode = 'user';
+let cameraGeneration = 0;
+let screenGeneration = 0;
+const captureAvailability = { screen: false, webcam: false };
+
+function syncCaptureStatus(source, active) {
+  captureAvailability[source] = Boolean(active);
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'vision_capture_status',
+    source, active: captureAvailability[source],
+    sessionId: String(source === 'screen' ? screenGeneration : cameraGeneration) }));
+}
 
 async function initWebcam(facingMode = 'user') {
+  const generation = ++cameraGeneration;
+  syncCaptureStatus('webcam', false);
+  continuousVision.setActive('webcam', false);
   try {
     // Hentikan stream lama jika ada
     if (video.srcObject) {
@@ -94,19 +108,35 @@ async function initWebcam(facingMode = 'user') {
     const stream = await navigator.mediaDevices.getUserMedia({ 
       video: { facingMode: { ideal: facingMode } } 
     });
+    if (generation !== cameraGeneration) {
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
     
     video.srcObject = stream;
     await video.play();
+    if (generation !== cameraGeneration || video.srcObject !== stream || !stream.active) {
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
     currentFacingMode = facingMode; // Simpan mode yang aktif jika sukses
+    syncCaptureStatus('webcam', true);
+    continuousVision.setActive('webcam', tuning.get('vision.webcamMonitoring') === 'on');
+    stream.getVideoTracks()[0].addEventListener('ended', () => {
+      if (video.srcObject === stream) {
+        syncCaptureStatus('webcam', false);
+        continuousVision.setActive('webcam', false);
+      }
+    });
   } catch (err) {
     log(`Webcam gagal: ${err.message}`, 'error');
     // Fallback: coba kembali ke mode sebelumnya jika pergantian gagal
-    if (facingMode !== currentFacingMode) {
+    if (generation === cameraGeneration && facingMode !== currentFacingMode) {
       log(`Mencoba kembali ke kamera sebelumnya...`, 'error');
       initWebcam(currentFacingMode);
     }
   } finally {
-    video.classList.remove('camera-loading');
+    if (generation === cameraGeneration) video.classList.remove('camera-loading');
   }
 }
 
@@ -122,7 +152,6 @@ if (switchBtn) {
 }
 
 let screenStream = null;
-let continuousCaptureTimer = null;
 let captureIntervalSeconds = 1; // default 1 frame per detik
 
 const screenVideo = document.createElement('video');
@@ -139,7 +168,7 @@ const screenShareBtn = document.getElementById('screen-share-btn');
 // ---------------------------------------------------------------------------
 const isDesktopCapture = typeof window.desktopBridge?.captureScreen === 'function';
 let desktopScreenVision = false; // disinkronkan dari main process (tray)
-let desktopCaptureInFlight = false;
+let desktopDisplayId = null;
 
 /** Apakah sumber layar sedang aktif (Share Screen di browser / Screen Vision di Electron). */
 function isScreenActive() {
@@ -148,7 +177,8 @@ function isScreenActive() {
 
 /** Metadata tambahan untuk audio_input/text_input agar backend tahu klien desktop. */
 function desktopInputMeta() {
-  return isDesktopCapture ? { desktop: true, screenVisionOn: desktopScreenVision } : {};
+  return { ...(isDesktopCapture ? { desktop: true, screenVisionOn: desktopScreenVision } : {}),
+    captureSessions: { screen: String(screenGeneration), webcam: String(cameraGeneration) } };
 }
 
 /** Ambil satu frame lewat desktopBridge; retry sekali jika kena rate limit main process. */
@@ -168,16 +198,15 @@ async function captureDesktopFrame() {
 /** Beritahu backend status sumber layar (dipakai untuk continuous capture). */
 function syncDesktopScreenStatus() {
   if (!isDesktopCapture) return;
-  if (!desktopScreenVision) stopContinuousCapture(); // jangan capture saat toggle off
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'screen_share_status', active: desktopScreenVision }));
-  }
+  continuousVision.setActive('screen', desktopScreenVision);
 }
 
 function applyDesktopScreenVision(enabled) {
   const next = Boolean(enabled);
   if (next === desktopScreenVision) return;
   desktopScreenVision = next;
+  screenGeneration++;
+  syncCaptureStatus('screen', next);
   console.log(`[ScreenVision] Toggle tray: ${next ? 'ON' : 'OFF'}`);
   syncDesktopScreenStatus();
 }
@@ -195,75 +224,44 @@ if (isDesktopCapture) {
     if (state && typeof state.screenVision === 'boolean') {
       applyDesktopScreenVision(state.screenVision);
     }
+    if (state?.activeDisplayId !== undefined && state.activeDisplayId !== desktopDisplayId) {
+      desktopDisplayId = state.activeDisplayId;
+      screenGeneration++;
+      syncCaptureStatus('screen', desktopScreenVision);
+      continuousVision.restart('screen');
+    }
   });
 }
 
 function startContinuousCapture() {
-  stopContinuousCapture();
-  console.log(`[ScreenShare] Memulai capture loop kontinu: 1 frame setiap ${captureIntervalSeconds} detik`);
-  
-  // Kirim frame pertama langsung
-  sendContinuousFrame();
-
-  continuousCaptureTimer = setInterval(() => {
-    sendContinuousFrame();
-  }, captureIntervalSeconds * 1000);
+  continuousVision.setActive('screen', isScreenActive());
 }
 
 function stopContinuousCapture() {
-  if (continuousCaptureTimer) {
-    clearInterval(continuousCaptureTimer);
-    continuousCaptureTimer = null;
-  }
-}
-
-async function sendDesktopContinuousFrame() {
-  if (!desktopScreenVision || desktopCaptureInFlight) return;
-  desktopCaptureInFlight = true;
-  try {
-    const shot = await captureDesktopFrame();
-    // Toggle bisa dimatikan selama capture berjalan -> buang frame
-    if (!desktopScreenVision) return;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'continuous_frame',
-        image: `data:image/jpeg;base64,${shot.base64}`,
-        timestamp: Date.now(),
-      }));
-    }
-  } catch (err) {
-    if (err?.code !== 'RATE_LIMITED' && err?.code !== 'SCREEN_VISION_DISABLED') {
-      console.warn('[ScreenVision] Capture kontinu gagal:', err?.code, err?.message);
-    }
-  } finally {
-    desktopCaptureInFlight = false;
-  }
-}
-
-function sendContinuousFrame() {
-  if (isDesktopCapture) {
-    void sendDesktopContinuousFrame();
-    return;
-  }
-  if (!screenStream || !screenVideo.videoWidth) return;
-  const frame = captureScreenFrame();
-  if (frame && ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'continuous_frame',
-      image: frame,
-      timestamp: Date.now(),
-    }));
-  }
+  continuousVision.setActive('screen', false);
 }
 
 async function startScreenShare() {
+  const generation = ++screenGeneration;
+  syncCaptureStatus('screen', false);
+  stopContinuousCapture();
   try {
-    screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { cursor: 'always' },
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { cursor: 'never' },
       audio: false,
     });
+    if (generation !== screenGeneration) {
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
+    screenStream?.getTracks().forEach(track => track.stop());
+    screenStream = stream;
     screenVideo.srcObject = screenStream;
     await screenVideo.play();
+    if (generation !== screenGeneration || screenStream !== stream || !stream.active) {
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
 
     if (screenShareBtn) {
       screenShareBtn.classList.add('active');
@@ -271,16 +269,11 @@ async function startScreenShare() {
     }
     log('🖥️ Share screen aktif.', 'muted');
 
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'screen_share_status', active: true }));
-    }
-
-    // Continuous capture TIDAK dimulai di sini — dikendalikan oleh backend
-    // via pesan 'continuous_capture_control' (hanya aktif jika Vision Monitor
-    // terhubung).
+    syncCaptureStatus('screen', true);
+    startContinuousCapture();
 
     screenStream.getVideoTracks()[0].onended = () => {
-      stopScreenShare();
+      if (screenStream === stream) stopScreenShare();
     };
   } catch (err) {
     console.warn('[ScreenShare] Dibatalkan atau gagal:', err.message);
@@ -288,6 +281,8 @@ async function startScreenShare() {
 }
 
 function stopScreenShare() {
+  screenGeneration++;
+  syncCaptureStatus('screen', false);
   stopContinuousCapture();
 
   if (screenStream) {
@@ -302,9 +297,6 @@ function stopScreenShare() {
   }
   log('🖥️ Share screen dimatikan.', 'muted');
 
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'screen_share_status', active: false }));
-  }
 }
 
 if (screenShareBtn) {
@@ -565,6 +557,33 @@ async function playDecodedAudio(buffer, emotion, { signal, speechId, pauseBefore
 // ---------------------------------------------------------------------------
 let ws = null;
 let desktopSelfieEnabled = true;
+const continuousVision = new ContinuousVisionCapture({
+  send: (message) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(message));
+    return true;
+  },
+  canSend: () => Boolean(ws?.readyState === WebSocket.OPEN && ws.bufferedAmount < 1024 * 1024),
+  capture: async (source) => {
+    if (source === 'screen' && isDesktopCapture) {
+      if (!desktopScreenVision) return null;
+      const shot = await captureDesktopFrame();
+      return { image: `data:${shot.mimeType || 'image/jpeg'};base64,${shot.base64}` };
+    }
+    const image = source === 'screen' ? captureScreenFrame() : captureWebcamFrame();
+    return image ? { image, signature: captureSignature(canvas, source) } : null;
+  },
+});
+
+tuning.onChange((group, key, value) => {
+  if (group === 'vision' && key === 'webcamMonitoring') {
+    continuousVision.setActive('webcam', value === 'on' && Boolean(video.srcObject?.active));
+  }
+  if (group === 'vision' && ['minInferenceIntervalMs', 'freshnessMs', 'screenChangeThreshold', 'webcamChangeThreshold'].includes(key)
+      && ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'update_vision_config', settings: { [key]: value } }));
+  }
+});
 
 function sendSelfieMessage(message) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
@@ -605,9 +624,9 @@ function connectWS() {
     if (window.desktopBridge?.notifySelfieEvent) {
       sendSelfieMessage({ type: 'selfie_feature', enabled: desktopSelfieEnabled });
     }
-    if (isScreenActive()) {
-      ws.send(JSON.stringify({ type: 'screen_share_status', active: true }));
-    }
+    continuousVision.setActive('screen', isScreenActive());
+    continuousVision.connect();
+    for (const source of ['screen', 'webcam']) syncCaptureStatus(source, captureAvailability[source]);
   });
   ws.addEventListener('message', (e) => {
     let msg;
@@ -617,6 +636,10 @@ function connectWS() {
       return;
     }
     if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'vision_monitor_status') {
+      continuousVision.setMonitorActive(msg.active === true);
+      return;
+    }
     if (msg.type === 'selfie_feature') {
       return;
     }
@@ -684,8 +707,13 @@ function connectWS() {
           });
           break;
         }
+        const generation = screenGeneration;
         captureDesktopFrame()
           .then((shot) => {
+            if (generation !== screenGeneration || !desktopScreenVision) {
+              reply({ error: { code: 'SOURCE_CHANGED', message: 'Sumber layar sudah berubah.' } });
+              return;
+            }
             reply({
               base64: shot.base64,
               mimeType: shot.mimeType || 'image/jpeg',
@@ -707,36 +735,18 @@ function connectWS() {
         break;
       }
       case 'continuous_capture_control': {
-        // Backend mengendalikan continuous capture berdasarkan status Vision Monitor.
-        if (msg.enabled && isScreenActive()) {
-          console.log('[ScreenShare] Backend meminta mulai continuous capture');
-          startContinuousCapture();
-          if (screenShareBtn) {
-            screenShareBtn.textContent = `🖥️ Screen On (${captureIntervalSeconds}s)`;
-          }
-        } else {
-          console.log('[ScreenShare] Backend meminta stop continuous capture');
-          stopContinuousCapture();
-          if (screenShareBtn && isScreenActive()) {
-            screenShareBtn.textContent = '🖥️ Screen On';
-          }
-        }
+        // New clients own source lifetimes; this message remains for old clients.
         break;
       }
       case 'config_updated':
       case 'init_vision_state': {
+        if (Object.hasOwn(msg, 'monitorActive')) continuousVision.setMonitorActive(msg.monitorActive === true);
         if (msg.settings && typeof msg.settings.intervalSeconds === 'number') {
           const newInterval = msg.settings.intervalSeconds;
           if (newInterval !== captureIntervalSeconds) {
             captureIntervalSeconds = newInterval;
             console.log(`[ScreenShare] Interval capture diperbarui ke ${captureIntervalSeconds}s`);
-            // Restart loop hanya jika continuous capture sedang jalan
-            if (continuousCaptureTimer && isScreenActive()) {
-              if (screenShareBtn) {
-                screenShareBtn.textContent = `🖥️ Screen On (${captureIntervalSeconds}s)`;
-              }
-              startContinuousCapture();
-            }
+            // Real capture stays at one frame/second; AI throttling is server-side.
           }
         }
         break;
@@ -747,6 +757,7 @@ function connectWS() {
     }
   });
   ws.addEventListener('close', () => {
+    continuousVision.disconnect();
     currentConversationState = 'idle';
     turnState.handle({ type: 'conversation_state', state: 'idle' });
     speechPlayback.reset();

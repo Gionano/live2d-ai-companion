@@ -60,6 +60,7 @@ function companionHarness({ desktop = true, initialState = Promise.resolve({ sel
   const settings = [];
   const browserEvents = [];
   const conversationEvents = [];
+  const monitorStates = [];
   let command;
   let stateChanged;
   class FakeWebSocket {
@@ -74,7 +75,8 @@ function companionHarness({ desktop = true, initialState = Promise.resolve({ sel
     addEventListener(type, callback) { this.listeners.set(type, callback); }
     send(raw) {
       if (this.failSend) throw new Error('Disconnected');
-      this.sent.push(JSON.parse(raw));
+      const message = JSON.parse(raw);
+      if (message.type !== 'proactive_config') this.sent.push(message);
     }
     open() {
       this.readyState = FakeWebSocket.OPEN;
@@ -93,6 +95,15 @@ function companionHarness({ desktop = true, initialState = Promise.resolve({ sel
     window: { desktopBridge: desktop ? bridge : undefined },
     location: { protocol: 'http:', host: 'localhost:5173' },
     WebSocket: FakeWebSocket,
+    ContinuousVisionCapture: class {
+      setActive() {}
+      setMonitorActive(active) { monitorStates.push(active); }
+      connect() {}
+      disconnect() {}
+    },
+    ProactiveVoiceGate: class { reset() {} },
+    tuning: { get: () => undefined, onChange() {} },
+    syncCaptureStatus() {}, captureAvailability: { screen: false, webcam: false },
     isMicMutedByDesktop: true,
     isScreenActive: () => false,
     turnState: { handle: event => conversationEvents.push(clone(event)) },
@@ -108,7 +119,7 @@ function companionHarness({ desktop = true, initialState = Promise.resolve({ sel
 connectWS();
 globalThis.reconnectSelfie = connectWS;`, context, { filename: 'companion-selfie-routing.js' });
   return {
-    sockets, forwarded, settings, browserEvents, conversationEvents,
+    sockets, forwarded, settings, browserEvents, conversationEvents, monitorStates,
     get command() { return command; },
     stateChanged: state => stateChanged(state),
     reconnect: () => context.reconnectSelfie(),
@@ -123,6 +134,14 @@ test('all five desktop selfie events reach main before conversation turn filteri
   assert.deepEqual(h.conversationEvents, []);
   h.sockets[0].receive({ type: 'conversation_state', state: 'processing' });
   assert.deepEqual(h.conversationEvents, [{ type: 'conversation_state', state: 'processing' }]);
+});
+
+test('monitor presence controls capture before conversation turn filtering', () => {
+  const h = companionHarness();
+  h.sockets[0].receive({ type: 'vision_monitor_status', active: true, turnId: 'stale-turn' });
+  h.sockets[0].receive({ type: 'vision_monitor_status', active: false, turnId: 'stale-turn' });
+  assert.deepEqual(h.monitorStates, [true, false]);
+  assert.deepEqual(h.conversationEvents, []);
 });
 
 test('all five browser selfie events use the modal and Cancel reaches the connected socket', () => {

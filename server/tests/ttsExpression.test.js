@@ -235,16 +235,18 @@ test('actual spontaneous comment listener survives deep speech text under strict
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     const listener = new AsyncFunction('raw', 'socket', 'speechController', 'handleSelfieFeature',
       'stripSpeechTags', 'markConversationActivity', 'history', 'HISTORY_MESSAGE_LIMIT',
-      'broadcastToAll', 'enqueueSpeech', 'console', ${body});
+      'send', 'console', ${body});
     const history = [], displayed = [], spoken = [];
     const emitter = new EventEmitter();
-    emitter.on('message', raw => listener(raw, {}, { isBusy: () => false }, () => false,
-      stripSpeechTags, () => {}, history, 8, event => displayed.push(event),
-      async text => spoken.push(text), { log() {} }));
+    const socket = {};
+    emitter.on('message', raw => listener(raw, socket,
+      { isBusy: () => false, async play(request) { spoken.push(request); } }, () => false,
+      stripSpeechTags, () => {}, history, 8, event => displayed.push(event), { log() {} }));
     const text = '('.repeat(8192) + 'Aku [unknown] (happy) sayang!' + ')'.repeat(8192);
     emitter.emit('message', Buffer.from(JSON.stringify({ type: 'spontaneous_vision_comment', text })));
     await new Promise(resolve => setImmediate(resolve));
-    assert.equal(spoken[0], text);
+    assert.deepEqual(spoken[0], { text, emotion: 'netral', speechEmotion: undefined,
+      recipients: [socket], deferred: true, origin: 'vision' });
     assert.equal(history.length, 1);
     assert.equal(displayed.length, 1);
     assert.doesNotMatch(history[0].content, /unknown|happy|\\[|\\]/);

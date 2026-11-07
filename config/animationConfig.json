@@ -390,10 +390,10 @@
       "value": 1,
       "default": 1,
       "min": 1,
-      "max": 15,
+      "max": 1,
       "step": 1,
-      "label": "Capture Interval (detik)",
-      "desc": "Jeda waktu pengambilan frame layar saat Share Screen aktif"
+      "label": "Interval capture (detik)",
+      "desc": "Layar dan kamera ditangkap sekali setiap detik. Jeda panggilan AI diatur terpisah."
     },
     "bufferDuration": {
       "value": 30,
@@ -466,6 +466,53 @@
       "step": 0.05,
       "label": "Webcam JPEG Quality",
       "desc": "Kualitas kompresi gambar webcam"
+    },
+    "webcamMonitoring": {
+      "type": "select",
+      "value": "on",
+      "default": "on",
+      "options": [
+        "off",
+        "on"
+      ],
+      "label": "Pantau kamera",
+      "desc": "Pantau kamera otomatis selama dashboard Vision Monitor terhubung."
+    },
+    "minInferenceIntervalMs": {
+      "value": 2000,
+      "default": 2000,
+      "min": 2000,
+      "max": 10000,
+      "step": 500,
+      "label": "Jeda analisis minimum (ms)",
+      "desc": "Batasi panggilan AI untuk setiap sumber yang berubah; gambar statis memakai deskripsi tersimpan."
+    },
+    "freshnessMs": {
+      "value": 5000,
+      "default": 5000,
+      "min": 2000,
+      "max": 5000,
+      "step": 1000,
+      "label": "Batas kesegaran capture (ms)",
+      "desc": "Hentikan konteks visual bila tidak ada capture yang benar-benar berhasil dalam waktu ini."
+    },
+    "screenChangeThreshold": {
+      "value": 3,
+      "default": 3,
+      "min": 1,
+      "max": 20,
+      "step": 0.5,
+      "label": "Ambang perubahan layar",
+      "desc": "Nilai lebih kecil lebih peka pada perubahan teks dan antarmuka."
+    },
+    "webcamChangeThreshold": {
+      "value": 5,
+      "default": 5,
+      "min": 1,
+      "max": 25,
+      "step": 0.5,
+      "label": "Ambang perubahan kamera",
+      "desc": "Nilai lebih besar mengabaikan gerakan kecil dan perubahan cahaya."
     }
   },
   "models": {
@@ -473,7 +520,10 @@
       "type": "select",
       "value": "whisper-large-v3",
       "default": "whisper-large-v3",
-      "options": ["whisper-large-v3", "whisper-large-v3-turbo"],
+      "options": [
+        "whisper-large-v3",
+        "whisper-large-v3-turbo"
+      ],
       "label": "STT Model (Groq)",
       "desc": "Model Whisper yang digunakan untuk Speech-to-Text"
     },
@@ -481,7 +531,9 @@
       "type": "select",
       "value": "qwen/qwen3.8-27b",
       "default": "qwen/qwen3.8-27b",
-      "options": ["qwen/qwen3.8-27b"],
+      "options": [
+        "qwen/qwen3.8-27b"
+      ],
       "label": "Vision Model (Groq)",
       "desc": "Model multimodal untuk mendeskripsikan frame kamera & layar"
     },

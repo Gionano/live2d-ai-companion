@@ -8,6 +8,8 @@ import WebSocket from 'ws';
 function withMonitorRole(rawUrl) {
   try {
     const u = new URL(rawUrl);
+    // The main backend binds IPv4 loopback; localhost may resolve to ::1 first.
+    if (u.hostname === 'localhost') u.hostname = '127.0.0.1';
     if (!u.searchParams.has('role')) u.searchParams.set('role', 'monitor');
     return u.toString();
   } catch {
@@ -16,7 +18,7 @@ function withMonitorRole(rawUrl) {
 }
 
 export class CompanionWsClient {
-  constructor(url = process.env.MAIN_COMPANION_WS_URL || 'ws://localhost:8787/ws') {
+  constructor(url = process.env.MAIN_COMPANION_WS_URL || 'ws://127.0.0.1:8787/ws') {
     // role=monitor: backend utama memperlakukan bridge ini sebagai observer
     // (bukan sesi percakapan), jadi tak mengganggu turn-taking/history.
     this.url = withMonitorRole(url);

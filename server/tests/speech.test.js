@@ -189,11 +189,14 @@ function inputHandler(socket, controller, transcribeAudio, generateReplyStream =
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   const run = new AsyncFunction('socket', 'speechController', 'transcribeAudio', 'generateReplyStream',
     'history', 'msg', 'extFromMime', 'detectSelfieIntent', 'detectVisionIntent',
-    'markConversationActivity', 'HISTORY_MESSAGE_LIMIT', 'memoryManager', 'getSlotStatus', source.slice(start, end));
+    'markConversationActivity', 'HISTORY_MESSAGE_LIMIT', 'memoryManager', 'getSlotStatus',
+    'proactiveConversation', 'visionManager', 'visionSessions', source.slice(start, end));
   const history = [];
   return msg => run(socket, controller, transcribeAudio, generateReplyStream, history, msg,
     () => 'webm', () => ({ isSelfie: false }), () => false, () => {}, 20,
-    { recordTurnAndExtract() {} }, () => ({ available: true }));
+    { recordTurnAndExtract() {} }, () => ({ available: true }),
+    { updateSettings() {}, setUserActive() {} },
+    { getConversationContext: () => null, setAssistantContext() {} }, new Map());
 }
 
 test('processing expiry aborts STT and a late old error cannot reset a newer turn', async () => {
@@ -233,6 +236,7 @@ test('processing expiry aborts STT and a late old error cannot reset a newer tur
   next.resolve('hello there');
   await nextTask;
   assert.equal(socket.conversationState, 'idle');
+  assert.equal(events.some(event => event.type === 'error'), false);
   assert.equal(events.find(event => event.type === 'user_said').turnId, nextId);
   controller.unregister(socket);
 });
@@ -257,6 +261,7 @@ test('private speech leaves another socket free to process its own input', async
   h.playbackGate.resolve();
   await task;
   assert.equal(other.conversationState, 'idle');
+  assert.equal(otherEvents.some(event => event.type === 'error'), false);
   assert.equal(h.controller.acknowledge(h.socket, privateSpeech.speechId), false);
   h.controller.unregister(other);
   h.controller.unregister(h.socket);

@@ -2,7 +2,7 @@
 // main.js (vision-monitor frontend)
 // Observation & Remote Configuration Panel.
 // Receives stream frames, perception logs, and filter events from Main Companion,
-// and sends realtime capture configuration updates back to the companion.
+// and sends analysis configuration updates back to the companion.
 // ---------------------------------------------------------------------------
 
 const USD_TO_IDR_RATE = 16200;
@@ -14,7 +14,14 @@ let sessionStartEpoch = null;
 let sessionTimerId = null;
 let bufferCount = 0;
 let bufferDurationSec = 30;
-let captureIntervalSec = 1;
+let inferenceIntervalSec = 2;
+let freshnessMs = 5000;
+let selectedSource = 'screen';
+let sourceSelectionTouched = false;
+const sourceStates = {};
+const sourceFrames = {};
+const sourceDescriptions = {};
+const sourceElements = {};
 let nextFilterSeconds = 30;
 let countdownTimerId = null;
 
@@ -66,8 +73,8 @@ let totalLogsCount = 0;
 // WebSocket Connection to Backend Bridge
 // ---------------------------------------------------------------------------
 function connectWebSocket() {
-  const wsHost = window.location.hostname || 'localhost';
-  const wsUrl = `ws://${wsHost}:3001/ws-monitor`;
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${wsProtocol}//${window.location.host}/ws-monitor`;
 
   ws = new WebSocket(wsUrl);
 
@@ -83,6 +90,7 @@ function connectWebSocket() {
     } catch {
       return;
     }
+    if (msg.sources) applySources(msg.sources);
 
     switch (msg.type) {
       case 'init_state': {
@@ -97,7 +105,7 @@ function connectWebSocket() {
 
       case 'init_vision_state':
       case 'screen_share_status': {
-        isScreenShareActive = Boolean(msg.active);
+        isScreenShareActive = msg.sources ? Object.values(sourceStates).some(source => source.active) : Boolean(msg.active);
         updateStreamStatusUI(isScreenShareActive);
         if (msg.settings) applySettings(msg.settings);
         if (msg.stats) updateStatsUI(msg.stats);
@@ -110,12 +118,16 @@ function connectWebSocket() {
       }
 
       case 'monitor_frame': {
-        renderIncomingFrame(msg.image, msg.timestamp);
+        renderIncomingFrame(msg.image, msg.timestamp, msg.source || 'screen', msg.sessionId);
         break;
       }
 
       case 'vision_entry': {
-        appendRawDescription(msg.entry);
+        if (!msg.entry) break;
+        const source = msg.source || msg.entry.source || 'screen';
+        sourceDescriptions[source] = msg.entry;
+        appendRawDescription({ ...msg.entry, source });
+        renderSources();
         updateBufferCountUI(msg.bufferCount);
         if (msg.stats) updateStatsUI(msg.stats);
         break;
@@ -123,13 +135,14 @@ function connectWebSocket() {
 
       case 'filter_start': {
         console.log(`[WS] Filter dimulai untuk ${msg.bufferSize} entries`);
-        filterCountdown.textContent = 'Filtering...';
+        filterCountdown.textContent = `${sourceLabel(msg.source)}: menilai...`;
         break;
       }
 
       case 'filter_result': {
         appendFilterResult(msg);
-        updateBufferCountUI(0);
+        if (!msg.sync) updateBufferCountUI(Object.values(sourceStates)
+          .reduce((total, source) => total + (source.bufferCount || 0), 0));
         resetFilterCountdown();
         if (msg.stats) updateStatsUI(msg.stats);
         break;
@@ -147,6 +160,11 @@ function connectWebSocket() {
         }
         break;
       }
+
+      case 'vision_error': {
+        appendVisionError(msg);
+        break;
+      }
     }
 
     // Sinkronkan counter buffer & countdown filter dengan server.
@@ -155,6 +173,7 @@ function connectWebSocket() {
 
   ws.onclose = () => {
     setBackendStatus('disconnected', 'Monitor Server: Offline');
+    updateCompanionStatusUI('disconnected');
     setTimeout(connectWebSocket, 2000);
   };
 
@@ -185,6 +204,14 @@ function updateCompanionStatusUI(status) {
     companionStatusPill.className = 'status-pill disconnected';
     companionStatusPill.querySelector('.status-text').textContent = 'Companion WS: Terputus';
   }
+  if (status !== 'connected') {
+    for (const state of Object.values(sourceStates)) {
+      Object.assign(state, { active: false, freshness: 'off', pending: false, inFlight: false });
+    }
+    isScreenShareActive = false;
+    updateStreamStatusUI(false);
+    renderSources();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +225,22 @@ function applyState(state) {
   if (state.settings) {
     applySettings(state.settings);
   }
+  if (state.sources) applySources(state.sources);
+  if (state.frames) {
+    for (const frame of Object.values(state.frames)) {
+      renderIncomingFrame(frame.image, frame.timestamp, frame.source, frame.sessionId);
+    }
+  }
+  if (state.descriptions) Object.assign(sourceDescriptions, state.descriptions);
+  if (Array.isArray(state.logs)) {
+    clearLogs();
+    for (const message of state.logs) {
+      if (message.type === 'vision_entry') appendRawDescription({ ...message.entry,
+        source: message.source || message.entry?.source || 'screen' });
+      else if (message.type === 'filter_result') appendFilterResult(message);
+      else if (message.type === 'vision_error') appendVisionError(message);
+    }
+  }
   if (state.stats) {
     updateStatsUI(state.stats);
   }
@@ -205,6 +248,7 @@ function applyState(state) {
     updateBufferCountUI(state.bufferCount);
   }
   if (state.sync) applySync(state.sync);
+  renderSources();
 }
 
 function applySync(sync, keepCountdownText = false) {
@@ -218,11 +262,12 @@ function applySync(sync, keepCountdownText = false) {
 }
 
 function applySettings(settings) {
-  if (typeof settings.intervalSeconds === 'number') {
-    captureIntervalSec = settings.intervalSeconds;
-    intervalSlider.value = captureIntervalSec;
-    intervalValDisplay.textContent = `${captureIntervalSec} detik`;
+  if (typeof settings.minInferenceIntervalMs === 'number') {
+    inferenceIntervalSec = Math.max(2, settings.minInferenceIntervalMs / 1000);
+    intervalSlider.value = inferenceIntervalSec;
+    intervalValDisplay.textContent = `${inferenceIntervalSec} detik`;
   }
+  if (Number.isFinite(settings.freshnessMs)) freshnessMs = settings.freshnessMs;
   if (typeof settings.bufferDurationSec === 'number') {
     bufferDurationSec = settings.bufferDurationSec;
     bufferSlider.value = bufferDurationSec;
@@ -233,15 +278,16 @@ function applySettings(settings) {
     maxTokensInput.value = settings.maxTokens;
     tokensValDisplay.textContent = `${settings.maxTokens} tokens`;
   }
+  updateStreamStatusUI(isScreenShareActive);
 }
 
 function updateStreamStatusUI(active) {
   if (active) {
     monitoringBadge.className = 'badge active';
     monitoringBadge.textContent = 'STREAM AKTIF';
-    streamStatusTitle.textContent = `Screen Share Aktif (${captureIntervalSec}s capture)`;
-    streamStatusDesc.textContent = 'Frame di-capture dari halaman companion utama dan diproses secara otomatis.';
-    streamSourceBadge.textContent = `Screen Feed (${captureIntervalSec} FPS)`;
+    const sources = Object.entries(sourceStates).filter(([, source]) => source.active).map(([source]) => sourceLabel(source));
+    streamStatusTitle.textContent = `${sources.join(' & ') || 'Penglihatan'} aktif`;
+    streamStatusDesc.textContent = `Tangkapan tetap 1×/detik per sumber. Jeda analisis AI minimal ${inferenceIntervalSec} detik.`;
     videoPlaceholder.style.display = 'none';
     livePreviewImg.style.display = 'block';
 
@@ -251,33 +297,193 @@ function updateStreamStatusUI(active) {
   } else {
     monitoringBadge.className = 'badge idle';
     monitoringBadge.textContent = 'MENUNGGU STREAM';
-    streamStatusTitle.textContent = 'Screen Share Belum Aktif';
-    streamStatusDesc.textContent = 'Klik tombol "Share Screen" di halaman avatar companion untuk memulai capture.';
-    streamSourceBadge.textContent = 'Menunggu Stream...';
+    streamStatusTitle.textContent = 'Layar dan kamera belum aktif';
+    streamStatusDesc.textContent = 'Aktifkan layar atau kamera di companion untuk mulai melihat. Monitor menampilkan hasil yang sudah dikirim.';
+    streamSourceBadge.textContent = 'Menunggu tangkapan...';
     videoPlaceholder.style.display = 'flex';
     livePreviewImg.style.display = 'none';
 
     stopSessionTimer();
     stopFilterCountdown();
   }
+  renderSelectedFrame();
 }
 
-function renderIncomingFrame(dataUrl, timestamp) {
-  if (!dataUrl) return;
+function renderIncomingFrame(dataUrl, timestamp, source = 'screen', sessionId = null) {
+  if (!dataUrl || !['screen', 'webcam'].includes(source)) return;
+  sourceFrames[source] = { image: dataUrl, timestamp, sessionId };
+  if (source !== selectedSource) return;
+  renderSelectedFrame();
 
-  livePreviewImg.src = dataUrl;
+  captureFlash.classList.add('active');
+  setTimeout(() => captureFlash.classList.remove('active'), 120);
+}
+
+function renderSelectedFrame() {
+  const frame = sourceFrames[selectedSource];
+  const state = sourceStates[selectedSource];
+  const active = state?.active ?? isScreenShareActive;
+  const captureAge = state?.lastCaptureAgeMs == null ? null
+    : state.lastCaptureAgeMs + Math.max(0, Date.now() - state.receivedAt);
+  const previewStatus = !active ? 'nonaktif' : captureAge > freshnessMs ? 'tangkapan kedaluwarsa' : '1×/detik';
+  streamSourceBadge.textContent = `${sourceLabel(selectedSource)} · ${previewStatus}`;
+  livePreviewImg.alt = `Pratinjau ${sourceLabel(selectedSource).toLowerCase()}`;
+  for (const [source, elements] of Object.entries(sourceElements)) {
+    elements.button.setAttribute('aria-pressed', String(source === selectedSource));
+  }
+  if (!active || !frame) {
+    videoPlaceholder.style.display = 'flex';
+    livePreviewImg.style.display = 'none';
+    hudRes.textContent = '-- × --';
+    hudLastTime.textContent = '--:--:--';
+    return;
+  }
+
+  if (livePreviewImg.src !== frame.image) livePreviewImg.src = frame.image;
   videoPlaceholder.style.display = 'none';
   livePreviewImg.style.display = 'block';
 
-  // Green Flash Animation on frame received
-  captureFlash.classList.add('active');
-  setTimeout(() => captureFlash.classList.remove('active'), 120);
-
-  // Update HUD
-  hudLastTime.textContent = new Date(timestamp || Date.now()).toLocaleTimeString();
+  hudLastTime.textContent = new Date(frame.timestamp || Date.now()).toLocaleTimeString();
   if (livePreviewImg.naturalWidth) {
     hudRes.textContent = `${livePreviewImg.naturalWidth} × ${livePreviewImg.naturalHeight}`;
   }
+}
+
+function sourceLabel(source) {
+  return source === 'webcam' ? 'Kamera' : 'Layar';
+}
+
+function applySources(sources) {
+  for (const source of ['screen', 'webcam']) {
+    if (!sources[source]) continue;
+    const previous = sourceStates[source];
+    if (previous && Object.hasOwn(sources[source], 'sessionId')
+      && previous.sessionId !== sources[source].sessionId) {
+      delete sourceFrames[source];
+      delete sourceDescriptions[source];
+    }
+    sourceStates[source] = { ...previous, ...sources[source], receivedAt: Date.now() };
+  }
+  if (!sourceSelectionTouched && !sourceStates[selectedSource]?.active) {
+    selectedSource = Object.keys(sourceStates).find(source => sourceStates[source].active) || selectedSource;
+  }
+  isScreenShareActive = Object.values(sourceStates).some(source => source.active);
+  updateStreamStatusUI(isScreenShareActive);
+  renderSources();
+}
+
+function ageText(value) {
+  return value == null ? 'belum tersedia' : `${Math.max(0, value / 1000).toFixed(1)} detik lalu`;
+}
+
+function renderSources() {
+  const labels = { current: 'Kondisi saat ini', recent: 'Baru saja', waiting: 'Menunggu analisis',
+    expired: 'Kedaluwarsa', off: 'Nonaktif' };
+  for (const source of ['screen', 'webcam']) {
+    const elements = sourceElements[source];
+    if (!elements) continue;
+    const state = sourceStates[source] || { active: false, freshness: 'off' };
+    const elapsedMs = Math.max(0, Date.now() - (state.receivedAt || Date.now()));
+    const captureAge = state.lastCaptureAgeMs == null ? null : state.lastCaptureAgeMs + elapsedMs;
+    const inferenceAge = state.lastInferenceAgeMs == null ? null : state.lastInferenceAgeMs + elapsedMs;
+    const freshness = !state.active ? 'off' : captureAge == null ? 'waiting'
+      : captureAge > freshnessMs ? 'expired' : state.freshness || 'waiting';
+    elements.freshness.textContent = labels[freshness] || labels.waiting;
+    elements.freshness.className = `source-freshness ${freshness}`;
+    elements.card.classList.toggle('source-active', Boolean(state.active));
+    elements.queue.textContent = state.inFlight
+      ? `Sedang dianalisis${state.pending ? ' · tangkapan terbaru menunggu' : ''}`
+      : state.pending ? 'Tangkapan terbaru menunggu giliran' : state.active ? 'Tidak ada antrean' : 'Sumber nonaktif';
+    elements.ages.textContent = `Tangkapan: ${ageText(captureAge)} · Analisis: ${ageText(inferenceAge)}`;
+    elements.score.textContent = Number.isFinite(state.score)
+      ? `Skor perubahan: ${state.score.toFixed(2)}` : 'Skor perubahan: belum tersedia';
+    const entry = sourceDescriptions[source];
+    elements.description.textContent = entry?.description || 'Belum ada deskripsi untuk sumber ini.';
+    const latency = state.lastLatencyMs ?? entry?.latencyMs;
+    const firstResponse = state.lastFirstResponseMs ?? entry?.firstResponseMs;
+    elements.latency.textContent = latency == null ? 'Durasi analisis: --' : `Durasi analisis: ${Math.round(latency)} ms`
+      + (firstResponse == null ? '' : ` · Tunggu respons: ${Math.round(firstResponse)} ms`);
+    for (const [name, element] of Object.entries(elements.counts)) element.textContent = state[name] || 0;
+  }
+  renderSelectedFrame();
+}
+
+function initializeMonitorControls() {
+  intervalSlider.min = '2';
+  intervalSlider.max = '30';
+  intervalSlider.value = '2';
+  intervalValDisplay.textContent = '2 detik';
+  const intervalLabel = document.querySelector('label[for="interval-input"]');
+  intervalLabel.htmlFor = 'interval-slider';
+  intervalLabel.textContent = 'Jeda minimal analisis AI (detik)';
+  configSyncBadge.closest('.card').querySelector('h2').textContent = 'Pengaturan analisis';
+  const ticks = intervalSlider.parentElement.querySelector('.slider-ticks');
+  ticks.replaceChildren(...['2s (Default)', '5s', '10s', '20s', '30s'].map(text => {
+    const tick = document.createElement('span');
+    tick.textContent = text;
+    return tick;
+  }));
+  const note = document.createElement('p');
+  note.className = 'analysis-control-note';
+  note.textContent = 'Tangkapan tetap 1×/detik. Kontrol ini mengatur jeda panggilan AI; gambar yang tidak berubah dilewati.';
+  intervalSlider.closest('.form-group').append(note);
+  document.querySelector('label[for="max-tokens-input"]').textContent = 'Batas panjang deskripsi AI';
+  statVisionCalls.closest('.metric-box').querySelector('.metric-name').textContent = 'Analisis visual';
+  statFilterCalls.closest('.metric-box').querySelector('.metric-name').textContent = 'Evaluasi komentar';
+  costVision.parentElement.firstElementChild.textContent = 'AI visual:';
+  costFilter.parentElement.firstElementChild.textContent = 'Pemilih komentar:';
+  monitoringBadge.closest('.card-header').querySelector('h2').textContent = 'Status penglihatan';
+  streamSourceBadge.parentElement.querySelector('h2').textContent = 'Pratinjau sumber';
+  videoPlaceholder.querySelector('h3').textContent = 'Menunggu tangkapan sumber';
+  videoPlaceholder.querySelector('p').textContent = 'Aktifkan layar atau kamera di companion. Pilih sumber di atas untuk melihat tangkapan terbarunya.';
+  emptyLogMessage.querySelector('p').textContent = 'Belum ada deskripsi. Aktifkan layar atau kamera di companion untuk mulai menerima hasil penglihatan.';
+  const modelChip = document.querySelector('.model-info-chip');
+  modelChip.textContent = 'Penyedia AI mengikuti pengaturan companion';
+
+  const tabs = document.createElement('div');
+  tabs.className = 'preview-source-tabs';
+  tabs.setAttribute('role', 'group');
+  tabs.setAttribute('aria-label', 'Pilih sumber pratinjau');
+  streamSourceBadge.parentElement.append(tabs);
+  const panel = document.createElement('div');
+  panel.className = 'card source-telemetry-card';
+  panel.innerHTML = '<div class="card-header"><h2>Layar dan kamera</h2><span class="badge-subtle">Tangkapan 1×/detik</span></div><div class="source-telemetry-grid"></div>';
+  document.querySelector('.preview-card').before(panel);
+  const counts = { captured: 'Tangkapan', inferred: 'Analisis', unchanged: 'Tetap', rateLimited: 'Jeda',
+    superseded: 'Diganti', rejected: 'Ditolak', expired: 'Kedaluwarsa', errors: 'Gagal' };
+  for (const source of ['screen', 'webcam']) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn btn-ghost btn-small';
+    button.textContent = sourceLabel(source);
+    button.addEventListener('click', () => {
+      sourceSelectionTouched = true;
+      selectedSource = source;
+      renderSelectedFrame();
+    });
+    tabs.append(button);
+    const card = document.createElement('section');
+    card.className = 'source-telemetry';
+    card.innerHTML = `<div class="source-telemetry-header"><strong>${sourceLabel(source)}</strong><span class="source-freshness"></span></div>
+      <p class="source-queue"></p><p class="source-ages"></p><p class="source-score"></p>
+      <div class="source-counts">${Object.entries(counts).map(([name, label]) =>
+        `<span><b data-count="${name}">0</b>${label}</span>`).join('')}</div>
+      <p class="source-latency"></p><p class="source-description"></p>`;
+    panel.querySelector('.source-telemetry-grid').append(card);
+    sourceElements[source] = { card, button,
+      freshness: card.querySelector('.source-freshness'), queue: card.querySelector('.source-queue'),
+      ages: card.querySelector('.source-ages'), score: card.querySelector('.source-score'),
+      latency: card.querySelector('.source-latency'),
+      description: card.querySelector('.source-description'),
+      counts: Object.fromEntries(Object.keys(counts).map(name => [name, card.querySelector(`[data-count="${name}"]`)])),
+    };
+  }
+  livePreviewImg.addEventListener('load', () => {
+    hudRes.textContent = `${livePreviewImg.naturalWidth} × ${livePreviewImg.naturalHeight}`;
+  });
+  renderSources();
+  renderSelectedFrame();
+  setInterval(renderSources, 1000);
 }
 
 function showConfigSyncFlash() {
@@ -294,7 +500,7 @@ function showConfigSyncFlash() {
 // Timers & Countdowns
 // ---------------------------------------------------------------------------
 function startSessionTimer() {
-  if (sessionTimerId) clearInterval(sessionTimerId);
+  if (sessionTimerId) return;
   sessionTimerId = setInterval(() => {
     if (!sessionStartEpoch) return;
     const diff = Math.floor((Date.now() - sessionStartEpoch) / 1000);
@@ -318,14 +524,14 @@ function resetFilterCountdown() {
 }
 
 function startFilterCountdown() {
-  if (countdownTimerId) clearInterval(countdownTimerId);
+  if (countdownTimerId) return;
   countdownTimerId = setInterval(() => {
     if (!isScreenShareActive) return;
     if (nextFilterSeconds > 0) {
       nextFilterSeconds--;
       filterCountdown.textContent = `${nextFilterSeconds}s`;
     } else {
-      filterCountdown.textContent = `Filtering...`;
+      filterCountdown.textContent = 'Menilai...';
     }
   }, 1000);
 }
@@ -339,8 +545,8 @@ function stopFilterCountdown() {
 }
 
 function updateBufferCountUI(count) {
-  bufferCount = count;
-  liveBufferCount.textContent = `${count} frame`;
+  bufferCount = Number.isFinite(count) ? count : 0;
+  liveBufferCount.textContent = `${bufferCount} deskripsi`;
 }
 
 // ---------------------------------------------------------------------------
@@ -378,28 +584,22 @@ function appendRawDescription(entry) {
   const item = document.createElement('div');
   item.className = 'feed-item';
 
-  const costStr = entry.costUsd ? `$${entry.costUsd.toFixed(5)}` : '$0.0001';
+  const costStr = Number.isFinite(entry.costUsd) ? `$${entry.costUsd.toFixed(5)}` : 'belum tersedia';
 
   item.innerHTML = `
     <div class="feed-item-header">
-      <span class="feed-badge badge-raw">Qwen 3.8 27B</span>
-      <span class="mono">${entry.timestamp}</span>
+      <span class="feed-badge badge-raw">${sourceLabel(entry.source)} · Deskripsi AI</span>
+      <span class="mono">${escapeHtml(entry.timestamp || '')}</span>
     </div>
     <div class="feed-content">${escapeHtml(entry.description)}</div>
     <div class="feed-meta">
-      <span>Tokens: ${entry.tokens || 0}</span>
-      <span>Latency: ${entry.latencyMs || 0}ms</span>
-      <span>Cost: ${costStr}</span>
+      <span>Token: ${escapeHtml(entry.tokens || 0)}</span>
+      <span>Durasi: ${escapeHtml(entry.latencyMs || 0)}ms</span>
+      <span>Biaya: ${costStr}</span>
     </div>
   `;
 
-  descriptionLogList.appendChild(item);
-  totalLogsCount++;
-  logCountTag.textContent = `(${totalLogsCount} log)`;
-
-  if (autoscrollToggle.checked) {
-    descriptionLogList.scrollTop = descriptionLogList.scrollHeight;
-  }
+  appendLogItem(item);
 }
 
 function appendFilterResult(msg) {
@@ -412,42 +612,62 @@ function appendFilterResult(msg) {
     item.innerHTML = `
       <div class="feed-item-header">
         <div style="display: flex; align-items: center; gap: 8px;">
-          <span class="feed-badge">DeepSeek V4 Filter</span>
+          <span class="feed-badge">${sourceLabel(msg.source)} · Komentar dipilih</span>
           <span class="comment-emotion-pill">${escapeHtml(msg.emotion || 'netral')}</span>
         </div>
-        <span class="mono">${msg.timestamp || new Date().toLocaleTimeString()}</span>
+        <span class="mono">${escapeHtml(msg.timestamp || new Date().toLocaleTimeString())}</span>
       </div>
       <div class="comment-text-quote">"${escapeHtml(msg.text)}"</div>
       <div class="feed-meta">
-        <span class="comment-sent-badge">💬 Amika Berbicara (TTS & Avatar)</span>
-        <span>Dari ${msg.sourceCount || 0} frame buffer</span>
-        <span>${msg.latencyMs || 0}ms</span>
+        <span class="comment-sent-badge">💬 Komentar dipilih untuk companion</span>
+        <span>Dari ${escapeHtml(msg.sourceCount || 0)} deskripsi</span>
+        <span>${escapeHtml(msg.latencyMs || 0)}ms</span>
       </div>
     `;
   } else {
     item.className = 'feed-item filter-skip';
     item.innerHTML = `
       <div class="feed-item-header">
-        <span class="feed-badge">Filter: SKIP</span>
-        <span class="mono">${msg.timestamp || new Date().toLocaleTimeString()}</span>
+        <span class="feed-badge">${sourceLabel(msg.source)} · Komentar dilewati</span>
+        <span class="mono">${escapeHtml(msg.timestamp || new Date().toLocaleTimeString())}</span>
       </div>
       <div class="feed-content" style="color: var(--text-muted);">
         Tidak ada momen yang cukup menarik (${escapeHtml(msg.reason || 'Dilewati')}).
       </div>
       <div class="feed-meta">
-        <span>Evaluasi ${msg.sourceCount || 0} frame buffer</span>
-        <span>${msg.latencyMs || 0}ms</span>
+        <span>Evaluasi ${escapeHtml(msg.sourceCount || 0)} deskripsi</span>
+        <span>${escapeHtml(msg.latencyMs || 0)}ms</span>
       </div>
     `;
   }
 
-  descriptionLogList.appendChild(item);
-  totalLogsCount++;
-  logCountTag.textContent = `(${totalLogsCount} log)`;
+  appendLogItem(item);
+}
 
-  if (autoscrollToggle.checked) {
-    descriptionLogList.scrollTop = descriptionLogList.scrollHeight;
-  }
+function appendVisionError(msg) {
+  const item = document.createElement('div');
+  item.className = 'feed-item vision-error';
+  item.innerHTML = `<div class="feed-item-header"><span class="feed-badge">${sourceLabel(msg.source)} · Analisis gagal</span>
+    <span class="mono">${escapeHtml(msg.timestamp || new Date().toLocaleTimeString())}</span></div>
+    <div class="feed-content">${escapeHtml(msg.message || msg.error || 'Hasil analisis belum tersedia.')}</div>`;
+  appendLogItem(item);
+}
+
+function appendLogItem(item) {
+  emptyLogMessage.style.display = 'none';
+  descriptionLogList.appendChild(item);
+  const items = descriptionLogList.querySelectorAll('.feed-item');
+  if (items.length > 100) items[0].remove();
+  totalLogsCount = Math.min(items.length, 100);
+  logCountTag.textContent = `(${totalLogsCount} log)`;
+  if (autoscrollToggle.checked) descriptionLogList.scrollTop = descriptionLogList.scrollHeight;
+}
+
+function clearLogs() {
+  descriptionLogList.replaceChildren(emptyLogMessage);
+  totalLogsCount = 0;
+  logCountTag.textContent = '(0 log)';
+  emptyLogMessage.style.display = 'block';
 }
 
 function escapeHtml(str) {
@@ -475,9 +695,11 @@ function sendConfigDebounced(partial) {
 }
 
 intervalSlider.addEventListener('input', (e) => {
-  captureIntervalSec = parseInt(e.target.value, 10);
-  intervalValDisplay.textContent = `${captureIntervalSec} detik`;
-  sendConfigDebounced({ intervalSeconds: captureIntervalSec });
+  inferenceIntervalSec = Math.max(2, parseInt(e.target.value, 10));
+  intervalSlider.value = inferenceIntervalSec;
+  intervalValDisplay.textContent = `${inferenceIntervalSec} detik`;
+  sendConfigDebounced({ minInferenceIntervalMs: inferenceIntervalSec * 1000 });
+  updateStreamStatusUI(isScreenShareActive);
 });
 
 bufferSlider.addEventListener('input', (e) => {
@@ -495,15 +717,7 @@ maxTokensInput.addEventListener('change', (e) => {
   });
 });
 
-clearLogsBtn.addEventListener('click', () => {
-  descriptionLogList.innerHTML = '';
-  totalLogsCount = 0;
-  logCountTag.textContent = `(0 log)`;
-  if (emptyLogMessage) {
-    descriptionLogList.appendChild(emptyLogMessage);
-    emptyLogMessage.style.display = 'block';
-  }
-});
+clearLogsBtn.addEventListener('click', clearLogs);
 
 resetStatsBtn.addEventListener('click', () => {
   if (confirm('Reset semua statistik dan estimasi biaya sesi ini?')) {
@@ -512,4 +726,5 @@ resetStatsBtn.addEventListener('click', () => {
 });
 
 // Initialize WebSocket on Load
+initializeMonitorControls();
 connectWebSocket();
