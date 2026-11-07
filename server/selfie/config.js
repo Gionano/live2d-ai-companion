@@ -6,6 +6,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ROOT_DIR, createLocalPaths, deepMerge, resolveManagedPaths, resolveSelfiePaths } from './localPaths.js';
+import { SettingsStore } from '../settings/store.js';
+import { CLOUD_IMAGE_ORIGIN, CLOUD_IMAGE_SECRET_ID, imageOverridesToSelfie } from '../settings/imageFields.js';
 
 export { ROOT_DIR } from './localPaths.js';
 const CONFIG_PATH = path.join(ROOT_DIR, 'selfie.config.json');
@@ -15,6 +17,7 @@ const DEFAULTS = {
   autoOrder: ['comfyui', 'comfyui-managed', 'sdcpp'],
   availabilityCacheMs: 30000,
   healthTimeoutMs: 1500,
+  cloud: { accountId: '', model: '@cf/black-forest-labs/flux-2-klein-9b', healthTimeoutMs: 10000 },
   comfyUrl: 'http://127.0.0.1:8000',
   outputDir: '',
   autoCloseSeconds: 30,
@@ -90,7 +93,7 @@ const DEFAULTS = {
   },
 };
 
-export const PROVIDERS = ['auto', 'comfyui', 'comfyui-managed', 'sdcpp'];
+export const PROVIDERS = ['auto', 'comfyui', 'comfyui-managed', 'sdcpp', 'cloud'];
 const LOCAL_PROVIDERS = ['comfyui', 'comfyui-managed', 'sdcpp'];
 
 export function normalizeAutoCloseSeconds(value) {
@@ -231,7 +234,7 @@ function normalizePreset(name, ...sources) {
  * Muat konfigurasi. `overrides` (mis. dari CLI) menimpa isi file.
  * Melempar Error berpesan jelas bila provider/preset tidak valid.
  */
-export function loadSelfieConfig(overrides = {}, { repoRoot = ROOT_DIR, env = process.env } = {}) {
+export function loadSelfieConfig(overrides = {}, { repoRoot = ROOT_DIR, env = process.env, settingsImages } = {}) {
   const paths = createLocalPaths({ repoRoot, env });
   let fileCfg = {};
   for (const filename of ['selfie.config.json', 'selfie.config.local.json']) {
@@ -245,9 +248,10 @@ export function loadSelfieConfig(overrides = {}, { repoRoot = ROOT_DIR, env = pr
       throw new Error(`${filename} is invalid: ${err.message}`);
     }
   }
-  const cleanOverrides = Object.fromEntries(
+  const savedImages = settingsImages ?? new SettingsStore({ localDir: paths.localDir }).read().images ?? {};
+  const cleanOverrides = deepMerge(imageOverridesToSelfie(savedImages), Object.fromEntries(
     Object.entries(overrides).filter(([, value]) => value !== undefined && value !== ''),
-  );
+  ));
   const cfg = deepMerge(DEFAULTS, fileCfg, cleanOverrides);
   cfg.presets = {};
   for (const name of new Set([
@@ -300,6 +304,11 @@ export function loadSelfieConfig(overrides = {}, { repoRoot = ROOT_DIR, env = pr
   if (!cfg.autoOrder.length || cfg.autoOrder.some(provider => !LOCAL_PROVIDERS.includes(provider))) {
     throw new Error('selfie.config.json: autoOrder may contain only "comfyui", "comfyui-managed", and "sdcpp".');
   }
+  if (!cfg.cloud || typeof cfg.cloud !== 'object' || Array.isArray(cfg.cloud)
+    || typeof cfg.cloud.accountId !== 'string' || cfg.cloud.accountId && !/^[a-f0-9]{32}$/i.test(cfg.cloud.accountId)
+    || cfg.cloud.model !== DEFAULTS.cloud.model || !Number.isInteger(cfg.cloud.healthTimeoutMs) || cfg.cloud.healthTimeoutMs < 1) {
+    throw new Error('selfie.config.json: cloud account, model, or health timeout is invalid.');
+  }
   for (const key of ['availabilityCacheMs', 'healthTimeoutMs', 'jobTimeoutMs']) {
     if (!Number.isFinite(cfg[key]) || cfg[key] < (key === 'availabilityCacheMs' ? 0 : 1)) {
       throw new Error(`selfie.config.json: ${key} is invalid.`);
@@ -342,6 +351,17 @@ export function loadSelfieConfig(overrides = {}, { repoRoot = ROOT_DIR, env = pr
     }
   }
   cfg.sdcpp.extraArgs = Array.isArray(cfg.sdcpp.extraArgs) ? cfg.sdcpp.extraArgs.map(String) : [];
+  if (cfg.provider === 'cloud' && !cfg.cloudCredentials) {
+    let stored;
+    cfg.cloudCredentials = async () => {
+      if (!env.CLOUDFLARE_API_TOKEN) {
+        stored ||= import('../settings/secretStore.js').then(({ SecretStore }) => new SecretStore({ localDir: paths.localDir,
+          allowPlaintext: env.WAIFU_ALLOW_PLAINTEXT_SECRETS === '1' }).snapshot());
+      }
+      return { accountId: cfg.cloud.accountId || env.CLOUDFLARE_ACCOUNT_ID || '',
+        token: env.CLOUDFLARE_API_TOKEN || (await stored)(CLOUD_IMAGE_SECRET_ID, CLOUD_IMAGE_ORIGIN)?.apiKey || '' };
+    };
+  }
   return cfg;
 }
 

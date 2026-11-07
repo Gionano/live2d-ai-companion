@@ -6,7 +6,7 @@
 //   isAvailable()                                      -> Promise<boolean>
 //   generate(params, onProgress, signal)               -> Promise<{ imagePath, seed, timings }>
 //       params = { positivePrompt, negativePrompt, referenceImage, resolution, steps, seed }
-//       onProgress({ value, max })
+//       onProgress({ value, max }) or ({ phase, percentage: null })
 //   cancel()                                           -> Promise<void>
 //   release()                                          -> Promise<void>   (bebaskan VRAM)
 // ---------------------------------------------------------------------------
@@ -18,6 +18,8 @@ export const IMAGE_ERROR = {
   CANCELLED: 'CANCELLED',
   FAILED: 'FAILED',
   NOT_IMPLEMENTED: 'NOT_IMPLEMENTED',
+  AUTH: 'AUTH',
+  RATE_LIMIT: 'RATE_LIMIT',
 };
 
 export class ImageProviderError extends Error {

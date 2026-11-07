@@ -2,7 +2,8 @@ import { ImageProvider, ImageProviderError, IMAGE_ERROR } from './imageProvider.
 import { etaStore, normalizeMemoryPeaks } from './etaStore.js';
 import { RUNTIME_WARNING_MESSAGES } from './localPaths.js';
 
-const PROVIDER_NAMES = ['comfyui', 'comfyui-managed', 'sdcpp'];
+const LOCAL_PROVIDER_NAMES = ['comfyui', 'comfyui-managed', 'sdcpp'];
+const PROVIDER_NAMES = [...LOCAL_PROVIDER_NAMES, 'cloud'];
 const DEFAULT_AVAILABILITY_CACHE_MS = 30000;
 
 async function initializeManagedComfyUi(config) {
@@ -22,6 +23,10 @@ async function defaultProviderFactory(name, config) {
   if (name === 'comfyui-managed') {
     const { ComfyUiManagedProvider } = await import('./providers/comfyuiManagedProvider.js');
     return new ComfyUiManagedProvider(config);
+  }
+  if (name === 'cloud') {
+    const { CloudProvider } = await import('./providers/cloudProvider.js');
+    return new CloudProvider(config);
   }
   throw new Error(`Unknown selfie provider: ${name}`);
 }
@@ -175,7 +180,7 @@ export class ProviderResolver extends ImageProvider {
     this.shutdownPromise = null;
     this.status = {
       active: null,
-      reasons: { comfyui: 'Not checked.', 'comfyui-managed': 'Not checked.', sdcpp: 'Not checked.' },
+      reasons: { comfyui: 'Not checked.', 'comfyui-managed': 'Not checked.', sdcpp: 'Not checked.', cloud: 'Not checked.' },
     };
     this.publicReasons = { ...this.status.reasons };
     this.managesGenerationStart = true;
@@ -183,6 +188,10 @@ export class ProviderResolver extends ImageProvider {
 
   get name() {
     return this.currentProviderName || this.config.provider || 'auto';
+  }
+
+  get usesLocalRuntime() {
+    return this._providerOrder().some(name => ['sdcpp', 'comfyui-managed'].includes(name));
   }
 
   getStatus() {
@@ -235,10 +244,10 @@ export class ProviderResolver extends ImageProvider {
 
   _providerOrder(config = this.config) {
     if (config.provider !== 'auto') return [config.provider];
-    const configured = Array.isArray(config.autoOrder) ? config.autoOrder : PROVIDER_NAMES;
-    const unique = configured.filter((name, index) => PROVIDER_NAMES.includes(name)
+    const configured = Array.isArray(config.autoOrder) ? config.autoOrder : LOCAL_PROVIDER_NAMES;
+    const unique = configured.filter((name, index) => LOCAL_PROVIDER_NAMES.includes(name)
       && configured.indexOf(name) === index);
-    return unique.length ? unique : [...PROVIDER_NAMES];
+    return unique.length ? unique : [...LOCAL_PROVIDER_NAMES];
   }
 
   _publishStatus(next, revision = this.selectionRevision) {
@@ -253,6 +262,8 @@ export class ProviderResolver extends ImageProvider {
           ? nextReasons['comfyui-managed'] : this.status.reasons['comfyui-managed'],
         sdcpp: Object.hasOwn(nextReasons, 'sdcpp')
           ? nextReasons.sdcpp : this.status.reasons.sdcpp,
+        cloud: Object.hasOwn(nextReasons, 'cloud')
+          ? nextReasons.cloud : this.status.reasons.cloud,
       },
       ...((Object.hasOwn(next, 'sdcpp') ? next.sdcpp : this.status.sdcpp) && {
         sdcpp: normalizeSdcppStatus(Object.hasOwn(next, 'sdcpp') ? next.sdcpp : this.status.sdcpp),
@@ -451,7 +462,7 @@ export class ProviderResolver extends ImageProvider {
   }
 
   async _initialize(signal) {
-    if (!this.initializeManaged) return;
+    if (!this.initializeManaged || this.config.provider === 'cloud') return;
     if (!this.initializationPromise) {
       this.initializationPromise = Promise.resolve().then(() => this.initializeManaged(this.config));
       this.initializationPromise.catch(error => {
@@ -476,12 +487,14 @@ export class ProviderResolver extends ImageProvider {
     }
     const order = this._providerOrder();
     const message = order.map(name => `${name}: ${resolved.status.reasons[name]}`).join('; ');
+    const cloudReady = this.config.provider === 'cloud' ? this.readiness.get('cloud')?.result : null;
     return {
       ...(this.config.provider === 'sdcpp' && this.status.sdcpp),
       ...(this.config.provider === 'comfyui-managed' && this.status.comfyuiManaged),
       ready: false,
-      code: this.config.provider === 'sdcpp' ? this.status.sdcpp?.code || IMAGE_ERROR.UNAVAILABLE
-        : this.config.provider === 'comfyui-managed' ? this.status.comfyuiManaged?.code || IMAGE_ERROR.UNAVAILABLE : IMAGE_ERROR.UNAVAILABLE,
+      code: cloudReady?.code || (this.config.provider === 'sdcpp' ? this.status.sdcpp?.code || IMAGE_ERROR.UNAVAILABLE
+        : this.config.provider === 'comfyui-managed' ? this.status.comfyuiManaged?.code || IMAGE_ERROR.UNAVAILABLE : IMAGE_ERROR.UNAVAILABLE),
+      ...(cloudReady?.publicMessage && { publicMessage: cloudReady.publicMessage }),
       message: message || 'No selfie image provider is ready.',
     };
   }
@@ -549,8 +562,8 @@ export class ProviderResolver extends ImageProvider {
     this.readinessInFlight.clear();
     this._publishStatus({
       active: null,
-      reasons: { comfyui: 'Not checked.', 'comfyui-managed': 'Not checked.', sdcpp: 'Not checked.' },
-      publicReasons: { comfyui: 'Not checked.', 'comfyui-managed': 'Not checked.', sdcpp: 'Not checked.' },
+      reasons: { comfyui: 'Not checked.', 'comfyui-managed': 'Not checked.', sdcpp: 'Not checked.', cloud: 'Not checked.' },
+      publicReasons: { comfyui: 'Not checked.', 'comfyui-managed': 'Not checked.', sdcpp: 'Not checked.', cloud: 'Not checked.' },
       sdcpp: null,
       comfyuiManaged: null,
     });

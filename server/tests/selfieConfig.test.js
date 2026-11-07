@@ -15,10 +15,12 @@ test('selfie config defaults to auto with bounded readiness checks and local pro
   assert.deepEqual(config.autoOrder, ['comfyui', 'comfyui-managed', 'sdcpp']);
   assert.equal(config.availabilityCacheMs, 30000);
   assert.equal(config.healthTimeoutMs, 1500);
-  for (const provider of ['auto', 'comfyui', 'comfyui-managed', 'sdcpp']) {
+  for (const provider of ['auto', 'comfyui', 'comfyui-managed', 'sdcpp', 'cloud']) {
     assert.equal(loadSelfieConfig({ provider }).provider, provider);
   }
-  assert.throws(() => loadSelfieConfig({ provider: 'cloud' }), /provider/);
+  assert.throws(() => loadSelfieConfig({ provider: 'unknown' }), /provider/);
+  assert.throws(() => loadSelfieConfig({ cloud: { accountId: 'invalid' } }), /cloud/);
+  assert.throws(() => loadSelfieConfig({ cloud: { model: '@cf/other' } }), /cloud/);
   assert.throws(() => loadSelfieConfig({ autoOrder: ['cloud'] }), /autoOrder/);
   assert.throws(() => loadSelfieConfig({ autoOrder: 'comfyui' }), /autoOrder/);
   assert.throws(() => loadSelfieConfig({ healthTimeoutMs: 0 }), /healthTimeoutMs/);

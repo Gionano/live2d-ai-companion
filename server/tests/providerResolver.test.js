@@ -137,7 +137,7 @@ test('auto selects the first ready provider and caches readiness until expiry', 
   const h = harness();
   const first = await h.resolver.resolveProvider();
   assert.equal(first.name, 'comfyui');
-  assert.deepEqual(first.status, { active: 'comfyui', reasons: { comfyui: null, 'comfyui-managed': 'Not checked.', sdcpp: null } });
+  assert.deepEqual(first.status, { active: 'comfyui', reasons: { comfyui: null, 'comfyui-managed': 'Not checked.', cloud: 'Not checked.', sdcpp: null } });
   assert.deepEqual(h.checks, { comfyui: 1, sdcpp: 1 });
 
   await h.resolver.resolveProvider();
@@ -230,7 +230,7 @@ test('a config update prevents stale readiness and instances from publishing', a
   assert.equal((await stale).name, 'sdcpp');
   assert.deepEqual(h.resolver.getStatus(), {
     active: 'sdcpp',
-    reasons: { comfyui: 'Not checked.', 'comfyui-managed': 'Not checked.', sdcpp: null },
+    reasons: { comfyui: 'Not checked.', 'comfyui-managed': 'Not checked.', cloud: 'Not checked.', sdcpp: null },
   });
   assert.ok(h.created.some(item => item.name === 'sdcpp' && item.config === nextConfig));
 });
@@ -242,7 +242,7 @@ test('auto skips an unavailable provider and reports reasons for both providers'
   assert.equal(result.name, 'sdcpp');
   assert.deepEqual(result.status, {
     active: 'sdcpp',
-    reasons: { comfyui: 'missing node: TextEncodeQwenImage21', 'comfyui-managed': 'Not checked.', sdcpp: null },
+    reasons: { comfyui: 'missing node: TextEncodeQwenImage21', 'comfyui-managed': 'Not checked.', cloud: 'Not checked.', sdcpp: null },
   });
 });
 
@@ -256,7 +256,7 @@ test('both unavailable disables the resolver with clear provider reasons', async
   assert.match(status.message, /sdcpp: binary missing/);
   assert.deepEqual(h.resolver.getStatus(), {
     active: null,
-    reasons: { comfyui: 'connection refused', 'comfyui-managed': 'Not checked.', sdcpp: 'binary missing' },
+    reasons: { comfyui: 'connection refused', 'comfyui-managed': 'Not checked.', cloud: 'Not checked.', sdcpp: 'binary missing' },
   });
 });
 
@@ -451,7 +451,7 @@ test('real readiness checks prefer a fully ready fake ComfyUI over fake sd-cli',
   assert.equal(result.name, 'comfyui');
   assert.deepEqual({ active: result.status.active, reasons: result.status.reasons }, {
     active: 'comfyui',
-    reasons: { comfyui: null, 'comfyui-managed': 'Not checked.', sdcpp: null },
+    reasons: { comfyui: null, 'comfyui-managed': 'Not checked.', cloud: 'Not checked.', sdcpp: null },
   });
 });
 
