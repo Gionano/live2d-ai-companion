@@ -5,7 +5,7 @@ export { validateBaseUrl };
 export { DEFAULT_TTS_PARAMS };
 export { FISH_EMOTION_GROUPS, FISH_EMOTION_TAGS };
 export const SLOT_LABELS = { llm: 'slot.llm', vision: 'slot.vision', stt: 'slot.stt', tts: 'slot.tts', planner: 'slot.planner', visionFilter: 'slot.visionFilter' };
-export const TAB_LABELS = { connections: 'tab.connections', status: 'tab.status', privacy: 'tab.privacy', diagnostics: 'tab.diagnostics', language: 'tab.language' };
+export const TAB_LABELS = { connections: 'tab.connections', images: 'tab.images', status: 'tab.status', privacy: 'tab.privacy', diagnostics: 'tab.diagnostics', language: 'tab.language' };
 export const ERROR_KEYS = { CONFLICT: 'error.conflict', ORIGIN_CHANGE: 'error.origin', IN_USE: 'error.inUse',
   FORBIDDEN: 'error.forbidden', AUTH: 'error.auth', RATE_LIMIT: 'error.rate', TIMEOUT: 'error.timeout',
   LOCK_BUSY: 'error.lockBusy', LOCK_UNKNOWN: 'error.lockUnknown', LOCK_RECOVERY: 'error.lockRecovery',

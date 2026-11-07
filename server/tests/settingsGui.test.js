@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { translator, detectLanguage } from '../../src/settings/i18n.js';
 import { createSettingsClient } from '../../src/settings/apiClient.js';
+import { mountImageSettings } from '../../src/settings/imageSettings.js';
 import { node } from '../../src/settings/dom.js';
 import * as view from '../../src/settings/viewModel.js';
 import * as wizard from '../../src/settings/wizard.js';
@@ -151,7 +152,7 @@ async function pageFixture(ttsParams = null, language = 'en') {
       if (path.startsWith('/slots/')) state.settings.slots[path.slice('/slots/'.length)] = body.slot;
       return { version: ++state.version };
     } };
-  const bindings = { id, en, presets, setupGuide: '/docs/setup.md', translator, detectLanguage, createSettingsClient, node, ...view, ...wizard };
+  const bindings = { id, en, presets, setupGuide: '/docs/setup.md', translator, detectLanguage, createSettingsClient, mountImageSettings, node, ...view, ...wizard };
   const code = source('src/settings/page.js').replace(/^import .+;\r?\n/gm, '').replace('export async function', 'async function');
   const mount = vm.compileFunction(code + '\nreturn mountSettings;', Object.keys(bindings))(...Object.values(bindings));
   await mount({ document, api, storage: { getItem: () => '{"step":"finish","completed":true}', setItem() {} }, navigatorLanguage: 'en', confirm: () => true });
@@ -272,7 +273,7 @@ test('settings tabs support keyboard navigation and role selection', async () =>
   const page = await pageFixture();
   const tabs = page.nodes().filter(item => item.attributes.role === 'tab');
   tabs[0].fire('keydown', { key: 'ArrowRight' }); assert.equal(page.document.activeElement, tabs[1]);
-  tabs[1].fire('click'); await settle();
+  tabs.find(item => item.textContent === en['tab.status']).fire('click'); await settle();
   assert.ok(page.nodes().some(item => item.tagName === 'h2' && item.textContent === en['tab.status']));
   assert.ok(page.document.activeElement.id === 'settings-content');
 });

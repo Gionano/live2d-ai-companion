@@ -5,6 +5,7 @@ import setupGuide from '../../docs/setup.md?url';
 import { translator, detectLanguage } from './i18n.js';
 import { createSettingsClient } from './apiClient.js';
 import { node } from './dom.js';
+import { mountImageSettings } from './imageSettings.js';
 import { TAB_LABELS, SLOT_LABELS, STATUS_WARNING_KEYS, DEFAULT_TTS_PARAMS, FISH_EMOTION_GROUPS, FISH_EMOTION_TAGS, emotionMapSelections, updateEmotionSelection, friendlyError, validateBaseUrl, originNeedsConfirmation, parseAdvanced, makeSlot, privacyFlows, withSecret } from './viewModel.js';
 import { WIZARD_STEPS, WIZARD_LABELS, WIZARD_STORAGE_KEY, needsWizard, readWizard, moveWizard, saveWizard } from './wizard.js';
 import './settings.css';
@@ -20,6 +21,7 @@ export async function mountSettings({ document = window.document, api = createSe
   let busy = false;
   let fieldId = 0;
   let wizard;
+  let imageController;
   try { wizard = readWizard(storage.getItem(WIZARD_STORAGE_KEY)); } catch { wizard = readWizard(null); }
   let showWizard = !wizard.completed;
   const root = node(document, 'main', undefined, { id: 'settings-page' });
@@ -306,7 +308,7 @@ export async function mountSettings({ document = window.document, api = createSe
       const item = el('section', undefined, { class: 'settings-card' }); parent.append(item);
       item.append(el('h3', t(flow.label)), el('p', flow.origin || t('slot.unassigned')), el('a', t('privacy.controls'), { href: '/' + flow.toggle }));
     }
-    parent.append(el('h3', t('privacy.images')), el('p', t('privacy.local')));
+    parent.append(el('h3', t('privacy.images')), el('p', t(effective.settings.images?.provider === 'cloud' ? 'images.privacyCloud' : 'privacy.local')));
   }
   function languages(parent) {
     const form = el('form'); parent.append(form);
@@ -339,8 +341,7 @@ export async function mountSettings({ document = window.document, api = createSe
     else if (['llm', 'tts', 'stt', 'vision'].includes(wizard.step)) { providers(parent); slotEditor(parent, wizard.step); }
     else if (wizard.step === 'privacy') privacy(parent);
     else if (wizard.step === 'images') {
-      const readiness = el('p', t('app.loading')); parent.append(readiness);
-      api.get('/images').then(value => { readiness.textContent = t(value.ready ? 'status.ready' : 'status.unavailable') + (value.provider ? ' · ' + value.provider : ''); }).catch(() => { readiness.textContent = t('status.unavailable'); });
+      imageController = mountImageSettings(parent, { document, api, t, fail, onVersion: version => { effective.version = version; } });
       parent.append(el('a', t('wizard.setupDocs'), { href: setupGuide, download: 'setup.md' }));
     } else parent.append(el('p', t('wizard.finished')));
     const nav = el('div', undefined, { class: 'settings-actions' }); parent.append(nav);
@@ -358,6 +359,7 @@ export async function mountSettings({ document = window.document, api = createSe
   }
   function advance(action) { wizard = moveWizard(wizard, action); saveWizard(storage, wizard); render(); }
   function render() {
+    imageController?.dispose(); imageController = undefined;
     document.documentElement.lang = language; document.title = t('app.title');
     root.replaceChildren(el('h1', t('app.title')), el('a', t('app.back'), { href: '/' }), toast);
     const controls = el('div', undefined, { class: 'settings-actions' }); root.append(controls);
@@ -379,7 +381,8 @@ export async function mountSettings({ document = window.document, api = createSe
       providers(content); content.append(el('h2', t('slot.title')));
       for (const name of ['llm', 'vision', 'stt', 'tts']) slotEditor(content, name);
       const advanced = details(content, 'slot.advanced'); for (const name of ['planner', 'visionFilter']) slotEditor(advanced, name);
-    } else if (tab === 'status') statusView(content);
+    } else if (tab === 'images') imageController = mountImageSettings(content, { document, api, t, fail, onVersion: version => { effective.version = version; } });
+    else if (tab === 'status') statusView(content);
     else if (tab === 'privacy') privacy(content);
     else if (tab === 'diagnostics') diagnostics(content);
     else languages(content);

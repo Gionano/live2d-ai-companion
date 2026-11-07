@@ -23,4 +23,6 @@ html:has(#settings-page), html:has(#settings-page) body { background: #161622 !i
 #settings-page table { width: 100%; text-align: left; border-collapse: collapse; }
 #settings-page td, #settings-page th { border-bottom: 1px solid #67677f; padding: 8px; overflow-wrap: anywhere; }
 #settings-page .settings-toast:not(:empty) { border: 1px solid #ffd479; border-radius: 6px; padding: 12px; }
+#settings-page .settings-image-plan { margin: 16px 0; border: 1px solid #67677f; border-radius: 8px; padding: 12px; }
+#settings-page progress { display: block; width: 100%; height: 18px; accent-color: #9dcaff; }
 @media (max-width: 480px) { #settings-page { padding: 14px; } #settings-page .settings-card { padding: 12px; } #settings-page .settings-tabs button { flex: 1 1 42%; } }

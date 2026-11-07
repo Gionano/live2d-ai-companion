@@ -5,7 +5,7 @@ export function createSettingsClient(fetchImpl = fetch) {
   let token;
   let pendingToken;
   async function send(path, { method = 'GET', body, progress } = {}) {
-    if (!/^\/(?:bootstrap|status|legacy(?:\/import)?|profiles\/[A-Za-z0-9_-]+|slots\/[A-Za-z]+|secrets\/[A-Za-z0-9_-]+|ui|export|import|test|models|diagnostics|images)?$/.test(path)) throw safeError('INVALID_SETTINGS');
+    if (!/^\/(?:bootstrap|status|legacy(?:\/import)?|profiles\/[A-Za-z0-9_-]+|slots\/[A-Za-z]+|secrets\/[A-Za-z0-9_-]+|ui|export|import|test|models|diagnostics|images(?:\/(?:secret|test|install(?:\/plan|\/[A-Za-z0-9_-]+(?:\/cancel)?)?))?)?$/.test(path)) throw safeError('INVALID_SETTINGS');
     if (method !== 'GET' && !token) {
       pendingToken ||= send('/bootstrap').then(result => { token = result.token; }).finally(() => { pendingToken = null; });
       await pendingToken;
