@@ -1,4 +1,5 @@
 import { getProviderRegistry } from './providers/registry.js';
+import { logger as console } from '../src/logging.js';
 import { getVoiceId } from './voiceConfig.js';
 import { withFishEmotion } from './providers/adapters/fishAudio.js';
 import { throwIfAborted } from './providers/errors.js';

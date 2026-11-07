@@ -5,6 +5,7 @@
 // Qwen 3.8 27B (Groq) for frame description.
 // ---------------------------------------------------------------------------
 import { getProviderRegistry, UNAVAILABLE_MESSAGES } from './providers/registry.js';
+import { logger as console } from '../src/logging.js';
 import { imagePartFromDataUrl } from './providers/adapters/shared.js';
 
 const WEBCAM_PROMPT =

@@ -8,6 +8,7 @@
 //   POST /api/chat    { history, message, visionDescription } -> SSE token stream
 // ---------------------------------------------------------------------------
 import http from 'http';
+import { logger as console } from '../src/logging.js';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';

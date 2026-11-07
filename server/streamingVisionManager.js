@@ -3,6 +3,7 @@
 // Per-conversation visual perception, source-bound commentary, and monitor telemetry.
 // ---------------------------------------------------------------------------
 import { getProviderRegistry, UNAVAILABLE_MESSAGES } from './providers/registry.js';
+import { logger as console, formatLogTime } from '../src/logging.js';
 import { imagePartFromDataUrl, totalTokens as countTokens } from './providers/adapters/shared.js';
 import { markConversationActivity } from './modelWarmup.js';
 import { HISTORY_MESSAGE_LIMIT } from './llmChat.js';
@@ -271,7 +272,7 @@ export class StreamingVisionManager {
     this.stats.totalVisionCostUsd += costUsd;
     return { id: 'desc_' + this.now() + '_' + Math.random().toString(36).slice(2, 6),
       source, sessionId: frame.sessionId, sequence: frame.sequence,
-      timestamp: new Date(frame.capturedAt).toLocaleTimeString(), capturedAt: frame.capturedAt,
+      timestamp: formatLogTime(new Date(frame.capturedAt)), capturedAt: frame.capturedAt,
       generatedAt: this.now(), description: response.text.trim() || '(Tidak ada deskripsi)',
       tokens, latencyMs: Math.round(performance.now() - startedAt), firstResponseMs, costUsd };
   }
@@ -305,7 +306,7 @@ export class StreamingVisionManager {
     state.filterController = controller;
     this.updateBusy();
     this.broadcast({ type: 'filter_start', source: state.source, bufferSize: entries.length,
-      timestamp: new Date(this.now()).toLocaleTimeString() });
+      timestamp: formatLogTime(new Date(this.now())) });
     this.stats.totalFilterCalls++;
     try {
       const result = await this.evaluateFilter(entries, { signal: controller.signal });
@@ -320,7 +321,7 @@ export class StreamingVisionManager {
       }
       if (controller.signal.aborted || epoch !== state.epoch || this.disposed) return;
       this.broadcast({ type: 'filter_result', source: state.source, ...result,
-        sourceCount: entries.length, stats: this.stats, timestamp: new Date(this.now()).toLocaleTimeString() });
+        sourceCount: entries.length, stats: this.stats, timestamp: formatLogTime(new Date(this.now())) });
     } catch (error) {
       if (!controller.signal.aborted && !this.disposed && epoch === state.epoch) {
         this.broadcast({ type: 'vision_error', source: state.source,

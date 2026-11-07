@@ -3,6 +3,7 @@
 // Best-effort, fire-and-forget maintenance requests for 9inference models.
 // ---------------------------------------------------------------------------
 import { getProviderRegistry } from './providers/registry.js';
+import { logger as console } from '../src/logging.js';
 import { totalTokens } from './providers/adapters/shared.js';
 
 export const KEEP_ALIVE_IDLE_MS = 4.5 * 60 * 1000;

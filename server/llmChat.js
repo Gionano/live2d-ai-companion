@@ -7,6 +7,7 @@
 // (dan nanti gampang dipecah per-kalimat untuk TTS).
 // ---------------------------------------------------------------------------
 import { getProviderRegistry, UNAVAILABLE_MESSAGES } from './providers/registry.js';
+import { logger as console } from '../src/logging.js';
 import { WAIFU_SYSTEM_PROMPT } from './personality.js';
 import { memoryManager } from './memoryManager.js';
 import { speechStylePrompt } from './speechStylePrompt.js';

@@ -4,6 +4,7 @@
 // Receives stream frames, vision logs, filter outcomes, and relays remote configs.
 // ---------------------------------------------------------------------------
 import WebSocket from 'ws';
+import { logger as console } from '../../src/logging.js';
 
 function withMonitorRole(rawUrl) {
   try {

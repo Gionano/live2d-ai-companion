@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { logger as console } from '../src/logging.js';
 import { stripSpeechTags, spokenSentenceCount } from './ttsExpression.js';
 import { normalizeSpeechEmotion } from './speechEmotionPrompt.js';
 

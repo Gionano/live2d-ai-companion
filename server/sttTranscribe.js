@@ -5,6 +5,7 @@
 // Model whisper-large-v3-turbo dipilih untuk kecepatan (percakapan real-time).
 // ---------------------------------------------------------------------------
 import { getProviderRegistry } from './providers/registry.js';
+import { logger as console } from '../src/logging.js';
 import { getServerTuning } from './serverConfig.js';
 
 // audioBuffer: Buffer audio mentah. `filename` dipakai Groq untuk menebak

@@ -1,4 +1,5 @@
 import { createVisionSignature } from './visionSignature.js';
+import { logger as console } from './logging.js';
 
 export function captureSignature(video, source, canvas = document.createElement('canvas')) {
   canvas.width = source === 'screen' ? 128 : 64;

@@ -4,6 +4,7 @@
 // Acts as an observation bridge between the Main Companion App and the Vision Monitor UI.
 // ---------------------------------------------------------------------------
 import 'dotenv/config';
+import { logger as console } from '../../src/logging.js';
 import http from 'http';
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';

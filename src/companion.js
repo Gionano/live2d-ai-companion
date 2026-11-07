@@ -18,6 +18,7 @@ const micStatusEl = document.getElementById('mic-status');
 const micLabelEl = document.getElementById('mic-label');
 const overlaySubtitleEl = document.getElementById('overlay-subtitle');
 import { tuning } from './tuningConfig.js';
+import { logger as console } from './logging.js';
 import { SpeechPlayback, TurnState } from './speechPlayback.js';
 import { analyzeSpeechRhythm } from './speechMotion.js';
 import { ProactiveVoiceGate } from './proactiveVoiceGate.js';
