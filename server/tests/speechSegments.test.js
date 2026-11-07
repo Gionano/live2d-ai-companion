@@ -133,6 +133,16 @@ test('invalid or disabled native segment metadata falls back without changing av
   }
 });
 
+test('internal spontaneous instructions preserve real history and add no fabricated user message', async () => {
+  const registry = registryFor(['{"segments":[{"emotion":"sayang","text":"Kamu sudah makan?"}]}']);
+  const history = [{ role: 'user', content: 'Aku sedang bekerja.' }, { role: 'assistant', content: 'Semangat, ya.' }];
+  await collect(generateReplyStream(history, null, 'User is at their desk.',
+    { registry, internalInstruction: 'Offer one natural spontaneous comment if relevant.' }));
+  assert.deepEqual(registry.requests[0].messages.slice(1), history);
+  assert.match(registry.requests[0].messages[0].content, /Offer one natural spontaneous comment if relevant/);
+  assert.match(registry.requests[0].messages[0].content, /User is at their desk/);
+});
+
 test('aborted segmented replies cannot flush queued tone metadata into a new reply', async () => {
   const controller = new AbortController();
   const registry = registryFor(['{"segments":[{"emotion":"marah","speechEmotion":"angry","text":"Halo!"}]}']);

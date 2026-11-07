@@ -216,3 +216,31 @@ test('bridge reports dashboard presence across closing the last tab and backend 
   bridge.companion.onStatusChange('connected');
   assert.equal(reports().at(-1), false);
 });
+
+test('monitor distinguishes total request duration from its minimum interval and shows quiet-chat outcomes', () => {
+  const ui = loadMonitorUi();
+  ui.receive({ type: 'stats_update', sources: { webcam: { active: true, sessionId: 'camera', lastLatencyMs: 20886 } } });
+  assert.equal(vm.runInContext('sourceElements.webcam.latency.textContent', ui.context), 'Durasi analisis: 20886 ms');
+  ui.receive({ type: 'proactive_status', status: 'waiting', remainingMs: 60000, decisionTimeoutMs: 30000 });
+  assert.match(ui.elements.get('proactive-status-detail').textContent, /60 detik/);
+  ui.setNow(31000);
+  for (const callback of ui.intervals.values()) callback();
+  assert.match(ui.elements.get('proactive-status-detail').textContent, /30 detik/);
+  ui.receive({ type: 'proactive_status', status: 'skipped', reason: 'no_topic' });
+  assert.equal(ui.elements.get('proactive-status-title').textContent, 'Topik dilewati');
+  assert.match(ui.elements.get('proactive-status-detail').textContent, /SKIP/);
+  ui.receive({ type: 'proactive_status', status: 'failed', reason: 'decision_timeout' });
+  assert.match(ui.elements.get('proactive-status-detail').textContent, /batas waktu/);
+  ui.receive({ type: 'companion_status', status: 'disconnected' });
+  assert.equal(ui.elements.get('proactive-status-title').textContent, 'Companion terputus');
+});
+
+test('bridge ages quiet-chat countdown for newly opened monitors without replaying private context', () => {
+  const bridge = loadMonitorBridge();
+  bridge.companion.onMessage({ type: 'proactive_status', status: 'waiting', quietForMs: 10000, remainingMs: 50000 });
+  bridge.setNow(21000);
+  assert.equal(bridge.state().proactive.remainingMs, 30000);
+  assert.equal(bridge.state().proactive.quietForMs, 30000);
+  bridge.companion.onStatusChange('disconnected');
+  assert.equal(bridge.state().proactive.status, 'disconnected');
+});

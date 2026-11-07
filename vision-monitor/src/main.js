@@ -24,6 +24,7 @@ const sourceDescriptions = {};
 const sourceElements = {};
 let nextFilterSeconds = 30;
 let countdownTimerId = null;
+let proactiveState = null;
 
 // DOM Elements
 const backendStatusPill = document.getElementById('backend-status-pill');
@@ -32,6 +33,8 @@ const monitoringBadge = document.getElementById('monitoring-badge');
 const streamStatusTitle = document.getElementById('stream-status-title');
 const streamStatusDesc = document.getElementById('stream-status-desc');
 const sessionTimerEl = document.getElementById('session-timer');
+const proactiveStatusTitle = document.getElementById('proactive-status-title');
+const proactiveStatusDetail = document.getElementById('proactive-status-detail');
 
 const intervalSlider = document.getElementById('interval-slider');
 const intervalValDisplay = document.getElementById('interval-val-display');
@@ -105,6 +108,7 @@ function connectWebSocket() {
 
       case 'init_vision_state':
       case 'screen_share_status': {
+        if (msg.proactive) applyProactiveStatus(msg.proactive);
         isScreenShareActive = msg.sources ? Object.values(sourceStates).some(source => source.active) : Boolean(msg.active);
         updateStreamStatusUI(isScreenShareActive);
         if (msg.settings) applySettings(msg.settings);
@@ -114,6 +118,11 @@ function connectWebSocket() {
 
       case 'companion_status': {
         updateCompanionStatusUI(msg.status);
+        break;
+      }
+
+      case 'proactive_status': {
+        applyProactiveStatus(msg);
         break;
       }
 
@@ -205,6 +214,10 @@ function updateCompanionStatusUI(status) {
     companionStatusPill.querySelector('.status-text').textContent = 'Companion WS: Terputus';
   }
   if (status !== 'connected') {
+    if (proactiveState) {
+      proactiveState.status = 'disconnected';
+      renderProactiveStatus();
+    }
     for (const state of Object.values(sourceStates)) {
       Object.assign(state, { active: false, freshness: 'off', pending: false, inFlight: false });
     }
@@ -218,6 +231,7 @@ function updateCompanionStatusUI(status) {
 // Apply State & UI Sync
 // ---------------------------------------------------------------------------
 function applyState(state) {
+  if (state.proactive) applyProactiveStatus(state.proactive);
   if (typeof state.active === 'boolean') {
     isScreenShareActive = state.active;
     updateStreamStatusUI(isScreenShareActive);
@@ -249,6 +263,42 @@ function applyState(state) {
   }
   if (state.sync) applySync(state.sync);
   renderSources();
+}
+
+function applyProactiveStatus(status) {
+  proactiveState = { ...status, receivedAt: Date.now() };
+  renderProactiveStatus();
+}
+
+function renderProactiveStatus() {
+  if (!proactiveState) return;
+  const labels = { waiting: 'Menunggu jeda hening', unarmed: 'Menunggu sapaan pertama',
+    disabled: 'Obrolan hening nonaktif', blocked: 'Menunggu aktivitas selesai',
+    deciding: 'Sedang memilih topik', generating: 'Sedang menyiapkan ucapan',
+    speaking: 'Ucapan sedang diputar', skipped: 'Topik dilewati',
+    paused: 'Menunggu balasan kamu', failed: 'Pemilihan topik gagal', disconnected: 'Companion terputus' };
+  const reasons = { first_interaction: 'Kirim pesan atau bicara sekali untuk memulai.',
+    user_input: 'Kamu masih mengetik atau berbicara.', conversation_busy: 'Menunggu balasan, audio, atau komentar visual selesai.',
+    no_topic: 'Model memilih SKIP. Menunggu interaksi kamu berikutnya.',
+    duplicate_topic: 'Topik berulang dilewati. Menunggu interaksi kamu berikutnya.',
+    unanswered_limit: 'Dua sapaan belum dibalas; kirim pesan untuk melanjutkan.',
+    decision_timeout: 'Model pemilih topik melewati batas waktu. Coba kirim pesan lagi.',
+    invalid_decision: 'Jawaban pemilih topik tidak valid. Coba kirim pesan lagi.',
+    provider_error: 'Permintaan pemilih topik gagal. Periksa koneksi penyedia AI.',
+    no_audio: 'Tidak ada audio yang diterima dari penyedia suara.',
+    playback_timeout: 'Pemutaran suara tidak memberi konfirmasi selesai.',
+    speech_failed: 'Balasan atau suara otomatis gagal dibuat.',
+    unavailable_visionFilter: 'Penyedia pemilih topik belum tersedia.',
+    unavailable_llm: 'Penyedia obrolan belum tersedia.', unavailable_tts: 'Penyedia suara belum tersedia.',
+    unavailable_conversation: 'Percakapan belum siap.', awaiting_activity: 'Kirim pesan untuk melanjutkan.' };
+  proactiveStatusTitle.textContent = labels[proactiveState.status] || 'Menunggu companion';
+  const elapsed = Math.max(0, Date.now() - proactiveState.receivedAt);
+  const seconds = Math.ceil(Math.max(0, (proactiveState.remainingMs ?? 0) - elapsed) / 1000);
+  proactiveStatusDetail.textContent = proactiveState.status === 'waiting'
+    ? `${seconds} detik menuju pemilihan topik. Suara menyusul jika ada topik yang sesuai.`
+    : proactiveState.status === 'deciding'
+      ? `Menunggu model pemilih topik, maksimal ${Math.round(proactiveState.decisionTimeoutMs / 1000)} detik.`
+      : reasons[proactiveState.reason] || '';
 }
 
 function applySync(sync, keepCountdownText = false) {
@@ -727,4 +777,5 @@ resetStatsBtn.addEventListener('click', () => {
 
 // Initialize WebSocket on Load
 initializeMonitorControls();
+setInterval(renderProactiveStatus, 1000);
 connectWebSocket();

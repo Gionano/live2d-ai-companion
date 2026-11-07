@@ -221,6 +221,8 @@ function clientHarness() {
       add: key => classes.add(key), contains: key => classes.has(key) } }, micLabelEl: { textContent: '' },
     document: { getElementById: () => null }, isMobile: () => false,
     speechPlayback: { busy: false }, playbackState: () => 'idle',
+    proactiveSpeechActive: false,
+    reportUserActivity: phase => sent.push({ type: 'user_activity', phase }),
     showOverlaySubtitle: text => subtitles.push(text), log() {},
     performance: { now: () => 1000 }, tuning: { get: () => undefined },
     captureWebcamFrame: () => null, captureScreenFrame: () => null, desktopInputMeta: () => ({}),
@@ -387,11 +389,16 @@ test('microphone mute aborts current STT and rejects new audio without affecting
   controller.register(socket, event => events.push(event));
   t.after(() => controller.unregister(socket));
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const proactive = { updateSettings() {}, setUserActive() {} };
+  const sessions = new Map();
   const runInputBody = new AsyncFunction('socket', 'speechController', 'transcribeAudio', 'msg', 'extFromMime', 'getSlotStatus',
+    'proactiveConversation', 'visionSessions',
     section(serverSource, "    if (msg.type !== 'audio_input' && msg.type !== 'text_input') return;", '\n      // Filter noise:')
       + '\n    } finally { if (turn) speechController.completeTurn(socket, turn.turnId); }');
-  const runInput = (...args) => runInputBody(...args, () => ({ available: true }));
-  const mute = new Function('socket', 'speechController', 'msg', section(serverSource, "    if (msg.type === 'mic_mute')", '\n    // 0.'));
+  const runInput = (...args) => runInputBody(...args, () => ({ available: true }), proactive, sessions);
+  const muteBody = new Function('socket', 'speechController', 'msg', 'proactiveConversation',
+    section(serverSource, "    if (msg.type === 'mic_mute')", '\n    // 0.'));
+  const mute = (...args) => muteBody(...args, proactive);
   let signal;
   let complete;
   let calls = 0;

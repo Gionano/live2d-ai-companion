@@ -20,6 +20,7 @@ const overlaySubtitleEl = document.getElementById('overlay-subtitle');
 import { tuning } from './tuningConfig.js';
 import { SpeechPlayback, TurnState } from './speechPlayback.js';
 import { analyzeSpeechRhythm } from './speechMotion.js';
+import { ProactiveVoiceGate } from './proactiveVoiceGate.js';
 import { ContinuousVisionCapture, captureSignature } from './continuousVision.js';
 import { handleBrowserSelfieModal } from './browserSelfieModal.js';
 
@@ -363,6 +364,7 @@ const activeAudioSources = new Set();
 const speechPlayback = new SpeechPlayback({
   playAudio: (chunks, emotion, options) => playSentenceAudio(chunks.map(b64ToUint8), emotion, options),
   onFinished: (speechId) => {
+    proactiveSpeechActive = [...speechPlayback.speeches.values()].some(speech => speech.origin === 'proactive');
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'playback_finished', speechId }));
     }
@@ -379,7 +381,7 @@ function updateUiForState(state, isPttRecording = false) {
   const chatInputEl = document.getElementById('chat-input');
   const chatSendEl = document.getElementById('chat-send');
   if (chatInputEl && chatSendEl) {
-    const busy = state !== 'idle' || speechPlayback.busy;
+    const busy = (state !== 'idle' || speechPlayback.busy) && !proactiveSpeechActive;
     const wasDisabled = chatInputEl.disabled;
     chatInputEl.disabled = busy;
     chatSendEl.disabled = busy;
@@ -557,6 +559,10 @@ async function playDecodedAudio(buffer, emotion, { signal, speechId, pauseBefore
 // ---------------------------------------------------------------------------
 let ws = null;
 let desktopSelfieEnabled = true;
+let proactiveSpeechActive = false;
+const proactiveVoiceGate = new ProactiveVoiceGate();
+let lastTypingActivity = 0;
+let lastProactiveStatus = '';
 const continuousVision = new ContinuousVisionCapture({
   send: (message) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
@@ -575,6 +581,17 @@ const continuousVision = new ContinuousVisionCapture({
   },
 });
 
+function reportUserActivity(phase = 'start') {
+  if (phase === 'start' && proactiveSpeechActive) {
+    proactiveSpeechActive = false;
+    speechPlayback.reset();
+    turnState.handle({ type: 'conversation_state', state: 'idle' });
+    currentConversationState = 'idle';
+    playCursor = scheduledEmotionEnd = audioCtx?.currentTime ?? 0;
+  }
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'user_activity', phase }));
+}
+
 tuning.onChange((group, key, value) => {
   if (group === 'vision' && key === 'webcamMonitoring') {
     continuousVision.setActive('webcam', value === 'on' && Boolean(video.srcObject?.active));
@@ -582,6 +599,10 @@ tuning.onChange((group, key, value) => {
   if (group === 'vision' && ['minInferenceIntervalMs', 'freshnessMs', 'screenChangeThreshold', 'webcamChangeThreshold'].includes(key)
       && ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'update_vision_config', settings: { [key]: value } }));
+  }
+  if (group === 'conversation' && ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'proactive_config', enabled: tuning.get('conversation.proactiveEnabled') === 'on',
+      delaySeconds: tuning.get('conversation.proactiveDelaySeconds') ?? 60 }));
   }
 });
 
@@ -627,6 +648,8 @@ function connectWS() {
     continuousVision.setActive('screen', isScreenActive());
     continuousVision.connect();
     for (const source of ['screen', 'webcam']) syncCaptureStatus(source, captureAvailability[source]);
+    ws.send(JSON.stringify({ type: 'proactive_config', enabled: tuning.get('conversation.proactiveEnabled') === 'on',
+      delaySeconds: tuning.get('conversation.proactiveDelaySeconds') ?? 60 }));
   });
   ws.addEventListener('message', (e) => {
     let msg;
@@ -638,6 +661,14 @@ function connectWS() {
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'vision_monitor_status') {
       continuousVision.setMonitorActive(msg.active === true);
+      return;
+    }
+    if (msg.type === 'proactive_status') {
+      const statusKey = msg.status + ':' + msg.reason;
+      if (statusKey !== lastProactiveStatus) {
+        console.info('[proactive]', msg.status, msg.reason ?? '', { remainingMs: msg.remainingMs });
+        lastProactiveStatus = statusKey;
+      }
       return;
     }
     if (msg.type === 'selfie_feature') {
@@ -658,6 +689,7 @@ function connectWS() {
       case 'turn_cancelled':
       case 'input_rejected':
         currentConversationState = turnState.state;
+        if (msg.type === 'turn_cancelled') proactiveSpeechActive = false;
         updateUiForState(playbackState());
         break;
       case 'user_said':
@@ -679,10 +711,14 @@ function connectWS() {
         }
         break;
       case 'speech_start':
+        proactiveSpeechActive = msg.origin === 'proactive';
+        speechPlayback.handle(msg);
+        break;
       case 'speech_end':
       case 'stop_speech':
       case 'audio_output':
       case 'audio_end':
+        if (msg.type === 'stop_speech') proactiveSpeechActive = false;
         speechPlayback.handle(msg);
         break;
       case 'request_screen_capture': {
@@ -758,6 +794,7 @@ function connectWS() {
   });
   ws.addEventListener('close', () => {
     continuousVision.disconnect();
+    proactiveSpeechActive = false;
     currentConversationState = 'idle';
     turnState.handle({ type: 'conversation_state', state: 'idle' });
     speechPlayback.reset();
@@ -782,6 +819,7 @@ let pttStartAt = 0;
 let isPttRecording = false;
 
 async function startPttRecording() {
+  if (proactiveSpeechActive) reportUserActivity('start');
   if (playbackState() !== 'idle') {
     console.log('[ptt] Diabaikan: status percakapan saat ini adalah', currentConversationState);
     return;
@@ -802,6 +840,7 @@ async function startPttRecording() {
   if (isMicMutedByDesktop || !micStream || isPttRecording || playbackState() !== 'idle') return;
   const revision = micMuteRevision;
   isPttRecording = true;
+  reportUserActivity('start');
   pttChunks = [];
   pttStartAt = performance.now();
 
@@ -859,6 +898,7 @@ async function startPttRecording() {
   } catch (err) {
     isPttRecording = false;
     pttRecorder = null;
+    reportUserActivity('end');
     console.error('[ptt] Gagal start MediaRecorder:', err);
     updateUiForState(playbackState());
   }
@@ -867,6 +907,7 @@ async function startPttRecording() {
 function stopPttRecording() {
   if (!isPttRecording) return;
   isPttRecording = false;
+  reportUserActivity('end');
   if (pttRecorder && pttRecorder.state === 'recording') {
     pttRecorder.stop();
   } else {
@@ -877,6 +918,7 @@ function stopPttRecording() {
 function abortPttRecording() {
   if (!isPttRecording && !pttRecorder) return;
   isPttRecording = false;
+  reportUserActivity('end');
   if (pttRecorder) {
     pttRecorder.ondataavailable = null;
     pttRecorder.onstop = null;
@@ -1059,6 +1101,7 @@ function endSegment() {
 
 // Batalkan segmen berjalan tanpa kirim (mis. amika keburu mulai bicara atau turn berganti).
 function abortSegment() {
+  if (speaking || segRecorder) reportUserActivity('end');
   if (segRecorder) {
     segRecorder.ondataavailable = null;
     segRecorder.onstop = null;
@@ -1124,6 +1167,18 @@ function vadLoop() {
     return;
   }
 
+  // Echo cancellation stays enabled; only unsolicited speech permits barge-in.
+  if (proactiveSpeechActive && playbackState() !== 'idle') {
+    if (proactiveVoiceGate.sample({ active: true, rms: micLevel(), now: performance.now(),
+      threshold: tuning.get('vad.vadStart') ?? 0.055 })) {
+      reportUserActivity('start');
+      speaking = true;
+      silenceStart = 0;
+      beginSegment();
+    }
+    return;
+  }
+  proactiveVoiceGate.reset();
   // Turn-taking: jika bukan IDLE (sedang PROCESSING atau SPEAKING), nonaktifkan deteksi
   if (playbackState() !== 'idle') {
     if (segRecorder) abortSegment();
@@ -1148,6 +1203,7 @@ function vadLoop() {
     setMicStatus(true, 'Mendengarkan…');
     if (level > vadStart) {
       speaking = true;
+      reportUserActivity('start');
       silenceStart = 0;
       beginSegment();
     }
@@ -1159,6 +1215,7 @@ function vadLoop() {
       silenceStart = now;
     } else if (now - silenceStart > silenceMs) {
       speaking = false;
+      reportUserActivity('end');
       silenceStart = 0;
       endSegment();
     }
@@ -1212,11 +1269,22 @@ async function startListening() {
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 if (chatForm && chatInput) {
+  let typingTimer;
+  chatInput.addEventListener('input', () => {
+    const now = performance.now();
+    if (!lastTypingActivity || now - lastTypingActivity > 1000 || proactiveSpeechActive) reportUserActivity('start');
+    lastTypingActivity = now;
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => {
+      if (!chatInput.value.trim()) reportUserActivity('end');
+    }, 1500);
+  });
   chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
     if (isMobile()) return;
     const text = chatInput.value.trim();
     if (!text) return;
+    if (proactiveSpeechActive) reportUserActivity('start');
     if (playbackState() !== 'idle') return;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       log('Belum terhubung ke server.', 'error');
@@ -1231,6 +1299,8 @@ if (chatForm && chatInput) {
       screenImage: captureScreenFrame(),
       ...desktopInputMeta(),
     }));
+    clearTimeout(typingTimer);
+    reportUserActivity('end');
     chatInput.value = '';
     updateUiForState('processing');
   });

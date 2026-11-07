@@ -17,7 +17,9 @@ import {
   resolveVisionSource,
 } from './visionCapture.js';
 import { StreamingVisionManager, streamingVisionManager } from './streamingVisionManager.js';
+import { ProactiveConversation } from './proactiveConversation.js';
 import { VisionMonitorPresence } from './visionMonitorPresence.js';
+import { getServerTuning } from './serverConfig.js';
 import {
   generateReply,
   generateReplyStream,
@@ -307,14 +309,22 @@ const stopSelfieConfigWatch = watchSelfieConfig(
 );
 
 // One controller owns turn state and speech IDs for every spoken output.
-const speechController = new SpeechController({ generateSpeech, isVoiceConfigured });
+const speechController = new SpeechController({ generateSpeech, isVoiceConfigured,
+  onPlaybackReleased: ({ recipients, ...info }) => {
+    for (const socket of recipients) proactiveConversation.playbackCompleted(socket, info);
+  } });
+const proactiveConversation = new ProactiveConversation({ registry: getProviderRegistry(),
+  enabled: getServerTuning('conversation', 'proactiveEnabled', 'on') === 'on',
+  decisionTimeoutMs: getServerTuning('conversation', 'proactiveDecisionTimeoutMs', 30000),
+  onError: error => console.warn('[proactive] Decision failed:', error.code ?? error.name),
+  delaySeconds: getServerTuning('conversation', 'proactiveDelaySeconds', 60) });
 
 function playSpokenMessage(text, emotion = 'sayang', socket, turnId) {
   return speechController.play({ text, emotion, recipients: [socket], turnId });
 }
 
-function enqueueSpeech(text, emotion = 'sayang', { speechEmotion } = {}) {
-  return speechController.play({ text, emotion, speechEmotion, deferred: true });
+function enqueueSpeech(text, emotion = 'sayang', { speechEmotion, origin = 'selfie' } = {}) {
+  return speechController.play({ text, emotion, speechEmotion, deferred: true, origin });
 }
 
 jobManager.setSpeechHandler(({ text, emotion, speechEmotion }) => {
@@ -327,6 +337,7 @@ function sendVisionInit(sock, manager = [...visionSessions.values()].at(-1) || s
   sock.send(JSON.stringify({
     type: 'init_vision_state',
     monitorActive: visionMonitorPresence.active,
+    proactive: proactiveConversation.getStatus(sock.isMonitor ? undefined : sock),
     active: Object.values(manager.getSourceSnapshot()).some(source => source.active),
     settings: manager.settings,
     stats: manager.stats,
@@ -393,12 +404,18 @@ wss.on('connection', (socket, req) => {
   socket.visionSessionId = randomUUID();
   socket.captureSessions = { screen: { sessionId: null, active: false }, webcam: { sessionId: null, active: false } };
   socket.explicitVisionControllers = new Map();
+  socket.userInputActive = false;
+  socket.proactiveEnabled = getServerTuning('conversation', 'proactiveEnabled', 'on') === 'on';
+  socket.proactiveDelaySeconds = getServerTuning('conversation', 'proactiveDelaySeconds', 60);
 
   socket.once('close', () => {
     for (const controller of socket.explicitVisionControllers.values()) controller.abort();
     socket.explicitVisionControllers.clear();
+    proactiveConversation.unregister(socket);
     visionManager.dispose();
     visionSessions.delete(socket);
+    proactiveConversation.updateSettings({ enabled: [...visionSessions.keys()].some(client => client.proactiveEnabled),
+      delaySeconds: proactiveConversation.latestSession?.proactiveDelaySeconds ?? 60 });
     speechController.unregister(socket);
     companionSessionClosed();
     for (const pending of pendingCaptures.values()) {
@@ -489,6 +506,66 @@ wss.on('connection', (socket, req) => {
     if (signal?.aborted) return;
     return speechController.play({ text, emotion, speechEmotion, signal, recipients: [socket], deferred: true, origin: 'vision' });
   });
+  proactiveConversation.register(socket, {
+    history: () => history,
+    getVisionContext: () => visionManager.getConversationContext(),
+    isAvailable: () => socket.proactiveEnabled && getSlotStatus('llm').available && getSlotStatus('tts').available,
+    isBusy: () => socket.userInputActive || speechController.isBusy(socket)
+      || Boolean(speechController.activeSpeech) || speechController.queue.length > 0 || visionManager.isFilteringInProgress,
+    onStatus: status => {
+      const key = status.status + ':' + status.reason;
+      if (socket.lastProactiveLogKey !== key) {
+        socket.lastProactiveLogKey = key;
+        console.info('[proactive]', status.status, status.reason ?? '',
+          { remainingMs: status.remainingMs, unanswered: status.unanswered });
+      }
+      const event = { ...status, conversationId: socket.visionSessionId };
+      send(event);
+      const json = JSON.stringify(event);
+      for (const monitor of monitorSockets) {
+        if (monitor.readyState === WebSocket.OPEN) monitor.send(json);
+      }
+    },
+    onCancel: ({ reason }) => speechController.cancelProactive(socket, { drain: reason !== 'user_activity' }),
+    onSpeak: async ({ topic, signal, visionContext }) => {
+      const turn = speechController.beginTurn(socket, { origin: 'proactive' });
+      if (!turn || signal.aborted) return { ok: false };
+      const abort = () => speechController.cancelProactive(socket, { drain: false });
+      signal.addEventListener('abort', abort, { once: true });
+      let full = '';
+      let emotion = 'netral';
+      try {
+        const result = await speechController.play({ origin: 'proactive', recipients: [socket], turnId: turn.turnId,
+          produce: async ({ say, signal: speechSignal }) => {
+            let chain = Promise.resolve();
+            try {
+              for await (const event of generateReplyStream(history, null, visionContext, {
+                signal: speechSignal,
+                internalInstruction: `Mulai obrolan singkat secara alami tentang topik ini: ${topic}. Jangan mengaku user baru saja mengatakan sesuatu.`,
+              })) {
+                if (event.type === 'delta') full += event.text;
+                else if (event.type === 'emotion') emotion = event.emotion;
+                else if (event.type === 'sentence') {
+                  const snapshot = { ...event };
+                  const selectedEmotion = snapshot.emotion ?? emotion;
+                  chain = chain.then(() => say(snapshot.text, selectedEmotion, () => {}, snapshot));
+                }
+              }
+            } finally { await chain; }
+            if (!speechSignal.aborted) speechController.sendTurn(socket, turn.turnId,
+              { type: 'amika_replied', text: full, emotion });
+          } });
+        if (signal.aborted || !speechController.isCurrentTurn(socket, turn.turnId) || !full.trim()) return { ok: false };
+        history.push({ role: 'assistant', content: full });
+        if (history.length > HISTORY_MESSAGE_LIMIT) history.splice(0, history.length - HISTORY_MESSAGE_LIMIT);
+        visionManager.setAssistantContext(full);
+        return { ok: true, text: full, speechId: result.speechId };
+      } finally {
+        signal.removeEventListener('abort', abort);
+        speechController.completeTurn(socket, turn.turnId);
+      }
+    },
+  });
 
   // Kirim status awal percakapan ke client
   send({
@@ -510,9 +587,35 @@ wss.on('connection', (socket, req) => {
     if (!msg || typeof msg !== 'object') return;
     if (handleSelfieFeature(msg)) return;
 
+    if (msg.type === 'user_activity') {
+      if (!['start', 'end'].includes(msg.phase)) return;
+      socket.userInputActive = msg.phase === 'start';
+      proactiveConversation.updateSettings({ enabled: [...visionSessions.keys()].some(client => client.proactiveEnabled),
+        delaySeconds: socket.proactiveDelaySeconds });
+      proactiveConversation.setUserActive(socket, socket.userInputActive);
+      speechController.cancelProactive(socket, { drain: false });
+      return;
+    }
+    if (msg.type === 'proactive_config') {
+      if (typeof msg.enabled !== 'boolean') return;
+      socket.proactiveEnabled = msg.enabled;
+      socket.proactiveDelaySeconds = Number.isFinite(msg.delaySeconds) ? Math.max(30, Math.min(300, msg.delaySeconds)) : 60;
+      proactiveConversation.updateSettings({ enabled: [...visionSessions.keys()].some(client => client.proactiveEnabled),
+        delaySeconds: proactiveConversation.latestSession?.proactiveDelaySeconds ?? socket.proactiveDelaySeconds });
+      if (!msg.enabled) {
+        proactiveConversation.cancel(socket, 'disabled');
+        speechController.cancelProactive(socket);
+      }
+      return;
+    }
+
     if (msg.type === 'mic_mute') {
       if (typeof msg.muted !== 'boolean') return;
       socket.micMuted = msg.muted;
+      if (socket.micMuted) {
+        socket.userInputActive = false;
+        proactiveConversation.setUserActive(socket, false);
+      }
       console.log('[mic] Microphone mute state:', socket.micMuted);
       if (socket.micMuted && socket.sttTurnId) {
         speechController.cancelTurn(socket, socket.sttTurnId, 'MIC_MUTED');
@@ -609,6 +712,11 @@ wss.on('connection', (socket, req) => {
     }
 
     // Reject input explicitly so the client can restore its optimistic UI.
+    proactiveConversation.updateSettings({ enabled: [...visionSessions.keys()].some(client => client.proactiveEnabled),
+      delaySeconds: socket.proactiveDelaySeconds });
+    proactiveConversation.setUserActive(socket, false);
+    speechController.cancelProactive(socket, { drain: false });
+    socket.userInputActive = false;
     if (speechController.isBusy(socket)) {
       speechController.rejectInput(socket, 'BUSY');
       return;
@@ -941,6 +1049,7 @@ wss.on('connection', (socket, req) => {
 installSelfieLifecycle({ manager: jobManager, server, wss });
 server.once('close', stopSelfieConfigWatch);
 server.once('close', () => {
+  proactiveConversation.dispose();
   for (const manager of visionSessions.values()) manager.dispose();
 });
 

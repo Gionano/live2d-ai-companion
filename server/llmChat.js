@@ -309,7 +309,7 @@ export async function* generateReply(
   conversationHistory,
   userMessage,
   visionDescription,
-  { signal, registry = getProviderRegistry(), includeSpeechText = false } = {},
+  { signal, registry = getProviderRegistry(), includeSpeechText = false, internalInstruction } = {},
 ) {
   signal?.throwIfAborted();
   if (!registry.getSlotStatus('llm').available) {
@@ -334,12 +334,15 @@ export async function* generateReply(
   if (visionDescription) {
     systemParts.push(`[User sedang menunjukkan: ${visionDescription}]`);
   }
+  if (typeof internalInstruction === 'string' && internalInstruction.trim()) {
+    systemParts.push(internalInstruction.trim());
+  }
   const systemContent = systemParts.join('\n\n');
   const messages = [{ role: 'system', content: systemContent }];
 
   for (const turn of trimmedHistory) messages.push(turn);
 
-  messages.push({ role: 'user', content: userMessage });
+  if (userMessage !== undefined && userMessage !== null) messages.push({ role: 'user', content: userMessage });
 
   const context = messageStats(messages);
   const historyStats = messageStats(trimmedHistory);
@@ -439,7 +442,7 @@ export async function* generateReplyStream(
   conversationHistory,
   userMessage,
   visionDescription,
-  { signal, registry = getProviderRegistry() } = {},
+  { signal, registry = getProviderRegistry(), internalInstruction } = {},
 ) {
   let buf = '';
   let speechEmotion;
@@ -481,7 +484,7 @@ export async function* generateReplyStream(
     conversationHistory,
     userMessage,
     visionDescription,
-    { signal, registry, includeSpeechText: true },
+    { signal, registry, includeSpeechText: true, internalInstruction },
   )) {
     signal?.throwIfAborted();
     if (event.type === 'segment_start') {

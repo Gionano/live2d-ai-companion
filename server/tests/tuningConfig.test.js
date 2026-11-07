@@ -12,6 +12,18 @@ function store() {
   return context.tuning;
 }
 
+test('camera monitoring and quiet conversation start enabled on reload and reset', () => {
+  for (const key of ['vision.webcamMonitoring', 'conversation.proactiveEnabled']) {
+    const tuning = store();
+    assert.equal(tuning.get(key), 'on');
+    tuning.set(key, 'off');
+    assert.equal(store().get(key), 'on');
+    tuning.resetAll();
+    assert.equal(tuning.get(key), 'on');
+  }
+  assert.equal(store().get('conversation.proactiveDelaySeconds'), 60);
+});
+
 test('tuning loads the structured server response without introducing NaN', () => {
   const tuning = store();
   const schema = JSON.parse(JSON.stringify(tuning.getSchema()));

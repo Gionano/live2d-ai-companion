@@ -18,7 +18,7 @@ export class SpeechPlayback {
     if (message.type === 'speech_start') {
       if (!this.speeches.has(speechId)) {
         this.speeches.set(speechId, { speechId, chunks: [], pending: 0, ended: false,
-          controller: new AbortController(), emotion: 'netral' });
+          controller: new AbortController(), emotion: 'netral', origin: message.origin || 'conversation' });
         this.onChange();
       }
       return;
@@ -51,7 +51,7 @@ export class SpeechPlayback {
     speech.pending++;
     const options = { signal: speech.controller.signal, speechId: speech.speechId,
       segmentId: metadata.segmentId, pauseBeforeMs: Math.max(0, Math.min(400, Number(metadata.pauseBeforeMs) || 0)),
-    };
+      origin: speech.origin };
     this.chain = this.chain.then(async () => {
       if (this.speeches.get(speech.speechId) !== speech) return;
       try {

@@ -44,6 +44,7 @@ let lastKnownState = {
   frames: {},
   descriptions: {},
   logs: [],
+  proactive: null,
 };
 
 // Broadcast to all UI clients connected to /ws-monitor
@@ -75,6 +76,7 @@ companionClient.onStatusChange = (status) => {
   if (status !== 'connected') {
     // Keep observed telemetry, but never present a disconnected source as live.
     lastKnownState.active = false;
+    if (lastKnownState.proactive) lastKnownState.proactive.status = 'disconnected';
     lastKnownState.sources = Object.fromEntries(Object.entries(lastKnownState.sources).map(([source, state]) =>
       [source, { ...state, active: false, freshness: 'off', pending: false, inFlight: false }]));
     broadcastToUI({ type: 'screen_share_status', active: false, settings: lastKnownState.settings,
@@ -84,6 +86,12 @@ companionClient.onStatusChange = (status) => {
 
 function snapshotState() {
   const state = { ...lastKnownState };
+  if (state.proactive) {
+    const elapsedMs = Math.max(0, Date.now() - state.proactive.receivedAt);
+    state.proactive = { ...state.proactive,
+      quietForMs: state.proactive.quietForMs + elapsedMs,
+      remainingMs: Math.max(0, state.proactive.remainingMs - elapsedMs) };
+  }
   state.sources = Object.fromEntries(Object.entries(state.sources).map(([source, observed]) => {
     const elapsedMs = Math.max(0, Date.now() - (observed.receivedAt ?? Date.now()));
     const age = observed.lastCaptureAgeMs == null ? null : observed.lastCaptureAgeMs + elapsedMs;
@@ -117,6 +125,9 @@ function cacheSources(sources) {
 // Relay incoming messages from Companion Utama to Vision Monitor UI
 companionClient.onMessage = (msg) => {
   if (!msg) return;
+  if (msg.type === 'proactive_status' || msg.proactive) {
+    lastKnownState.proactive = { ...(msg.proactive || msg), receivedAt: Date.now() };
+  }
 
   if (msg.sync) {
     lastKnownState.bufferCount = msg.sync.bufferCount ?? lastKnownState.bufferCount;
