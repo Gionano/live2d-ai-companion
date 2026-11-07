@@ -1,11 +1,33 @@
 # Status
 
-Evidence: Phase D implementation committed through `ecef631`; P1-P5 audit corrections are included in the follow-up commits. Phases E1 and E1.5, the memory/argument correction, CLI quality experiments, and managed ComfyUI below are implemented in the working tree without a commit. Verification uses code inspection and mocked selfie/provider, HTTP/WS, desktop IPC, speech, spawned local-provider processes, and memory/telemetry tests.
+Current companion behavior is documented in the [continuous vision and conversation guide](continuous-vision-conversation.md) and [Live2D speech movement guide](live2d-speech-motion.md). Historical sections below retain the implementation and verification evidence recorded during their original work. Automated verification uses mocked providers, HTTP/WS, desktop IPC, speech, local-process fixtures, and memory/telemetry tests.
+
+Latest change-set verification (2026-11-07): 266 changed regression tests passed,
+one optional local-asset test skipped, root and monitor builds passed, and the
+privacy scan reported zero failing files. The preceding full-suite run passed
+1,125 tests with one optional asset skip. Full hardware checks remain below.
 
 ## Done
+- Continuous vision uses independent screen/webcam sessions, scene filtering,
+  capture-based freshness and source-labelled conversation context. Capture runs
+  only while a Vision Monitor dashboard is connected; closing the last dashboard
+  cancels analysis and clears visual context. Webcam monitoring is automatic.
+- Chat streams tone segments with early first-sentence TTS and audio-clock pauses.
+  Quiet conversation is enabled with a 60-second delay, SKIP/topic selection,
+  a 30-second decision deadline, two-unanswered limit and voice/typing/PTT takeover.
+  The monitor shows waiting, skipped, blocked and failed decisions. See the
+  [operator guide](continuous-vision-conversation.md).
+- Live2D head/body speech gestures follow audio emphasis and pauses, maintain
+  coordinated poses across segments and fade on interruption. The active local
+  魔女 rig and existing speech gains are preserved. See [speech movement](live2d-speech-motion.md).
+- Diagnostic chat/vision/speech and monitor logs use Jakarta timestamps with
+  milliseconds. User-facing conversation messages and captions keep plain text.
+- Original project code has an MIT license; SDK, model and dependency terms are
+  retained separately in the root third-party notices.
 - Native Fish speech emotions: the existing chat, vision-comment and selfie-caption
-  LLM requests choose one of 49 speech emotions per reply, separate from the
-  avatar's twelve labels. Header freezing, queue snapshots and mapped fallbacks
+  LLM requests choose from 49 speech emotions, separate from the avatar's twelve
+  labels. Ordinary and proactive chat can choose a tone per segment; vision and
+  selfie captions retain their single-object format. Header freezing, queue snapshots and mapped fallbacks
   preserve streaming and cancellation. Translated selection controls default to native.
 - Fish emotion catalogue: all 24 Basic and 25 Advanced tags are available in
   translated grouped selectors and direct TTS/CLI emotion names.
@@ -23,7 +45,7 @@ Evidence: Phase D implementation committed through `ecef631`; P1-P5 audit correc
   safe errors, streaming deadlines/retries, lazy registry, capability gating,
   migrated AI call sites and manual provider-test CLI. See the P1 record below.
 - Live2D Cubism rendering, physics, blinking, breathing, synthetic tracking, and emotion controls.
-- Live2D model discovery/upload/switching, persistent framing presets, and animation tuning.
+- Live2D model discovery/upload/switching, persistent framing presets, and configuration-based animation tuning.
 - WebSocket voice/text chat, VAD, mobile push-to-talk, STT, streaming chat/TTS, and turn-taking.
 - Webcam/screen vision routing, continuous capture, and a monitor bridge/dashboard with remote settings.
 - Persistent JSON memory extraction, user facts, and episodic recall.
@@ -977,8 +999,9 @@ Manual check: run `npm.cmd run dev:all`, then `npm.cmd --prefix desktop-companio
 - Speech: speech_start -> tagged audio -> speech_end (ok:false on failure); amika_replied logs only; playback acknowledgment gates subsequent speech even after partial failure. State and cancellable turn ownership are per socket; expired turnId events are ignored. stop_speech cancels playback on timeout; input_rejected restores the client's authoritative state.
 - Backend binds to `127.0.0.1`; selfie images use tokenized `/api/selfies/:token` URLs. Forwarded headers are trusted only from a loopback peer. Mobile/LAN chat and vision access still use Vite `/api` and `/ws`; the local monitor bridge connects over loopback. No current feature requires a direct LAN backend listener. Opting into selfie LAN access retains the localhost/127.0.0.1 Host allowlist.
 - Electron uses context isolation, sandboxing, disabled Node integration, narrow preload IPC, and overlay capture protection.
-- Continuous capture requires active screen sharing and a connected monitor; selfie generation runs independently of conversation turns.
+- Continuous capture requires a connected Vision Monitor dashboard; available webcam monitoring is automatic, and screen capture also requires screen sharing or the Electron tray toggle. Quiet conversation is enabled with a 60-second delay. Selfie generation runs independently of conversation turns.
 
 ## Next
-TTS expressiveness and the full Fish catalogue are implemented. Stop here;
-live listening and UI verification remain manual. No subsequent task has started.
+Complete the manual browser/Electron capture, speech-playback and speaker-echo
+checks in the operator guide. Native image quality and installer verification
+still require the configured local hardware and assets.

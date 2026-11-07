@@ -1,4 +1,4 @@
-# Amika ? Live2D AI Companion
+# Amika Live2D AI Companion
 
 ![Amika Live2D AI companion with chat and selfie preview](docs/amikaHeader.png)
 
@@ -8,11 +8,13 @@ Amika is a browser and Windows desktop companion with an official Live2D Cubism 
 
 ## Features
 
-- **Live2D Cubism 5 / IceGirl:** WebGL rendering, physics, blinking, breathing, procedural face/eye tracking, audio-reactive body motion, and sentence-break animations.
-- **Contextual expressions:** twelve Indonesian emotion labels, including `sayang`, `jahil`, `penasaran`, and `netral`, drive the avatar expressions.
-- **Voice and text chat:** browser VAD, mobile push-to-talk, desktop typed input, streaming chat/TTS, synchronized captions, and turn ownership that rejects stale replies and prevents overlapping audio.
-- **Visual perception:** requests such as "lihat di kamera" or "coba lihat layar" select webcam or screen input. The Vision Monitor supplies recent screen descriptions when available; one-shot vision handles other requests.
-- **Continuous screen vision:** capture runs while screen sharing and the Vision Monitor are active. A separate filter selects moments for spontaneous spoken commentary.
+- **Live2D Cubism 5:** WebGL rendering, physics, blinking, breathing, procedural tracking, and model-aware speech gestures driven by actual audio emphasis and pauses. See [speech movement](docs/live2d-speech-motion.md).
+- **Contextual expressions:** each reply can contain multiple tone segments using twelve Indonesian avatar emotions and a separate Fish Audio speech-emotion vocabulary.
+- **Voice and text chat:** browser VAD, mobile push-to-talk, desktop typed input, streamed chat/TTS, early first-sentence playback, configurable segment pauses, synchronized captions, and cancellation across queued speech.
+- **Visual perception:** ordinary conversation receives valid screen and webcam descriptions automatically. Explicit requests such as "lihat di kamera" or "coba lihat layar" obtain fresh source-specific detail.
+- **Continuous screen and camera vision:** available sources capture once per second while a Vision Monitor dashboard is connected. Scene filtering reuses unchanged descriptions; AI requests have a two-second minimum spacing per source. Closing the last dashboard stops capture and clears current visual context.
+- **Conversation during silence:** enabled in configuration with a 60-second delay after user activity or playback completion. A topic decision can choose SKIP; at most two unanswered unsolicited turns are allowed. Voice, typing and PTT interrupt unsolicited speech.
+- **Diagnostic logs:** chat/vision/speech and monitor-bridge diagnostics use Jakarta timestamps with milliseconds. Conversation messages and captions display plain text.
 - **Persistent memory:** background extraction stores user facts and episodic recall in the ignored `data/` directory.
 - **Windows desktop overlay:** transparent avatar, click-through/edit modes, saved display presets, tray controls, configurable global shortcuts, and protected direct screen capture.
 - **PAP / selfies:** voice or typed requests such as "pap dong" use a character whitelist, prompt planning, local reference images, and automatic selection of external ComfyUI, managed ComfyUI, or sd.cpp.
@@ -27,7 +29,7 @@ Amika is a browser and Windows desktop companion with an official Live2D Cubism 
 | Chat and PAP planner | Experiential Labs | `deepseek-v4.1-flash-uncensored` |
 | Speech recognition | Groq | `whisper-large-v3` |
 | Webcam and screen vision | Groq | `qwen/qwen3.8-27b` |
-| Spontaneous commentary filter | 9inference | `deepseek-v4.1-flash` |
+| Commentary filter and quiet-conversation topics | 9inference | `deepseek-v4.1-flash` |
 | Streaming speech | Fish Audio | `s2.1-pro-free` |
 | Image generation | Local providers | ComfyUI ? managed ComfyUI ? sd.cpp |
 
@@ -114,7 +116,18 @@ npm --prefix vision-monitor install
 npm --prefix vision-monitor run start
 ```
 
-Open [http://localhost:5174](http://localhost:5174), then enable screen sharing in the companion for continuous screen vision. See the [Vision Monitor README](vision-monitor/README.md).
+Open [http://localhost:5174](http://localhost:5174). Camera monitoring starts
+automatically when the companion camera is available. Share the screen in the
+browser or enable Electron's Screen Vision tray control to monitor the screen too.
+The last dashboard must remain connected for continuous capture; the bridge alone
+does not enable it. Explicit visual questions and quiet conversation can work
+with the monitor closed.
+
+The **Obrolan saat hening** card shows its countdown, SKIP, blocked state or
+decision timeout. **Durasi analisis** measures an AI request's duration, while
+the interval setting controls minimum request spacing. See the
+[operator guide](docs/continuous-vision-conversation.md) and
+[Vision Monitor README](vision-monitor/README.md).
 
 ### Windows desktop companion
 
@@ -273,10 +286,17 @@ Use `npm run selfie:test-b` or `npm run selfie:test-c` for focused planner/job-m
 
 Managed ComfyUI, sd.cpp hardening, setup tools, and browser/Electron flows have automated regression coverage. Live image quality, native capture behavior, real engine installation, and the Windows installer still need manual verification. The cloud image provider remains an unavailable stub. Detailed implementation evidence and remaining work are in [docs/STATUS.md](docs/STATUS.md).
 
+## License
+
+The project's original code is licensed under the [MIT License](LICENSE).
+Live2D SDK components, model artwork and binaries, third-party dependencies, and
+locally installed engines/models retain their own terms. See
+[third-party notices](THIRD_PARTY_NOTICES.md).
+
 ## Credits and licenses
 
 - **IceGirl Live2D model:** created by **tianyelulu**, available on [BOOTH](https://tianyelulu.booth.pm/items/5975192). Model art and intellectual property remain with the creator; use the assets according to the published license.
-- **Live2D Cubism SDK for Web:** by [Live2D Inc.](https://www.live2d.com/en/sdk/about/). Core/framework use is governed by the [Live2D Open Software License Agreement](https://www.live2d.com/eula/live2d-open-software-license-agreement_en.html) and applicable proprietary terms. Obtain Cubism Core from the [official SDK download](https://www.live2d.com/en/sdk/download/web/).
+- **Live2D Cubism SDK for Web:** by [Live2D Inc.](https://www.live2d.com/en/sdk/about/). The Framework uses the [Live2D Open Software License](https://www.live2d.com/eula/live2d-open-software-license-agreement_en.html); Core uses the [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_en.html). Obtain Cubism Core from the [official SDK download](https://www.live2d.com/en/sdk/download/web/).
 - **AI services:** [Experiential Labs](https://experientiallabs.ai), [Groq](https://groq.com), [Fish Audio](https://fish.audio), and [9inference](https://9inference.cloud).
 
 Keep API keys, personal reference images, generated data, machine overrides, and local engine/model files out of Git. Review each engine/model license before accepting it or installing artifacts.
