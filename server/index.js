@@ -779,7 +779,7 @@ wss.on('connection', (socket, req) => {
 
       let replyEmotion = 'netral';
 
-      async function speak(sentence, idx, say, emotion, speechEmotion) {
+      async function speak(sentence, idx, say, emotion, speechEmotion, options = {}) {
         const isFirst = idx === 0;
         if (isFirst) tTtsStart = performance.now();
         await say(sentence, emotion, () => {
@@ -794,7 +794,7 @@ wss.on('connection', (socket, req) => {
                 ` | total to first audio: ${ms(tPipe, tFirstAudioOut)}ms`,
             );
           }
-        }, { speechEmotion });
+        }, { ...options, speechEmotion });
       }
 
       await speechController.play({
@@ -821,9 +821,10 @@ wss.on('connection', (socket, req) => {
                   console.log(`[timing] LLM first sentence: ${ms(tLlmStart, tLlmFirstSentence)}ms (req->sentence, t+${ms(tPipe)})`);
                 }
                 const idx = sentenceIdx++;
-                const emotion = replyEmotion;
+                const emotion = ev.emotion ?? replyEmotion;
                 const speechEmotion = ev.speechEmotion;
-                ttsChain = ttsChain.then(() => speak(ev.text, idx, say, emotion, speechEmotion));
+                const options = { speechEmotion, segmentId: ev.segmentId, pauseBeforeMs: ev.pauseBeforeMs };
+                ttsChain = ttsChain.then(() => speak(ev.text, idx, say, emotion, speechEmotion, options));
               }
             }
           } finally {

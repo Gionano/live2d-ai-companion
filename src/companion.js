@@ -527,7 +527,7 @@ async function playDecodedAudio(buffer, emotion, { signal, speechId, pauseBefore
   const src = audioCtx.createBufferSource();
   src.buffer = buffer;
   src.connect(analyser);
-  const startAt = Math.max(audioCtx.currentTime, playCursor);
+  const startAt = Math.max(audioCtx.currentTime, playCursor) + Math.max(0, Math.min(400, pauseBeforeMs)) / 1000;
   const endAt = startAt + buffer.duration;
   let resolvePlayed;
   const played = new Promise(resolve => { resolvePlayed = resolve; });

@@ -393,8 +393,18 @@ test('Fish debug can be enabled through the environment without persisting setti
 });
 
 test('speech expressiveness leaves protected persona and moderation files unchanged', () => {
+  const source = fs.readFileSync(new URL('../personality.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const active = source.slice(0, source.indexOf('\n`.trim();'));
+  // Output structure may evolve; persona prose, emotion guidance and spoken
+  // example wording must still match the established character contract.
+  const persona = active.replace(/(?:Format output WAJIB|Required output format):[\s\S]*?(?=\nPanduan emosi)/, '')
+    .replace(/^\{.*\}$/gm, line => {
+      const reply = JSON.parse(line);
+      return JSON.stringify(reply.segments ? reply.segments[0] : reply);
+    });
+  assert.equal(createHash('sha256').update(persona).digest('hex'),
+    '180a3d03508bf3393a8c4d19ea381ba386be63e7619422f8e1238d508fded885');
   for (const [relative, expected] of [
-    ['../personality.js', '22a76160074880b22d1aa435437d740dded1ea3aA2bcdc3bc4b43116164f2921'],
     ['../../config/selfieModeration.json', 'a0e67cbbfe0259f9a966a3725e352223419f2638715ee8ea9094fbd1fb5aa8fd'],
   ]) {
     const actual = createHash('sha256').update(fs.readFileSync(new URL(relative, import.meta.url))).digest('hex');

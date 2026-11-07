@@ -11,6 +11,7 @@ export const DEFAULT_TTS_PARAMS = {
   temperature: 0.8, topP: 0.7, latency: 'balanced',
   prosody: { speed: 1, volume: 0 }, debug: false,
   expression: { selection: 'native', emotionTagMap: DEFAULT_EMOTION_TAG_MAP, tagPlacement: 'every-sentence',
+    earlyFirstSentence: true, segmentPauseMs: 150,
     maxTagsPerSentence: 2, mergeShortSentences: { enabled: true, minChars: 25, maxChars: 180 } },
   inlineTags: { enabled: false, allowList: ['laughs', 'sigh', 'pause', 'whisper', 'chuckle', 'emphasis', 'break'], maxPerSentence: 2 },
   speechStyle: { enabled: true },
@@ -26,7 +27,10 @@ export function resolveTtsParams(params = {}, overrides = {}) {
     }
     return result;
   };
-  return merge(merge(structuredClone(DEFAULT_TTS_PARAMS), params), overrides);
+  const result = merge(merge(structuredClone(DEFAULT_TTS_PARAMS), params), overrides);
+  const pause = result.expression.segmentPauseMs;
+  result.expression.segmentPauseMs = Number.isFinite(pause) ? Math.max(0, Math.min(400, pause)) : 150;
+  return result;
 }
 
 const LEGACY_TAGS = new Set((

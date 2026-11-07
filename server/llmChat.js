@@ -11,7 +11,7 @@ import { WAIFU_SYSTEM_PROMPT } from './personality.js';
 import { memoryManager } from './memoryManager.js';
 import { speechStylePrompt } from './speechStylePrompt.js';
 import { normalizeSpeechEmotion, speechEmotionPrompt } from './speechEmotionPrompt.js';
-import { resolveTtsParams, StreamingTagSanitizer, SentenceMerger } from './ttsExpression.js';
+import { resolveTtsParams, StreamingTagSanitizer, SentenceMerger, spokenSentenceCount } from './ttsExpression.js';
 export const HISTORY_MESSAGE_LIMIT = 8;
 export const HISTORY_TOKEN_LIMIT = 700;
 export const REPLY_EMOTIONS = new Set([
@@ -116,6 +116,7 @@ function scanReplyHeader(raw) {
     if (raw[index++] !== ':') break;
     while (/\s/.test(raw[index] ?? '') && index < raw.length) index++;
     if (key.value === 'text' && raw[index] === '"') return { fields, textStart: index + 1 };
+    if (key.value === 'segments' && raw[index] === '[') return { fields, segmentsStart: index + 1 };
     const value = readHeaderValue(raw, index);
     if (!value) break;
     fields.push({ key: key.value, value: value.value });
@@ -129,7 +130,7 @@ function scanReplyHeader(raw) {
 
 // Parse the ordered JSON object incrementally so emotion can reach the avatar
 // before the first complete sentence is sent to TTS. This preserves streaming.
-export class StructuredReplyParser {
+class LegacyReplyParser {
   constructor() {
     this.raw = '';
     this.emotion = null;
@@ -220,6 +221,90 @@ export class StructuredReplyParser {
   }
 }
 
+// Each segment uses the existing string decoder; the outer scanner only tracks
+// JSON boundaries, so escaped quotes and nested metadata cannot become speech.
+export class StructuredReplyParser {
+  constructor() {
+    this.raw = '';
+    this.legacy = new LegacyReplyParser();
+    this.segmented = false;
+    this.scanAt = 0;
+    this.segmentIndex = 0;
+    this.current = null;
+    this.done = false;
+  }
+
+  push(chunk) {
+    this.raw += chunk;
+    if (!this.segmented) {
+      const head = this.raw.trimStart();
+      if (head && head[0] !== '{' && head[0] !== '`') return this.legacy.push(chunk);
+      const header = scanReplyHeader(this.raw);
+      if (header.segmentsStart === undefined || this.legacy.textStarted || this.legacy.plain) {
+        return this.legacy.push(chunk);
+      }
+      this.segmented = true;
+      this.scanAt = header.segmentsStart;
+    }
+    const events = [];
+    while (this.scanAt < this.raw.length && !this.done) {
+      if (!this.current) {
+        while (this.scanAt < this.raw.length && /\s|,/.test(this.raw[this.scanAt])) this.scanAt++;
+        if (this.scanAt >= this.raw.length) break;
+        if (this.raw[this.scanAt] === ']') { this.done = true; break; }
+        if (this.raw[this.scanAt] !== '{') {
+          const skipped = readHeaderValue(this.raw, this.scanAt);
+          if (!skipped || skipped.end <= this.scanAt) break;
+          this.scanAt = skipped.end;
+          continue;
+        }
+        this.current = { parser: new LegacyReplyParser(), segmentId: this.segmentIndex++,
+          feedAt: this.scanAt, depth: 0, quoted: false, escaped: false, started: false };
+      }
+      const segment = this.current;
+      while (this.scanAt < this.raw.length) {
+        const char = this.raw[this.scanAt++];
+        if (segment.quoted) {
+          if (segment.escaped) segment.escaped = false;
+          else if (char === '\\') segment.escaped = true;
+          else if (char === '"') segment.quoted = false;
+        } else if (char === '"') segment.quoted = true;
+        else if ('{['.includes(char)) segment.depth++;
+        else if ('}]'.includes(char) && --segment.depth === 0) break;
+      }
+      const parsed = segment.parser.push(this.raw.slice(segment.feedAt, this.scanAt));
+      segment.feedAt = this.scanAt;
+      events.push(...this.segmentEvents(segment, parsed));
+      if (segment.depth !== 0) break;
+      if (segment.started) events.push({ type: 'segment_end', segmentId: segment.segmentId });
+      this.current = null;
+    }
+    return events;
+  }
+
+  segmentEvents(segment, parsed) {
+    const events = [];
+    if (!segment.started && segment.parser.textStarted) {
+      segment.started = true;
+      events.push({ type: 'segment_start', segmentId: segment.segmentId,
+        emotion: segment.parser.emotion || 'netral', speechEmotion: segment.parser.speechEmotion });
+      events.push({ type: 'emotion', emotion: segment.parser.emotion || 'netral', segmentId: segment.segmentId });
+    }
+    for (const event of parsed) if (event.type === 'delta' && segment.started) {
+      events.push({ ...event, segmentId: segment.segmentId });
+    }
+    return events;
+  }
+
+  finish() {
+    if (!this.segmented) return this.legacy.finish();
+    if (!this.current?.started) return [];
+    const event = { type: 'segment_end', segmentId: this.current.segmentId };
+    this.current = null;
+    return [event];
+  }
+}
+
 export async function* generateReply(
   conversationHistory,
   userMessage,
@@ -269,8 +354,34 @@ export async function* generateReply(
 
   const stream = registry.getLlm().stream({ messages, json: true, signal });
   const parser = new StructuredReplyParser();
-  const sanitizer = new StreamingTagSanitizer(ttsParams);
+  let sanitizer = new StreamingTagSanitizer(ttsParams);
   let gotText = false;
+  let displayEnd = '';
+  let boundaryPending = false;
+  const displayDelta = (displayText, ttsText, segmentId) => {
+    if (displayText) {
+      if (boundaryPending && displayEnd && !/\s$/.test(displayEnd) && !/^\s/.test(displayText)) displayText = ' ' + displayText;
+      boundaryPending = false;
+      displayEnd = displayText.slice(-1);
+    }
+    return { type: 'delta', text: displayText, ...(segmentId !== undefined && { segmentId }),
+      ...(includeSpeechText && { speechText: ttsText }) };
+  };
+  const processEvent = function* (event) {
+    if (event.type === 'segment_start') {
+      sanitizer = new StreamingTagSanitizer(ttsParams);
+      boundaryPending = Boolean(displayEnd);
+      if (includeSpeechText) yield { ...event, speechEmotion: nativeSelection ? event.speechEmotion : undefined };
+    } else if (event.type === 'segment_end') {
+      const tail = sanitizer.finish();
+      if (tail.displayText || includeSpeechText && tail.ttsText) yield displayDelta(tail.displayText, tail.ttsText, event.segmentId);
+      if (includeSpeechText) yield event;
+    } else if (event.type === 'delta') {
+      gotText = true;
+      const { displayText, ttsText } = sanitizer.push(event.text);
+      if (displayText || includeSpeechText && ttsText) yield displayDelta(displayText, ttsText, event.segmentId);
+    } else if (event.type !== 'speechEmotion' || nativeSelection && includeSpeechText) yield event;
+  };
 
   for await (const chunk of stream) {
     signal?.throwIfAborted();
@@ -278,12 +389,7 @@ export async function* generateReply(
     if (!delta) continue;
     for (const event of parser.push(delta)) {
       signal?.throwIfAborted();
-      if (event.type === 'delta') gotText = true;
-      if (event.type === 'delta') {
-        const { displayText, ttsText } = sanitizer.push(event.text);
-        if (displayText || includeSpeechText && ttsText) yield { type: 'delta', text: displayText,
-          ...(includeSpeechText && { speechText: ttsText }) };
-      } else if (event.type !== 'speechEmotion' || nativeSelection && includeSpeechText) yield event;
+      yield* processEvent(event);
     }
   }
   if (!gotText) {
@@ -294,11 +400,10 @@ export async function* generateReply(
   signal?.throwIfAborted();
   for (const event of parser.finish()) {
     signal?.throwIfAborted();
-    yield event;
+    yield* processEvent(event);
   }
   const tail = sanitizer.finish();
-  if (tail.displayText || includeSpeechText && tail.ttsText) yield { type: 'delta', text: tail.displayText,
-    ...(includeSpeechText && { speechText: tail.ttsText }) };
+  if (tail.displayText || includeSpeechText && tail.ttsText) yield displayDelta(tail.displayText, tail.ttsText);
 }
 
 // Ambil kalimat lengkap paling awal dari `buf`. Return { sentence, rest } atau
@@ -338,9 +443,40 @@ export async function* generateReplyStream(
 ) {
   let buf = '';
   let speechEmotion;
+  let segment = null;
+  let firstSentenceSent = false;
+  let spokeAny = false;
   const params = resolveTtsParams(registry.getTts?.()?.params);
   if (!registry.getSlotStatus('tts').available) params.expression.mergeShortSentences.enabled = false;
-  const merger = new SentenceMerger(params);
+  let merger = new SentenceMerger(params);
+  const emitSentences = function* (sentences) {
+    for (const text of sentences) {
+      if (!spokenSentenceCount(text)) continue;
+      const metadata = segment ? { emotion: segment.emotion, segmentId: segment.segmentId,
+        pauseBeforeMs: !segment.emitted && spokeAny ? params.expression.segmentPauseMs : 0 } : {};
+      const nativeEmotion = segment ? segment.speechEmotion : speechEmotion;
+      yield { type: 'sentence', text, ...metadata, ...(nativeEmotion && { speechEmotion: nativeEmotion }) };
+      if (segment) segment.emitted = true;
+      firstSentenceSent = true;
+      spokeAny = true;
+    }
+  };
+  const pushSentence = function* (sentence, complete = true) {
+    if (!firstSentenceSent && complete && params.expression.earlyFirstSentence && spokenSentenceCount(sentence)) {
+      const pending = merger.finish();
+      yield* emitSentences([pending.length ? pending.join(' ') + ' ' + sentence : sentence]);
+    } else yield* emitSentences(merger.push(sentence));
+  };
+  const flushSegment = function* () {
+    let hit;
+    while ((hit = takeSentence(buf + ' '))) {
+      yield* pushSentence(hit.sentence);
+      buf = hit.rest;
+    }
+    if (buf.trim()) yield* pushSentence(buf.trim(), false);
+    buf = '';
+    yield* emitSentences(merger.finish());
+  };
   for await (const event of generateReply(
     conversationHistory,
     userMessage,
@@ -348,6 +484,18 @@ export async function* generateReplyStream(
     { signal, registry, includeSpeechText: true },
   )) {
     signal?.throwIfAborted();
+    if (event.type === 'segment_start') {
+      yield* flushSegment();
+      segment = { segmentId: event.segmentId, emotion: event.emotion,
+        speechEmotion: event.speechEmotion, emitted: false };
+      merger = new SentenceMerger(params);
+      continue;
+    }
+    if (event.type === 'segment_end') {
+      yield* flushSegment();
+      segment = null;
+      continue;
+    }
     if (event.type === 'emotion') {
       yield event;
       continue;
@@ -363,17 +511,12 @@ export async function* generateReplyStream(
     let hit;
     while ((hit = takeSentence(buf))) {
       signal?.throwIfAborted();
-      for (const sentence of merger.push(hit.sentence)) yield { type: 'sentence', text: sentence,
-        ...(speechEmotion && { speechEmotion }) };
+      yield* pushSentence(hit.sentence);
       buf = hit.rest;
     }
   }
-  const tail = buf.trim();
   signal?.throwIfAborted();
-  if (tail) for (const sentence of merger.push(tail)) yield { type: 'sentence', text: sentence,
-    ...(speechEmotion && { speechEmotion }) };
-  for (const sentence of merger.finish()) yield { type: 'sentence', text: sentence,
-    ...(speechEmotion && { speechEmotion }) };
+  yield* flushSegment();
 }
 
 // Self-check parser: `node server/llmChat.js`

@@ -104,10 +104,13 @@ export function validateTtsParams(params) {
     if (params.prosody.volume !== undefined) number(params.prosody.volume, -20, 20);
   }
   if (params.expression !== undefined) {
-    const expression = object(params.expression, ['selection', 'emotionTagMap', 'tagPlacement', 'maxTagsPerSentence', 'mergeShortSentences']);
+    const expression = object(params.expression, ['selection', 'emotionTagMap', 'tagPlacement', 'maxTagsPerSentence', 'mergeShortSentences',
+      'earlyFirstSentence', 'segmentPauseMs']);
     if (expression.selection !== undefined && !['native', 'mapped'].includes(expression.selection)) invalid();
     if (expression.tagPlacement !== undefined && !['every-sentence', 'first-only'].includes(expression.tagPlacement)) invalid();
     if (expression.maxTagsPerSentence !== undefined) integer(expression.maxTagsPerSentence, 0, 2);
+    if (expression.earlyFirstSentence !== undefined && typeof expression.earlyFirstSentence !== 'boolean') invalid();
+    if (expression.segmentPauseMs !== undefined) integer(expression.segmentPauseMs, 0, 400);
     if (expression.emotionTagMap !== undefined) {
       object(expression.emotionTagMap, TTS_EMOTIONS);
       for (const tags of Object.values(expression.emotionTagMap)) {

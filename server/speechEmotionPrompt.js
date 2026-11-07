@@ -8,10 +8,12 @@ export function normalizeSpeechEmotion(value) {
 export function speechEmotionPrompt(params = {}, kind = 'chat') {
   if (params.expression?.selection === 'mapped') return '';
   const format = kind === 'chat'
-    ? 'Return ordered JSON {"emotion":"existing avatar label","speechEmotion":"catalogue name","text":"reply"}; place both emotion fields before text.'
+    ? 'Return ordered JSON {"segments":[{"emotion":"existing avatar label","speechEmotion":"catalogue name","text":"spoken segment"}]}; place both emotion fields before text in every segment.'
     : `Add the optional top-level speechEmotion field to the existing ${kind === 'selfie' ? 'selfie plan' : 'vision comment'} JSON. Keep every existing field and rule.`;
   return [
-    'Speech emotion metadata: choose exactly one Fish emotion for the entire spoken reply, based on its meaning and tone.',
+    kind === 'chat'
+      ? 'Speech emotion metadata: choose one Fish emotion per coherent spoken segment, based on its meaning and tone. Use a new segment when the tone changes naturally; do not force a change or split individual words.'
+      : 'Speech emotion metadata: choose exactly one Fish emotion for the entire spoken reply, based on its meaning and tone.',
     `speechEmotion must be one canonical name without brackets: ${FISH_EMOTION_NAMES.join(', ')}.`,
     format,
     'Keep emotion as an existing avatar label; it controls the avatar separately from speechEmotion.',

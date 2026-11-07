@@ -36,7 +36,7 @@ export class SpeechPlayback {
     if (message.type === 'audio_output') speech.chunks.push(message.data);
     else if (message.type === 'emotion') speech.emotion = message.emotion;
     else if (message.type === 'audio_end') {
-      this.flush(speech, message.emotion);
+      this.flush(speech, message.emotion, message);
     } else if (message.type === 'speech_end') {
       speech.ended = true;
       this.flush(speech);
@@ -44,12 +44,14 @@ export class SpeechPlayback {
     }
   }
 
-  flush(speech, emotion = speech.emotion) {
+  flush(speech, emotion = speech.emotion, metadata = {}) {
     if (!speech.chunks.length) return;
     const chunks = speech.chunks;
     speech.chunks = [];
     speech.pending++;
-    const options = { signal: speech.controller.signal, speechId: speech.speechId };
+    const options = { signal: speech.controller.signal, speechId: speech.speechId,
+      segmentId: metadata.segmentId, pauseBeforeMs: Math.max(0, Math.min(400, Number(metadata.pauseBeforeMs) || 0)),
+    };
     this.chain = this.chain.then(async () => {
       if (this.speeches.get(speech.speechId) !== speech) return;
       try {

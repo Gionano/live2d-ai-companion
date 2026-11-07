@@ -3,10 +3,11 @@ import { stripSpeechTags, spokenSentenceCount } from './ttsExpression.js';
 import { normalizeSpeechEmotion } from './speechEmotionPrompt.js';
 
 export class SpeechController {
-  constructor({ generateSpeech, isVoiceConfigured, safetyTimeoutMs = 30000 }) {
+  constructor({ generateSpeech, isVoiceConfigured, safetyTimeoutMs = 30000, onPlaybackReleased = () => {} }) {
     this.generateSpeech = generateSpeech;
     this.isVoiceConfigured = isVoiceConfigured;
     this.safetyTimeoutMs = safetyTimeoutMs;
+    this.onPlaybackReleased = onPlaybackReleased;
     this.sessions = new Map();
     this.queue = [];
     this.activeSpeech = null;
@@ -28,7 +29,8 @@ export class SpeechController {
       speech.pending.delete(socket);
       speech.recipients.delete(socket);
       if (!speech.recipients.size) {
-        if (speech.ended) this.releaseSpeech(speech);
+        speech.releaseReason = 'disconnected';
+        if (speech.ended) this.releaseSpeech(speech, 'disconnected');
         else {
           this.finishSpeech(speech, false);
           this.releaseSpeech(speech);
@@ -39,7 +41,8 @@ export class SpeechController {
     this.drain();
   }
 
-  beginTurn(socket) {
+  beginTurn(socket, { origin = 'conversation' } = {}) {
+    if (origin !== 'proactive') this.cancelProactive(socket, { drain: false });
     if (this.isBusy(socket)) {
       this.rejectInput(socket, 'BUSY');
       return null;
@@ -47,7 +50,7 @@ export class SpeechController {
     const session = this.sessions.get(socket);
     if (!session) return null;
     const controller = new AbortController();
-    const turn = { turnId: randomUUID(), controller, signal: controller.signal };
+    const turn = { turnId: randomUUID(), controller, signal: controller.signal, origin };
     session.turn = turn;
     socket.turnId = turn.turnId;
     this.setState(socket, 'processing', false, turn.turnId);
@@ -80,7 +83,9 @@ export class SpeechController {
     session.turn.controller.abort(new Error(reason));
     session.turn = null;
     socket.turnId = null;
-    if (this.activeSpeech?.turnId === turnId) this.stopSpeech(this.activeSpeech);
+    if (this.activeSpeech?.turnId === turnId) {
+      this.stopSpeech(this.activeSpeech, reason === 'TIMEOUT' ? 'timeout' : 'cancelled');
+    }
     session.send({ type: 'turn_cancelled', turnId, reason });
     this.setState(socket, 'idle');
     return true;
@@ -121,10 +126,33 @@ export class SpeechController {
       || Boolean(speech?.recipients.has(socket) && (!speech.ended || speech.pending.has(socket)));
   }
 
-  play({ text, emotion = 'sayang', speechEmotion, recipients = null, produce = null, deferred = false, turnId = null }) {
+  play({ text, emotion = 'sayang', speechEmotion, recipients = null, produce = null, deferred = false,
+    turnId = null, origin = 'conversation', signal = null }) {
     return new Promise((resolve) => {
-      this.queue.push({ text, emotion, speechEmotion: normalizeSpeechEmotion(speechEmotion),
-        recipients, produce, deferred, turnId, resolve });
+      if (signal?.aborted) {
+        resolve({ ok: false, speechId: null, turnId, reason: 'cancelled' });
+        return;
+      }
+      const item = { text, emotion, speechEmotion: normalizeSpeechEmotion(speechEmotion),
+        recipients, produce, deferred, turnId, origin, resolve };
+      const onAbort = () => {
+        const queuedIndex = this.queue.indexOf(item);
+        if (queuedIndex >= 0) {
+          this.queue.splice(queuedIndex, 1);
+          item.dispose();
+          resolve({ ok: false, speechId: null, turnId, reason: 'cancelled' });
+        }
+        const speech = this.activeSpeech;
+        if (speech?.item === item) {
+          speech.suppressDrain = true;
+          this.stopSpeech(speech, 'cancelled');
+          this.releaseSpeech(speech, 'cancelled', { drain: false });
+        }
+        if (origin !== 'proactive') this.drain();
+      };
+      item.dispose = () => signal?.removeEventListener('abort', onAbort);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      this.queue.push(item);
       this.drain();
     });
   }
@@ -133,29 +161,31 @@ export class SpeechController {
     // Drop expired turns even while another socket is playing speech.
     this.queue = this.queue.filter(item => {
       if (!item.turnId || item.recipients?.every(socket => this.isCurrentTurn(socket, item.turnId))) return true;
+      item.dispose();
       item.resolve({ ok: false, speechId: null, turnId: item.turnId });
       return false;
     });
     if (this.activeSpeech || !this.queue.length) return;
     const index = this.queue.findIndex(item => (item.recipients || [...this.sessions.keys()])
-      .filter(socket => this.sessions.has(socket)).every(socket => item.turnId
-        ? this.isCurrentTurn(socket, item.turnId) : !this.isBusy(socket)));
+      .filter(socket => this.sessions.has(socket)).every(socket => !socket.userInputActive && (item.turnId
+        ? this.isCurrentTurn(socket, item.turnId) : !this.isBusy(socket))));
     if (index < 0) return;
     const item = this.queue.splice(index, 1)[0];
     const recipients = new Set((item.recipients || [...this.sessions.keys()])
       .filter(socket => this.sessions.has(socket)));
     if (!recipients.size) {
+      item.dispose();
       item.resolve({ ok: false, speechId: null });
       this.drain();
       return;
     }
     const speech = {
-      speechId: randomUUID(), turnId: item.turnId, recipients, pending: new Set(recipients),
+      speechId: randomUUID(), turnId: item.turnId, origin: item.origin, recipients, pending: new Set(recipients),
       ended: false, hasAudio: false, controller: new AbortController(),
-      resolve: item.resolve, timer: null,
+      resolve: item.resolve, timer: null, item,
     };
     this.activeSpeech = speech;
-    this.emit(speech, { type: 'speech_start' });
+    this.emit(speech, { type: 'speech_start', origin: speech.origin });
     for (const socket of recipients) this.setState(socket, 'speaking', false, item.turnId);
     this.armSpeechTimeout(speech);
     void this.run(speech, item);
@@ -176,17 +206,24 @@ export class SpeechController {
       sentenceIndex += spokenSentenceCount(text);
       let endedRequest = false;
       let pendingAudio = false;
+      const speechEmotion = Object.hasOwn(options, 'speechEmotion')
+        ? normalizeSpeechEmotion(options.speechEmotion) : item.speechEmotion;
+      const metadata = {
+        segmentId: typeof options.segmentId === 'string' || Number.isSafeInteger(options.segmentId) && options.segmentId >= 0
+          ? options.segmentId : `${speech.speechId}:${index}`,
+        pauseBeforeMs: Math.max(0, Math.min(400, Number(options.pauseBeforeMs) || 0)),
+      };
       this.emit(speech, { type: 'emotion', emotion });
       try {
         if (this.isVoiceConfigured()) {
           let format = 'mp3';
           for await (const chunk of this.generateSpeech(text, emotion, { signal: speech.controller.signal,
-            speechEmotion: Object.hasOwn(options, 'speechEmotion')
-              ? normalizeSpeechEmotion(options.speechEmotion) : item.speechEmotion,
+            speechEmotion,
             sentenceIndex: index, onAudioFormat: value => { format = value; pendingAudio = true; },
             onAudioEnd: () => {
               endedRequest = true; pendingAudio = false;
-              if (!speech.ended) this.emit(speech, { type: 'audio_end', emotion });
+              if (!speech.ended) this.emit(speech, { type: 'audio_end', emotion, ...metadata });
+              metadata.pauseBeforeMs = 0;
             } })) {
             if (speech.ended) break;
             speech.hasAudio = true;
@@ -198,7 +235,7 @@ export class SpeechController {
         ok = false;
         console.error('[tts:speech]', err.message);
       } finally {
-        if (!speech.ended && (!endedRequest || pendingAudio)) this.emit(speech, { type: 'audio_end', emotion });
+        if (!speech.ended && (!endedRequest || pendingAudio)) this.emit(speech, { type: 'audio_end', emotion, ...metadata });
       }
     };
     try {
@@ -218,11 +255,12 @@ export class SpeechController {
   finishSpeech(speech, ok) {
     if (this.activeSpeech !== speech || speech.ended) return;
     speech.ended = true;
+    speech.ok = ok;
     speech.controller.abort();
     this.emit(speech, { type: 'speech_end', ok });
     for (const socket of speech.recipients) this.setState(socket, 'idle', false);
     speech.resolve({ speechId: speech.speechId, ok });
-    if (!speech.hasAudio) this.releaseSpeech(speech);
+    if (!speech.hasAudio) this.releaseSpeech(speech, speech.releaseReason || 'no_audio');
     else this.armSpeechTimeout(speech);
   }
 
@@ -233,26 +271,66 @@ export class SpeechController {
         const socket = [...speech.recipients][0];
         this.cancelTurn(socket, speech.turnId);
       }
-      this.stopSpeech(speech);
-      this.releaseSpeech(speech);
+      this.stopSpeech(speech, 'timeout');
+      this.releaseSpeech(speech, 'timeout');
     }, this.safetyTimeoutMs);
   }
 
-  stopSpeech(speech) {
+  stopSpeech(speech, reason = 'cancelled') {
     if (this.activeSpeech !== speech) return;
+    speech.releaseReason = reason;
     this.emit(speech, { type: 'stop_speech' });
     if (!speech.ended) this.finishSpeech(speech, false);
   }
 
-  releaseSpeech(speech) {
+  releaseSpeech(speech, reason = 'acknowledged', { drain = true } = {}) {
     if (this.activeSpeech !== speech) return;
     clearTimeout(speech.timer);
+    speech.item.dispose();
     this.activeSpeech = null;
     for (const socket of speech.recipients) {
       this.sessions.get(socket)?.send({ type: 'conversation_state',
         state: socket.conversationState, turnId: socket.turnId });
     }
-    this.drain();
+    try {
+      this.onPlaybackReleased({ speechId: speech.speechId, turnId: speech.turnId, origin: speech.origin,
+        reason: speech.releaseReason || reason, hasAudio: speech.hasAudio, ok: speech.ok,
+        recipients: [...speech.recipients] });
+    } catch (error) {
+      console.error('[speech:release]', error.message);
+    }
+    if (drain && !speech.suppressDrain) this.drain();
+  }
+
+  cancelProactive(socket, { drain = true } = {}) {
+    let cancelled = false;
+    this.queue = this.queue.filter(item => {
+      if (item.origin !== 'proactive' || item.recipients && !item.recipients.includes(socket)) return true;
+      cancelled = true;
+      item.dispose();
+      item.resolve({ ok: false, speechId: null, turnId: item.turnId, reason: 'cancelled' });
+      return false;
+    });
+    const session = this.sessions.get(socket);
+    const turn = session?.turn;
+    if (turn?.origin === 'proactive') {
+      cancelled = true;
+      turn.controller.abort(new Error('USER_ACTIVITY'));
+      session.turn = null;
+      socket.turnId = null;
+      session.send({ type: 'turn_cancelled', turnId: turn.turnId, reason: 'USER_ACTIVITY' });
+      this.setState(socket, 'idle', false);
+    }
+    const speech = this.activeSpeech;
+    if (speech?.origin === 'proactive' && speech.recipients.has(socket)) {
+      cancelled = true;
+      speech.suppressDrain = true;
+      // Generation can already be over while the client is still playing its audio.
+      this.stopSpeech(speech, 'cancelled');
+      this.releaseSpeech(speech, 'cancelled', { drain: false });
+    }
+    if (drain) this.drain();
+    return cancelled;
   }
 
   acknowledge(socket, speechId) {
