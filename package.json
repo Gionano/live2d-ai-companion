@@ -2,6 +2,7 @@
   "name": "amika-live2d-companion",
   "description": "Amika AI companion with official Live2D Cubism Web rendering, STT, LLM, and TTS",
   "private": true,
+  "license": "MIT",
   "version": "0.1.0",
   "type": "module",
   "scripts": {

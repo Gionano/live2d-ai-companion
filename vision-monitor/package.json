@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Vision Monitor UI + bridge untuk backend companion (amika-live2d-companion) - observer via ws ?role=monitor",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
