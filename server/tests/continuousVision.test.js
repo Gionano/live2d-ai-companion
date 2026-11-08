@@ -28,7 +28,8 @@ function harness(t, { describe, filter = { action: 'SKIP', reason: 'Rutinitas' }
   const manager = new StreamingVisionManager({ registry, startTimer: false, now: () => clock.value });
   manager.setMonitorConnected(true);
   manager.setBroadcaster(event => events.push(event));
-  manager.setSpeechHandler((text, emotion, options) => speeches.push({ text, emotion, options }));
+  manager.setHistoryRef([{ role: 'user', content: 'Comment on my screen.' }]);
+  manager.setSpeechHandler((text, emotion, options) => { options.onAdmitted(); speeches.push({ text, emotion, options }); });
   t.after(() => manager.dispose());
   let sequence = 0;
   const send = (source = 'screen', sig = signature(source), extra = {}) => manager.handleContinuousFrame(IMAGE,
@@ -271,7 +272,7 @@ test('screen and webcam freshness, pending work and stop state are independent',
 });
 
 test('commentary consumes source-bound windows without clearing conversation cache', async t => {
-  const h = harness(t, { filter: { action: 'COMMENT', text: 'Wah, bagus!', emotion: 'kagum' } });
+  const h = harness(t, { filter: { action: 'COMMENT', relevant: true, text: 'Wah, bagus!', emotion: 'kagum' } });
   h.manager.setSourceStatus('screen', true, 'screen-1');
   h.manager.setSourceStatus('webcam', true, 'webcam-1');
   await h.send();

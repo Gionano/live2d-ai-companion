@@ -46,6 +46,7 @@ let lastKnownState = {
   descriptions: {},
   logs: [],
   proactive: null,
+  routing: null,
 };
 
 // Broadcast to all UI clients connected to /ws-monitor
@@ -126,6 +127,7 @@ function cacheSources(sources) {
 // Relay incoming messages from Companion Utama to Vision Monitor UI
 companionClient.onMessage = (msg) => {
   if (!msg) return;
+  if (msg.type === 'routing_status' || msg.routing) lastKnownState.routing = msg.routing || msg;
   if (msg.type === 'proactive_status' || msg.proactive) {
     lastKnownState.proactive = { ...(msg.proactive || msg), receivedAt: Date.now() };
   }

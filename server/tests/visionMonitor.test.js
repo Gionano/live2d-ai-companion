@@ -162,8 +162,11 @@ function loadMonitorBridge() {
   };
   return { companion, state, setNow: value => { now = value; }, connectUi: () => {
     const handlers = new Map();
-    connections.get('connection')({ send() {}, on: (name, callback) => handlers.set(name, callback) });
+    const events = [];
+    connections.get('connection')({ send: value => events.push(JSON.parse(value)),
+      on: (name, callback) => handlers.set(name, callback) });
     const receive = message => handlers.get('message')(Buffer.from(JSON.stringify(message)));
+    receive.events = events;
     receive.close = () => handlers.get('close')();
     return receive;
   } };
@@ -185,6 +188,40 @@ test('bridge ages cached telemetry, clears changed sessions, and retains histori
   bridge.companion.onStatusChange('reconnecting');
   assert.equal(bridge.state().sources.screen.active, false);
   assert.equal(bridge.state().sources.screen.captured, 12);
+});
+
+test('monitor renders routing diagnostics without corrupting source telemetry or adding conversation text', () => {
+  const ui = loadMonitorUi();
+  ui.receive({ type: 'screen_share_status', sources: {
+    screen: { active: true, sessionId: 'screen-1', freshness: 'current', captured: 7 },
+    webcam: { active: true, sessionId: 'camera-1', freshness: 'current', captured: 9 },
+  } });
+  const before = vm.runInContext('JSON.stringify(sourceStates)', ui.context);
+  ui.receive({ type: 'routing_status', status: 'deciding', method: 'model', selectedSources: [], ready: true, latencyMs: 0 });
+  assert.equal(ui.elements.get('routing-status-title').textContent, 'Memahami konteks...');
+  ui.receive({ type: 'routing_status', status: 'done', target: 'both', selectedSources: ['screen', 'webcam'],
+    method: 'fallback', ready: true, latencyMs: 5000, reason: 'timeout' });
+  assert.equal(ui.elements.get('routing-status-title').textContent, 'Layar dan kamera');
+  assert.match(ui.elements.get('routing-status-detail').textContent, /Cadangan otomatis.*5000 ms.*AI siap.*batas waktu/);
+  assert.equal(vm.runInContext('JSON.stringify(sourceStates)', ui.context), before);
+  assert.equal(ui.elements.get('description-log-list').querySelectorAll().length, 0);
+});
+
+test('bridge caches and replays routing status after monitor refresh without changing capture state', () => {
+  const bridge = loadMonitorBridge();
+  bridge.companion.onMessage({ type: 'stats_update', sources: { screen: { active: true, sessionId: 'screen-1', captured: 4 } } });
+  const before = bridge.state().sources;
+  const routing = { type: 'routing_status', status: 'done', target: 'screen', selectedSources: ['screen'],
+    method: 'rules', ready: false, latencyMs: 1 };
+  bridge.companion.onMessage(routing);
+  assert.deepEqual(bridge.state().routing, routing);
+  assert.deepEqual(bridge.state().sources, before);
+  const receive = bridge.connectUi();
+  assert.deepEqual(receive.events[0].state.routing, routing);
+  const ui = loadMonitorUi();
+  ui.receive(receive.events[0]);
+  assert.equal(ui.elements.get('routing-status-title').textContent, 'Layar');
+  assert.match(ui.elements.get('routing-status-detail').textContent, /Aturan.*1 ms.*belum siap/);
 });
 
 test('bridge bounds replay logs and normalizes old monitor controls to AI spacing', () => {

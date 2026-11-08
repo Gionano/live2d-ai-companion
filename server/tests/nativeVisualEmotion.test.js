@@ -28,14 +28,14 @@ function visionHarness(reply, params = {}, ttsAvailable = true) {
   const manager = new StreamingVisionManager({ registry, startTimer: false });
   const events = [];
   const speeches = [];
-  const history = [];
+  const history = [{ role: 'user', content: 'Comment on my game.' }];
   manager.setBroadcaster(event => events.push(event));
   manager.setHistoryRef(history);
-  manager.setSpeechHandler((text, emotion, options) => speeches.push({ text, emotion, ...options }));
+  manager.setSpeechHandler((text, emotion, options) => { options.onAdmitted(); speeches.push({ text, emotion, ...options }); });
   return { manager, requests, events, speeches, history };
 }
 
-const COMMENT = { action: 'COMMENT', emotion: 'sayang', text: 'Aku bangga sama kamu!' };
+const COMMENT = { action: 'COMMENT', relevant: true, emotion: 'sayang', text: 'Aku bangga sama kamu!' };
 const BUFFER = [{ timestamp: '12:00:00', description: 'Pemain menang.' }];
 const CAPTION = { caption: 'Ini fotonya, sayang.', emotion: 'sayang', pose: 'holding_camera' };
 
@@ -57,10 +57,12 @@ test('all 49 native visual choices keep the avatar emotion and use one existing 
     assert.equal(result.speechEmotion, speechEmotion);
     assert.equal(result.emotion, 'sayang');
     await h.manager.executeSpontaneousCommentary(result.text, result.emotion, result);
-    assert.deepEqual(h.speeches, [{ text: COMMENT.text, emotion: 'sayang', speechEmotion }]);
+    assert.deepEqual(h.speeches.map(({ text, emotion, speechEmotion }) => ({ text, emotion, speechEmotion })),
+      [{ text: COMMENT.text, emotion: 'sayang', speechEmotion }]);
+    assert.equal(h.speeches[0].origin, 'vision');
     assert.equal(h.requests.length, 1);
     assert.match(h.requests[0].messages[0].content, /speechEmotion/);
-    assert.deepEqual(h.history, [{ role: 'assistant', content: COMMENT.text }]);
+    assert.deepEqual(h.history.at(-1), { role: 'assistant', content: COMMENT.text });
     assert.equal(h.events.some(event => 'speechEmotion' in event), false);
   }
 });
@@ -95,7 +97,7 @@ test('visual performance tags stay out of monitor events and history while allow
   assert.match(h.speeches[0].text, /\[laughs\]/);
   assert.equal(h.speeches[0].speechEmotion, 'proud');
   assert.doesNotMatch(JSON.stringify(h.events), /\[laughs\]|\[proud\]|\[invented\]/);
-  assert.doesNotMatch(h.history[0].content, /\[|\]/);
+  assert.doesNotMatch(h.history.at(-1).content, /\[|\]/);
 });
 
 test('all 49 native selfie choices stay outside image slots, prompts and moderation', async () => {

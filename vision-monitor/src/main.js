@@ -35,6 +35,8 @@ const streamStatusDesc = document.getElementById('stream-status-desc');
 const sessionTimerEl = document.getElementById('session-timer');
 const proactiveStatusTitle = document.getElementById('proactive-status-title');
 const proactiveStatusDetail = document.getElementById('proactive-status-detail');
+const routingStatusTitle = document.getElementById('routing-status-title');
+const routingStatusDetail = document.getElementById('routing-status-detail');
 
 const intervalSlider = document.getElementById('interval-slider');
 const intervalValDisplay = document.getElementById('interval-val-display');
@@ -109,6 +111,7 @@ function connectWebSocket() {
       case 'init_vision_state':
       case 'screen_share_status': {
         if (msg.proactive) applyProactiveStatus(msg.proactive);
+        if (msg.routing) applyRoutingStatus(msg.routing);
         isScreenShareActive = msg.sources ? Object.values(sourceStates).some(source => source.active) : Boolean(msg.active);
         updateStreamStatusUI(isScreenShareActive);
         if (msg.settings) applySettings(msg.settings);
@@ -123,6 +126,11 @@ function connectWebSocket() {
 
       case 'proactive_status': {
         applyProactiveStatus(msg);
+        break;
+      }
+
+      case 'routing_status': {
+        applyRoutingStatus(msg);
         break;
       }
 
@@ -191,6 +199,17 @@ function connectWebSocket() {
   };
 }
 
+function applyRoutingStatus(status) {
+  if (!routingStatusTitle || !routingStatusDetail) return;
+  const targets = { conversation: 'Percakapan', screen: 'Layar', webcam: 'Kamera', both: 'Layar dan kamera' };
+  const methods = { rules: 'Aturan', model: 'AI', fallback: 'Cadangan otomatis' };
+  const reasons = { unavailable: 'pengarah belum siap', timeout: 'batas waktu', invalid_decision: 'respons tidak valid',
+    authentication: 'autentikasi gagal', rate_limit: 'batas permintaan', provider_failed: 'penyedia tidak tersedia', source_changed: 'sumber berubah' };
+  routingStatusTitle.textContent = status.status === 'deciding' ? 'Memahami konteks...' : targets[status.target] || 'Menunggu percakapan';
+  routingStatusDetail.textContent = `${methods[status.method] || ''} · ${Math.max(0, Number(status.latencyMs) || 0)} ms`
+    + ` · AI ${status.ready ? 'siap' : 'belum siap'}` + (reasons[status.reason] ? ` · ${reasons[status.reason]}` : '');
+}
+
 function sendWs(data) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(data));
@@ -232,6 +251,7 @@ function updateCompanionStatusUI(status) {
 // ---------------------------------------------------------------------------
 function applyState(state) {
   if (state.proactive) applyProactiveStatus(state.proactive);
+  if (state.routing) applyRoutingStatus(state.routing);
   if (typeof state.active === 'boolean') {
     isScreenShareActive = state.active;
     updateStreamStatusUI(isScreenShareActive);
@@ -272,12 +292,16 @@ function applyProactiveStatus(status) {
 
 function renderProactiveStatus() {
   if (!proactiveState) return;
-  const labels = { waiting: 'Menunggu jeda hening', unarmed: 'Menunggu sapaan pertama',
+  const labels = { waiting: 'Menunggu jeda hening', unarmed: 'Menunggu audio siap',
     disabled: 'Obrolan hening nonaktif', blocked: 'Menunggu aktivitas selesai',
-    deciding: 'Sedang memilih topik', generating: 'Sedang menyiapkan ucapan',
+    deciding: 'Sedang merefleksikan percakapan', generating: 'Sedang menyiapkan ucapan',
     speaking: 'Ucapan sedang diputar', skipped: 'Topik dilewati',
     paused: 'Menunggu balasan kamu', failed: 'Pemilihan topik gagal', disconnected: 'Companion terputus' };
-  const reasons = { first_interaction: 'Kirim pesan atau bicara sekali untuk memulai.',
+  const reasons = { first_interaction: 'Klik atau ketik sekali untuk mengaktifkan audio.',
+    audio_not_ready: 'Klik atau ketik untuk mengaktifkan audio browser. Tidak perlu mengirim pesan.',
+    another_conversation: 'Percakapan lain menjadi percakapan aktif.',
+    reflection_playback: 'Refleksi menyusul setelah ucapan benar-benar selesai.',
+    private_guidance: 'Panduan percakapan tersimpan untuk balasan berikutnya.',
     user_input: 'Kamu masih mengetik atau berbicara.', conversation_busy: 'Menunggu balasan, audio, atau komentar visual selesai.',
     no_topic: 'Model memilih SKIP. Menunggu interaksi kamu berikutnya.',
     duplicate_topic: 'Topik berulang dilewati. Menunggu interaksi kamu berikutnya.',
@@ -289,15 +313,16 @@ function renderProactiveStatus() {
     playback_timeout: 'Pemutaran suara tidak memberi konfirmasi selesai.',
     speech_failed: 'Balasan atau suara otomatis gagal dibuat.',
     unavailable_visionFilter: 'Penyedia pemilih topik belum tersedia.',
+    unavailable_reflection: 'Penyedia refleksi percakapan belum tersedia.',
     unavailable_llm: 'Penyedia obrolan belum tersedia.', unavailable_tts: 'Penyedia suara belum tersedia.',
     unavailable_conversation: 'Percakapan belum siap.', awaiting_activity: 'Kirim pesan untuk melanjutkan.' };
   proactiveStatusTitle.textContent = labels[proactiveState.status] || 'Menunggu companion';
   const elapsed = Math.max(0, Date.now() - proactiveState.receivedAt);
   const seconds = Math.ceil(Math.max(0, (proactiveState.remainingMs ?? 0) - elapsed) / 1000);
   proactiveStatusDetail.textContent = proactiveState.status === 'waiting'
-    ? `${seconds} detik menuju pemilihan topik. Suara menyusul jika ada topik yang sesuai.`
+    ? `${seconds} detik menuju refleksi percakapan. Suara menyusul jika ada hal yang ingin disampaikan.`
     : proactiveState.status === 'deciding'
-      ? `Menunggu model pemilih topik, maksimal ${Math.round(proactiveState.decisionTimeoutMs / 1000)} detik.`
+      ? `Menunggu model refleksi, maksimal ${Math.round(proactiveState.decisionTimeoutMs / 1000)} detik.`
       : reasons[proactiveState.reason] || '';
 }
 

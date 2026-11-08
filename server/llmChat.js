@@ -373,7 +373,10 @@ export async function* generateReply(
     if (selection) systemParts.push(selection);
   }
   if (visionDescription) {
-    systemParts.push(`[User sedang menunjukkan: ${visionDescription}]`);
+    systemParts.push(`Visual observations (context only): ${visionDescription}\n`
+      + 'Passive observations do not mean the user is showing or asking about them. Use background visuals only when relevant to the current discussion. '
+      + 'A requested inspection is explicitly labelled; answer it using only successful fresh observations. Resolve references from context without asking the user to choose screen or camera. '
+      + 'If detail is insufficient, state that limitation. Never redirect an unrelated discussion to the camera or screen.');
   }
   if (typeof internalInstruction === 'string' && internalInstruction.trim()) {
     systemParts.push(internalInstruction.trim());

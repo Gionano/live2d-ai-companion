@@ -52,10 +52,17 @@ test('monitor dev frontend forwards the same-origin WebSocket to its bridge', as
   const target = `http://127.0.0.1:${backend.address().port}`;
   assert.equal(config.server.proxy['/ws-monitor'].target, target);
   assert.equal(config.preview.proxy['/ws-monitor'].target, target);
+  // Vite interprets port 0 as its default. Ask the OS for an allowed test port
+  // instead, avoiding Windows exclusions and the user's running dev frontend.
+  const portProbe = http.createServer();
+  portProbe.listen(0, '127.0.0.1');
+  await once(portProbe, 'listening');
+  const frontendPort = portProbe.address().port;
+  await new Promise(resolve => portProbe.close(resolve));
   frontend = await createServer({ root: process.cwd(), configFile: false, logLevel: 'silent',
     cacheDir: './.test-vite-cache', css: { postcss: { plugins: [] } },
     optimizeDeps: { noDiscovery: true, include: [] },
-    server: { host: '127.0.0.1', port: 0, proxy: config.server.proxy,
+    server: { host: '127.0.0.1', port: frontendPort, strictPort: true, proxy: config.server.proxy,
       watch: null, fs: { allow: [process.cwd()] } } });
   await frontend.listen();
   const reachedBridge = once(bridge, 'connection');
