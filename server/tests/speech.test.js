@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { SpeechController } from '../speechController.js';
+import { playConversationReply } from '../conversationSpeech.js';
 import { SpeechPlayback, TurnState } from '../../src/speechPlayback.js';
 import { planSelfie } from '../selfie/planner.js';
 import { prepareSelfieJob } from '../selfie/backendLifecycle.js';
@@ -15,6 +16,33 @@ function deferred() {
 
 async function tick() {
   await new Promise(resolve => setImmediate(resolve));
+}
+
+function fakeTimers(t) {
+  let now = 0;
+  let nextId = 0;
+  const timers = new Map();
+  t.mock.method(globalThis, 'setTimeout', (callback, delay) => {
+    const id = ++nextId;
+    timers.set(id, { callback, at: now + delay });
+    return id;
+  });
+  t.mock.method(globalThis, 'clearTimeout', id => timers.delete(id));
+  return {
+    advance(duration) {
+      const target = now + duration;
+      while (true) {
+        const next = [...timers.entries()].filter(([, timer]) => timer.at <= target)
+          .sort((a, b) => a[1].at - b[1].at)[0];
+        if (!next) break;
+        timers.delete(next[0]);
+        now = next[1].at;
+        next[1].callback();
+      }
+      now = target;
+    },
+    remaining(id) { return timers.get(id)?.at - now; },
+  };
 }
 
 function harness(generateSpeech, options = {}) {
@@ -133,6 +161,109 @@ test('speech timeout aborts delayed TTS, restores idle, and drains caption witho
   h.controller.unregister(h.socket);
 });
 
+test('stage progress and TTS activity keep a healthy multi-stage reply alive beyond the inactivity timeout', async t => {
+  const clock = fakeTimers(t);
+  const stageGates = [deferred(), deferred(), deferred()];
+  const audioGates = [deferred(), deferred(), deferred()];
+  const h = harness(async function* (text, emotion, options) {
+    options.onAudioFormat('mp3');
+    for (const gate of audioGates) {
+      await gate.promise;
+      yield Buffer.from('audio');
+    }
+    options.onAudioEnd();
+  }, { safetyTimeoutMs: 45 });
+  t.after(() => h.controller.unregister(h.socket));
+  const turn = h.controller.beginTurn(h.socket);
+  const resultPromise = playConversationReply({ controller: h.controller, socket: h.socket,
+    turnId: turn.turnId, history: [], userMessage: 'Explain',
+    generate: async function* () {
+      yield { type: 'reply_part', stage: 'surface', partId: 'surface', status: 'start', text: '' };
+      for (const gate of stageGates) {
+        await gate.promise;
+        yield { type: 'reply_part', stage: 'deep', partId: 'deep', status: 'delta', text: 'Continuing. ' };
+      }
+      yield { type: 'delta', text: 'A complete reply.' };
+      yield { type: 'sentence', stage: 'deep', text: 'A complete reply.', pauseAfterMs: 200 };
+      yield { type: 'conversation_done', text: 'A complete reply.', emotion: 'netral' };
+    } });
+  await tick();
+  for (const gate of [...stageGates, ...audioGates]) {
+    clock.advance(35);
+    assert.equal(h.controller.isCurrentTurn(h.socket, turn.turnId), true);
+    gate.resolve();
+    await tick();
+  }
+  const result = await resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(h.events.filter(event => event.type === 'audio_output').length, 3);
+  assert.equal(h.events.some(event => event.type === 'turn_cancelled'), false);
+  assert.equal(h.controller.acknowledge(h.socket, result.speechId), true);
+});
+
+test('fuller queued speech gets a bounded playback budget after generation finishes', async t => {
+  const clock = fakeTimers(t);
+  const h = harness(async function* () { yield Buffer.from('audio'); }, { safetyTimeoutMs: 45 });
+  t.after(() => h.controller.unregister(h.socket));
+  const text = 'A thoughtful reply can continue naturally through several sentences. '.repeat(12);
+  const result = await h.controller.play({ recipients: [h.socket], produce: ({ say }) =>
+    say(text, 'netral', () => {}, { pauseBeforeMs: 150, pauseAfterMs: 200 }) });
+  const remaining = clock.remaining(h.controller.activeSpeech.timer);
+  assert.ok(remaining > 45);
+  assert.ok(remaining <= 10 * 60 * 1000);
+  clock.advance(46);
+  assert.equal(h.controller.activeSpeech.speechId, result.speechId);
+  assert.equal(h.events.some(event => event.type === 'stop_speech'), false);
+  assert.equal(h.controller.acknowledge(h.socket, result.speechId), true);
+
+  await h.controller.play({ text: 'Lengthy speech. '.repeat(10000), recipients: [h.socket] });
+  assert.equal(clock.remaining(h.controller.activeSpeech.timer), 10 * 60 * 1000);
+  clock.advance(10 * 60 * 1000);
+  assert.equal(h.controller.activeSpeech, null);
+});
+
+test('a buffered repeated opening reports private progress without restarting speech or timing out', async t => {
+  const clock = fakeTimers(t);
+  const gates = [deferred(), deferred(), deferred(), deferred()];
+  const h = harness(async function* () { yield Buffer.from('audio'); }, { safetyTimeoutMs: 45 });
+  t.after(() => h.controller.unregister(h.socket));
+  const registry = {
+    getSlotStatus: () => ({ available: true }), getTts: () => ({ params: {} }),
+    getLlm: role => ({ async *stream() {
+      if (role === 'surface') {
+        yield { type: 'text', delta: JSON.stringify({ status: 'ok', mode: 'say+think',
+          segments: [{ emotion: 'netral', text: 'Aku dengar.' }] }) };
+        return;
+      }
+      yield { type: 'text', delta: '{"segments":[{"emotion":"sayang","text":"Aku' };
+      const chunks = [' dengar.', ' Kamu', ' bisa cerita dulu.', '"}]}'];
+      for (let index = 0; index < gates.length; index++) {
+        await gates[index].promise;
+        yield { type: 'text', delta: chunks[index] };
+      }
+    } }),
+  };
+  const turn = h.controller.beginTurn(h.socket);
+  const resultPromise = playConversationReply({ controller: h.controller, socket: h.socket,
+    turnId: turn.turnId, history: [], userMessage: 'cerita', registry });
+  await tick();
+  for (const gate of gates) {
+    clock.advance(35);
+    assert.equal(h.controller.isCurrentTurn(h.socket, turn.turnId), true);
+    gate.resolve();
+    await tick();
+  }
+  const result = await resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(result.text, 'Aku dengar. Kamu bisa cerita dulu.');
+  assert.equal(h.events.filter(event => event.type === 'speech_start').length, 1);
+  assert.equal(h.events.filter(event => event.type === 'audio_output').length, 2);
+  assert.equal(h.events.some(event => ['generation_progress', 'opening_suppressed', 'turn_cancelled'].includes(event.type)), false);
+  assert.deepEqual(h.events.filter(event => event.type === 'reply_part' && event.status === 'done').map(event => event.text),
+    ['Aku dengar.', 'Kamu bisa cerita dulu.']);
+  assert.equal(h.controller.acknowledge(h.socket, result.speechId), true);
+});
+
 test('idle to idle transitions drain deferred captions', async () => {
   const h = harness(async function* () {});
   h.controller.setState(h.socket, 'processing');
@@ -187,16 +318,20 @@ function inputHandler(socket, controller, transcribeAudio, generateReplyStream =
   const end = source.indexOf('\n  });\n});', start);
   assert.ok(start >= 0 && end > start);
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-  const run = new AsyncFunction('socket', 'speechController', 'transcribeAudio', 'generateReplyStream',
-    'history', 'msg', 'extFromMime', 'detectSelfieIntent', 'detectVisionIntent',
+  const run = new AsyncFunction('socket', 'speechController', 'transcribeAudio', 'playConversationReply',
+    'history', 'msg', 'extFromMime', 'detectSelfieIntent', 'visionRouter',
     'markConversationActivity', 'HISTORY_MESSAGE_LIMIT', 'memoryManager', 'getSlotStatus',
-    'proactiveConversation', 'visionManager', 'visionSessions', source.slice(start, end));
+    'proactiveConversation', 'visionManager', 'visionSessions',
+    'speechMemoryRecorder', 'trimConversationHistory', source.slice(start, end));
   const history = [];
-  return msg => run(socket, controller, transcribeAudio, generateReplyStream, history, msg,
-    () => 'webm', () => ({ isSelfie: false }), () => false, () => {}, 20,
+  return msg => run(socket, controller, transcribeAudio, options =>
+    playConversationReply({ ...options, generate: generateReplyStream }), history, msg,
+    () => 'webm', () => ({ isSelfie: false }), { route: async () => ({ sources: [] }) }, () => {}, 20,
     { recordTurnAndExtract() {} }, () => ({ available: true }),
-    { updateSettings() {}, setUserActive() {} },
-    { getConversationContext: () => null, setAssistantContext() {} }, new Map());
+    { updateSettings() {}, setUserActive() {}, consumeGuidance: () => ({}) },
+    { getConversationContext: () => null, getRoutingObservations: () => [], getSourceSnapshot: () => ({}),
+      setAssistantContext() {}, conversationActivity() {} }, new Map(),
+      { context: () => null }, history => history);
 }
 
 test('processing expiry aborts STT and a late old error cannot reset a newer turn', async () => {

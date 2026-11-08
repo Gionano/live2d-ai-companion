@@ -132,14 +132,15 @@ export class SpeechController {
   }
 
   play({ text, emotion = 'sayang', speechEmotion, recipients = null, produce = null, deferred = false,
-    turnId = null, origin = 'conversation', signal = null }) {
+    turnId = null, origin = 'conversation', signal = null, memoryContext = null }) {
     return new Promise((resolve) => {
       if (signal?.aborted) {
         resolve({ ok: false, speechId: null, turnId, reason: 'cancelled' });
         return;
       }
       const item = { text, emotion, speechEmotion: normalizeSpeechEmotion(speechEmotion),
-        recipients, produce, deferred, turnId, origin, resolve };
+        recipients, produce, deferred, turnId, origin, resolve,
+        memoryContext: memoryContext ? Object.freeze({ ...memoryContext }) : null };
       const onAbort = () => {
         const queuedIndex = this.queue.indexOf(item);
         if (queuedIndex >= 0) {
@@ -258,10 +259,17 @@ export class SpeechController {
           }
         }
       } catch (err) {
+        sentenceOk = false;
         ok = false;
         console.error('[tts:speech]', err.message);
       } finally {
         if (!speech.ended && (!endedRequest || pendingAudio)) this.emit(speech, { type: 'audio_end', emotion, ...metadata });
+        // Record only text whose complete synthesis was delivered. Streamed
+        // display text can include an unfinished or failed later stage.
+        if (speech.item.memoryContext && sentenceOk && countedAudio && !speech.ended) {
+          const spokenText = stripSpeechTags(text).trim();
+          if (spokenText) speech.memorySentences.push(spokenText);
+        }
       }
     };
     try {
@@ -331,7 +339,9 @@ export class SpeechController {
     try {
       this.onPlaybackReleased({ speechId: speech.speechId, turnId: speech.turnId, origin: speech.origin,
         reason: speech.releaseReason || reason, hasAudio: speech.hasAudio, ok: speech.ok,
-        recipients: [...speech.recipients] });
+        recipients: [...speech.recipients],
+        ...(speech.item.memoryContext && { memoryContext: speech.item.memoryContext,
+          spokenText: speech.memorySentences.join(' ') }) });
     } catch (error) {
       console.error('[speech:release]', error.message);
     }
