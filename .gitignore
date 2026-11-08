@@ -46,6 +46,7 @@ src/visionMonitor.js
 local/
 selfie.config.local.json
 providers.config.local.json
+docker-compose.override.yml
 assets/references/*
 !assets/references/default.jpg
 !assets/references/README.md

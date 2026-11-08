@@ -1,19 +1,32 @@
-FROM node:20-alpine
+FROM node:22-bookworm-slim AS build
 
 WORKDIR /app
-
-# Install dependencies
-COPY package*.json ./
-RUN npm install
-
-# Copy source files
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY vision-monitor/package.json vision-monitor/package-lock.json ./vision-monitor/
+RUN npm ci --prefix vision-monitor
 COPY . .
+RUN npm run build && npm --prefix vision-monitor run build \
+    && npm prune --omit=dev && npm --prefix vision-monitor prune --omit=dev
 
-# Expose Vite frontend and Express backend ports
-EXPOSE 5173 8787
+FROM node:22-bookworm-slim AS runtime
 
-# Set host to 0.0.0.0 so Vite is accessible outside the container
-ENV HOST=0.0.0.0
+# Debian provides Python 3.11 and glibc wheels for optional BGE memory setup.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash ca-certificates nginx python3 python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build --chown=node:node /app /app
+RUN mkdir -p /app/local /app/data /app/assets/references /app/public/models \
+    && chown -R node:node /app/local /app/data /app/assets/references /app/public/models \
+    && chmod +x /app/docker/start.sh
 
-# Start both server and frontend
-CMD ["npm", "run", "dev:all"]
+ENV NODE_ENV=production \
+    PORT=8787 \
+    WAIFU_DATA_DIR=/app/data \
+    WAIFU_LOCAL_DIR=/app/local
+USER node
+EXPOSE 5173 5174
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD ["node", "docker/healthcheck.js"]
+CMD ["bash", "/app/docker/start.sh"]
