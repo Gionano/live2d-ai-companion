@@ -14,6 +14,7 @@
  *  - intensity:  kategori amplitudo gerak saat bicara (Layer 1 & 2).
  */
 export const EMOTION_MAP = {
+  senang:    { expression: '星星眼', intensity: 'tinggi' },
   terkejut:  { expression: '惊讶',   intensity: 'tinggi' },
   marah:     { expression: '生气',   intensity: 'tinggi' },
   bingung:   { expression: '疑惑',   intensity: 'sedang' },

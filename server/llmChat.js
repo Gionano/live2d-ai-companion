@@ -13,12 +13,10 @@ import { memoryManager } from './memoryManager.js';
 import { speechStylePrompt } from './speechStylePrompt.js';
 import { normalizeSpeechEmotion, speechEmotionPrompt } from './speechEmotionPrompt.js';
 import { resolveTtsParams, StreamingTagSanitizer, SentenceMerger, spokenSentenceCount } from './ttsExpression.js';
+import { VALID_EMOTIONS } from '../src/expressionMap.js';
 export const HISTORY_MESSAGE_LIMIT = 8;
 export const HISTORY_TOKEN_LIMIT = 700;
-export const REPLY_EMOTIONS = new Set([
-  'terkejut', 'marah', 'bingung', 'jengkel', 'malu', 'kesal',
-  'sedih', 'kagum', 'sayang', 'jahil', 'penasaran', 'netral',
-]);
+export const REPLY_EMOTIONS = new Set(VALID_EMOTIONS);
 
 // Estimasi konservatif tanpa menambah tokenizer dependency. Untuk teks campuran
 // Indonesia/Inggris, ~4 karakter per token cukup berguna untuk logging/budget.

@@ -1,0 +1,338 @@
+{
+  "version": 1,
+  "banks": {
+    "neutral": {
+      "label": "Netral",
+      "expressions": [
+        {
+          "id": "neutral",
+          "label": "Netral",
+          "file": "expressions/neutral.exp3.json",
+          "weight": 1
+        }
+      ],
+      "motions": [
+        {
+          "id": "relaxed-glance",
+          "label": "Pandangan santai",
+          "file": "motions/relaxed-glance.motion3.json",
+          "weight": 1,
+          "duration": 3.2
+        },
+        {
+          "id": "gentle-settling",
+          "label": "Kembali rileks",
+          "file": "motions/gentle-settling.motion3.json",
+          "weight": 1,
+          "duration": 3.5
+        }
+      ]
+    },
+    "shy": {
+      "label": "Malu",
+      "expressions": [
+        {
+          "id": "shy-glance",
+          "label": "Pandangan malu",
+          "file": "expressions/shy-glance.exp3.json",
+          "weight": 1
+        },
+        {
+          "id": "hesitant-smile",
+          "label": "Senyum ragu",
+          "file": "expressions/hesitant-smile.exp3.json",
+          "weight": 1
+        },
+        {
+          "id": "shy-pout",
+          "label": "Cemberut malu",
+          "file": "expressions/shy-pout.exp3.json",
+          "weight": 1
+        }
+      ],
+      "motions": [
+        {
+          "id": "downward-glance",
+          "label": "Melihat ke bawah",
+          "file": "motions/downward-glance.motion3.json",
+          "weight": 1,
+          "duration": 3.1
+        },
+        {
+          "id": "small-sideways-tilt",
+          "label": "Miring malu",
+          "file": "motions/small-sideways-tilt.motion3.json",
+          "weight": 1,
+          "duration": 3.4
+        }
+      ]
+    },
+    "affectionate": {
+      "label": "Sayang",
+      "expressions": [
+        {
+          "id": "soft-smile",
+          "label": "Senyum lembut",
+          "file": "expressions/soft-smile.exp3.json",
+          "weight": 1
+        },
+        {
+          "id": "smiling-eyes",
+          "label": "Mata tersenyum",
+          "file": "expressions/smiling-eyes.exp3.json",
+          "weight": 1
+        },
+        {
+          "id": "heart-eyes",
+          "label": "Mata hati",
+          "file": "expressions/heart-eyes.exp3.json",
+          "weight": 0.5,
+          "holdMs": 2000,
+          "fallback": "soft-smile"
+        }
+      ],
+      "motions": [
+        {
+          "id": "gentle-nod",
+          "label": "Anggukan lembut",
+          "file": "motions/gentle-nod.motion3.json",
+          "weight": 1,
+          "duration": 2.8
+        },
+        {
+          "id": "affectionate-lean",
+          "label": "Condong hangat",
+          "file": "motions/affectionate-lean.motion3.json",
+          "weight": 1,
+          "duration": 3.6
+        }
+      ]
+    },
+    "playful": {
+      "label": "Jahil",
+      "expressions": [
+        {
+          "id": "side-smile",
+          "label": "Senyum jahil",
+          "file": "expressions/side-smile.exp3.json",
+          "weight": 1
+        },
+        {
+          "id": "wink",
+          "label": "Kedipan jahil",
+          "file": "expressions/wink.exp3.json",
+          "weight": 1,
+          "holdMs": 850,
+          "fallback": "side-smile"
+        },
+        {
+          "id": "tongue-tease",
+          "label": "Jahil menjulurkan lidah",
+          "file": "expressions/tongue-tease.exp3.json",
+          "weight": 1,
+          "holdMs": 850,
+          "fallback": "side-smile",
+          "cue": {
+            "parameter": "Param46",
+            "peak": 0.7,
+            "duration": 0.6,
+            "companions": {
+              "ParamMouthOpenY": 0.28
+            }
+          }
+        }
+      ],
+      "motions": [
+        {
+          "id": "sideways-peek",
+          "label": "Mengintip samping",
+          "file": "motions/sideways-peek.motion3.json",
+          "weight": 1,
+          "duration": 2.7
+        },
+        {
+          "id": "playful-tilt",
+          "label": "Miring jahil",
+          "file": "motions/playful-tilt.motion3.json",
+          "weight": 1,
+          "duration": 3
+        }
+      ]
+    },
+    "happy": {
+      "label": "Senang",
+      "expressions": [
+        {
+          "id": "bright-smile",
+          "label": "Senyum cerah",
+          "file": "expressions/bright-smile.exp3.json",
+          "weight": 1
+        },
+        {
+          "id": "star-eyes",
+          "label": "Mata berbintang",
+          "file": "expressions/star-eyes.exp3.json",
+          "weight": 0.5,
+          "holdMs": 2000,
+          "fallback": "bright-smile"
+        }
+      ],
+      "motions": [
+        {
+          "id": "light-nod",
+          "label": "Anggukan ceria",
+          "file": "motions/light-nod.motion3.json",
+          "weight": 1,
+          "duration": 2.6
+        },
+        {
+          "id": "lifted-posture",
+          "label": "Postur ceria",
+          "file": "motions/lifted-posture.motion3.json",
+          "weight": 1,
+          "duration": 3.1
+        }
+      ]
+    },
+    "sad": {
+      "label": "Sedih",
+      "expressions": [
+        {
+          "id": "sad-eyes",
+          "label": "Mata sedih",
+          "file": "expressions/sad-eyes.exp3.json",
+          "weight": 1
+        },
+        {
+          "id": "small-frown",
+          "label": "Cemberut kecil",
+          "file": "expressions/small-frown.exp3.json",
+          "weight": 1
+        }
+      ],
+      "motions": [
+        {
+          "id": "lowered-head",
+          "label": "Menunduk pelan",
+          "file": "motions/lowered-head.motion3.json",
+          "weight": 1,
+          "duration": 3.8
+        },
+        {
+          "id": "inward-settling",
+          "label": "Kembali tenang",
+          "file": "motions/inward-settling.motion3.json",
+          "weight": 1,
+          "duration": 3.6
+        }
+      ]
+    },
+    "angry": {
+      "label": "Marah",
+      "expressions": [
+        {
+          "id": "furrowed-brows",
+          "label": "Alis tegas",
+          "file": "expressions/furrowed-brows.exp3.json",
+          "weight": 1
+        },
+        {
+          "id": "cheek-puff",
+          "label": "Pipi menggembung",
+          "file": "expressions/cheek-puff.exp3.json",
+          "weight": 1
+        }
+      ],
+      "motions": [
+        {
+          "id": "firm-posture",
+          "label": "Postur tegas",
+          "file": "motions/firm-posture.motion3.json",
+          "weight": 1,
+          "duration": 2.9
+        },
+        {
+          "id": "small-head-turn",
+          "label": "Menoleh tegas",
+          "file": "motions/small-head-turn.motion3.json",
+          "weight": 1,
+          "duration": 2.8
+        }
+      ]
+    },
+    "surprised": {
+      "label": "Terkejut",
+      "expressions": [
+        {
+          "id": "wide-eyes",
+          "label": "Mata terkejut",
+          "file": "expressions/wide-eyes.exp3.json",
+          "weight": 1
+        },
+        {
+          "id": "small-gasp",
+          "label": "Terkejut kecil",
+          "file": "expressions/small-gasp.exp3.json",
+          "weight": 1,
+          "holdMs": 900,
+          "fallback": "wide-eyes",
+          "cue": {
+            "parameter": "ParamMouthOpenY",
+            "peak": 0.45,
+            "duration": 0.6
+          }
+        }
+      ],
+      "motions": [
+        {
+          "id": "brief-recoil",
+          "label": "Terkejut mundur",
+          "file": "motions/brief-recoil.motion3.json",
+          "weight": 1,
+          "duration": 2.3
+        },
+        {
+          "id": "curious-tilt",
+          "label": "Miring penasaran",
+          "file": "motions/curious-tilt.motion3.json",
+          "weight": 1,
+          "duration": 3.2
+        }
+      ]
+    },
+    "__idle__": {
+      "label": "Gerakan diam",
+      "expressions": [],
+      "motions": [
+        {
+          "id": "idle-left-glance",
+          "label": "Pandangan kiri",
+          "file": "motions/idle-left-glance.motion3.json",
+          "weight": 1,
+          "duration": 5.8
+        },
+        {
+          "id": "idle-right-glance",
+          "label": "Pandangan kanan",
+          "file": "motions/idle-right-glance.motion3.json",
+          "weight": 1,
+          "duration": 6.2
+        },
+        {
+          "id": "idle-relaxed-tilt",
+          "label": "Miring santai",
+          "file": "motions/idle-relaxed-tilt.motion3.json",
+          "weight": 1,
+          "duration": 7
+        },
+        {
+          "id": "idle-posture-shift",
+          "label": "Ganti postur",
+          "file": "motions/idle-posture-shift.motion3.json",
+          "weight": 1,
+          "duration": 7.8
+        }
+      ]
+    }
+  }
+}
