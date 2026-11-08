@@ -3,7 +3,8 @@
 P2 adds a local settings store, credential storage and a protected backend API.
 P3 adds the local [settings GUI and first-run wizard](settings-gui.md), models
 suggestions, progress probes, stale-lock recovery and isolated storage diagnostics.
-Image generation, selfie moderation and personality remain outside this schema.
+Image generation has separate [Foto / PAP settings](settings-gui.md);
+selfie moderation and personality remain outside the provider schema.
 
 ## Layers and stored data
 
@@ -19,7 +20,7 @@ The default runtime registry reads these layers in order:
 choices. Their migration requires an explicit request, described below.
 Objects merge recursively; arrays, scalars and null replace earlier values.
 Profile deletion writes a null tombstone to prevent lower layers restoring it.
-An explicit null slot is unassigned. Planner and visionFilter can instead save
+An explicit null slot is unassigned. Planner, visionFilter, surface and reflection can instead save
 `{ "followLlm": true }` to track the current LLM assignment. Omitted advanced slots
 also inherit the LLM; an explicit null does not. The GUI offers inheritance by
 default when configuring chat. The initial UI language is `id`; before a language
@@ -42,16 +43,34 @@ Only these fields are accepted:
 | Object | Fields |
 | --- | --- |
 | Profile | Optional matching `id`; required `adapter`, `baseUrl`; optional `apiKeyEnv`, `flags`, `headerNames`, `capabilities`, `bodyExtras`, `omitParams`, `anthropicVersion`, `defaultMaxTokens`, `models` |
-| Slot | `profile`, `model`, optional `params`, `timeouts`; null to unassign; or `{followLlm:true}` for planner/visionFilter |
+| Slot | `profile`, `model`, optional `params`, `timeouts`; null to unassign; or `{followLlm:true}` for planner/visionFilter/surface/reflection |
 | Params | `temperature`, `maxTokens`, `json`, `language`, `prompt`, `voice`, `format`, `bodyExtras`, `omitParams` |
 | Timeouts | `firstByteMs`, `idleMs`, `totalMs`, each 0–300000 ms; zero disables that deadline outside API probes |
 | UI | `language`: `id` or `en` |
 
 Profile IDs contain letters, digits, underscores or hyphens and are at most
-64 characters. At most 32 profiles are stored. Slots are `llm`, `planner`,
-`vision`, `visionFilter`, `stt` and `tts`. Adapters are `openaiCompatible`,
+64 characters. At most 32 profiles are stored. Slots are `llm`, `surface`,
+`reflection`, `router`, `planner`, `vision`, `visionFilter`, `stt` and `tts`. Adapters are `openaiCompatible`,
 `anthropicNative` and `fishAudio`. A slot's model is a nonempty string of at most
 256 characters; template placeholders cannot be selected.
+
+Surface provides the quick reaction; `llm` supplies the deeper continuation.
+The dedicated `router` defaults to Groq `openai/gpt-oss-20b` and does not follow
+Chat. It uses the existing slot settings/test/status interfaces and a hard
+five-second routing deadline. Missing router fields use the default; explicit
+assignments and null are preserved. Older imports restore the default Groq
+router when omitted, except when its profile is explicitly deleted. See
+[vision routing](vision-routing.md).
+Reflection supplies private hints, plans and follow-up decisions. Both new slots
+inherit `llm` unless explicitly assigned or disabled. Importing older settings
+without these two slots retains that inheritance. See
+[Conversation and idle behavior](conversation-behavior.md).
+
+TTS `params.expression.sentencePauseMs` defaults to 200 and
+`segmentPauseMs` to 150, with integer values from 0 to 400. At tone/stage
+boundaries playback uses the greater pause instead of stacking them. Registers
+and Fish speech tones are selected per sentence; the GUI preserves other saved
+TTS parameters when editing timing.
 
 Flags are `supportsImages`, `supportsStt`, `supportsVerboseStt`,
 `supportsJsonMode` and `supportsStreamUsage`. Capability overrides are booleans
@@ -123,7 +142,7 @@ stale writes return HTTP 409 `CONFLICT`; reread before retrying.
 | --- | --- |
 | `GET /bootstrap` | Returns the backend-session token. |
 | `GET /` | Effective settings, per-field sources and credential presence. |
-| `GET /status` | Version, selected secret backend, all six slot statuses, warnings and `firstRun`. No provider request. |
+| `GET /status` | Version, selected secret backend, all slot statuses, warnings and `firstRun`. No provider request. |
 | `PUT /profiles/:id` | `{version, profile, secrets?, confirmDeleteSecrets?}`; requires adapter and URL, merges supported profile fields. |
 | `DELETE /profiles/:id` | `{version, force?}`. |
 | `PUT /slots/:slot` | `{version, slot}`; use null to unassign. |
@@ -211,7 +230,8 @@ empty list with a reason code; manual model entry remains available.
 Export omits invalid/unconfigured templates and includes no credential values or
 local filesystem paths. Import strictly validates the portable schema, replaces
 the saved selection and tombstones omitted profiles so lower layers cannot revive
-them. Omitted slots become unassigned. Matching-origin secrets stay in their
+them. Omitted slots become unassigned except surface/reflection, which inherit
+the LLM for older exports. Matching-origin secrets stay in their
 separate store; importing on another installation never imports keys.
 
 Legacy migration is never automatic. It recognizes declared `baseUrlEnv`,
@@ -300,3 +320,20 @@ Run `npm test`, `npm run check:privacy` and `npm run build` for offline validati
 Live DPAPI, live providers, real Electron rendering and browser layout require
 manual verification; mocked tests do not establish those results.
 See [Providers](providers.md) for adapter contracts and transport behavior.
+
+## Evidence-backed memory
+
+The optional `memoryWriter` follows Chat; `memoryEmbedding` defaults to the
+embeddings-only local BGE service. The `memory` configuration adds managed
+startup and `auto|cpu|cuda` device selection without changing existing saved
+provider assignments. Missing fields gain defaults; explicit null slots remain
+disabled. The first-run wizard does not require memory setup.
+
+The **Memori** panel and protected `/api/settings/memory` endpoints expose
+readiness, original dialogue, quote-backed facts, search, correction history,
+manual records, job retry, index rebuild, and deletion impact. Data mutations
+use `memoryRevision`; configuration saves retain Settings `version` protection.
+Legacy `/api/memory` aliases receive the same origin/token checks. Memory text
+is not included in Settings exports or browser storage. See the
+[memory guide](memory.md) for explicit installation commands, API details,
+retention, migration, and playback-based recording.

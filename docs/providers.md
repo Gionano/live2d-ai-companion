@@ -17,12 +17,16 @@ removed. No runtime call sites remain on a legacy client.
 | Flow | Call site | Slot and preserved behavior |
 | --- | --- | --- |
 | Streaming chat | `server/llmChat.js:194` | `llm`; structured emotion/text JSON, reasoning controlled by configured slot options |
+| Quick reaction | `server/conversationCoordinator.js` | `surface`; one short reaction and a decision to speak or continue into deeper generation |
+| Private reflection | `server/proactiveConversation.js` | `reflection`; bounded hints, plans, SKIP or a proactive speaking cue |
+| Private vision routing | `server/visionRouting.js` | `router`; hybrid decisions with Groq `openai/gpt-oss-20b`, a five-second deadline, and automatic source resolution |
 | Emotion parser / sentences | `server/llmChat.js:73`, `:223` | Existing parser and sentence splitter retained |
 | Selfie scene planner | `server/selfie/planner.js:178` | `planner`; whitelist, moderation, timeout and default-slot fallback retained |
-| Memory extraction | `server/memoryManager.js:246` | `llm`; JSON, temperature 0.1, 250-token limit |
+| Memory extraction | `server/memoryManager.js` | `memoryWriter`; follows `llm` by default, validates literal speaker quotes, and runs persistent background jobs after confirmed playback |
+| Memory embeddings | `server/providers/adapters/localEmbedding.js` | `memoryEmbedding`; local BGE-M3 service, keyword fallback, and one bounded retrieval reused by surface/deep speech |
 | One-shot vision | `server/visionCapture.js:27` | `vision`; canonical image part, existing Indonesian prompts |
 | Continuous vision | `server/streamingVisionManager.js:215` | `vision`; existing monitor tuning and token/cost estimates |
-| Monitor filter | `server/streamingVisionManager.js:355` | `visionFilter`; existing SKIP/COMMENT parsing |
+| Monitor filter | `server/streamingVisionManager.js` | `visionFilter`; interest and conversation relevance checked together before commentary admission |
 | Speech recognition | `server/sttTranscribe.js:18` | `stt`; optional verbose metadata normalized before filtering at `:22` |
 | Speech synthesis | `server/ttsGenerate.js:16` | `tts`; same Buffer chunks to the speech controller |
 | Warm-up / keep-alive | `server/modelWarmup.js:38` | Optional `visionFilter.warmup()`, same idle schedule |
@@ -37,10 +41,25 @@ probes still use the migrated chat, speech and warm-up functions.
 `providers.config.json` contains three neutral templates: `openai-compatible`,
 `anthropic-native`, and `fish-audio`. Their `baseUrl` and `model` fields are
 `REPLACE_WITH_...` placeholders. Every slot (`llm`, `planner`, `vision`,
-`visionFilter`, `stt`, `tts`) is explicitly **unassigned** (`null`). Installing
-dependencies or setting old provider environment variables never assigns a slot.
+`visionFilter`, `stt`, `tts`) is explicitly **unassigned** (`null`). The optional
+`surface` and `reflection` roles default to `{ "followLlm": true }`; they become
+usable only after Chat is configured. The dedicated `router` defaults to the
+Groq profile and `openai/gpt-oss-20b`; it requires the existing saved Groq key or
+`GROQ_API_KEY`. Its profile uses `https://api.groq.com/openai/v1` and preserves
+machine overrides. Installing dependencies does not assign the core conversation
+providers. See [vision routing](vision-routing.md) for privacy and fallback behavior.
 The template's `model` field is a setup reminder; the actual model belongs in
 `slots.<slot>.model`. A placeholder model cannot be used for a request.
+
+Memory adds `memoryWriter`, following `llm` by default, and `memoryEmbedding`,
+assigned to the embeddings-only `localBge` profile with `bge-m3-d768` at
+`http://127.0.0.1:8011`. Missing legacy fields receive defaults; explicit null
+assignments remain disabled. Chat-only adapters cannot satisfy the embedding
+slot, even through capability overrides. Explicit CLI installation is required
+before cached local startup; keyword retrieval remains available without it.
+See [memory](memory.md) for quoted evidence, retention, setup, and runtime
+privacy. The memory writer is independently configurable and does not reuse
+the vision router role.
 
 The default runtime registry layers the public file, ignored
 `providers.config.local.json`, then `<local>/settings.json`. Objects merge
@@ -91,6 +110,11 @@ the settings document adds schema/version and UI fields:
 - Omitted `planner` and `visionFilter` resolve to `llm` when constructing a config
   directly. Shipped null values survive a local deep merge, so assign those roles
   explicitly in the local file when needed. Null does not inherit.
+- Omitted `surface` and `reflection` also resolve to `llm`, and the public defaults
+  explicitly follow Chat. Assign independent profiles/models under Advanced for
+  a fast surface reaction or a different reflection model. Old settings imports
+  inherit these roles; explicit null remains unassigned. See
+  [conversation behavior](conversation-behavior.md).
 - `getSlotStatus(slot)` returns `{available, reason, profile, model, adapter,
   insecureTransport, warnings}`.
   It checks configuration/capabilities/credentials without making a network call.

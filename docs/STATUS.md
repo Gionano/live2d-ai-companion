@@ -1,19 +1,42 @@
 # Status
 
-Current companion behavior is documented in the [continuous vision and conversation guide](continuous-vision-conversation.md) and [Live2D speech movement guide](live2d-speech-motion.md). Historical sections below retain the implementation and verification evidence recorded during their original work. Automated verification uses mocked providers, HTTP/WS, desktop IPC, speech, local-process fixtures, and memory/telemetry tests.
+Current companion behavior is documented in the [continuous vision and conversation guide](continuous-vision-conversation.md), [conversation stages](conversation-behavior.md), [vision routing](vision-routing.md), [memory](memory.md), and [Live2D speech movement guide](live2d-speech-motion.md). Historical sections below retain the implementation and verification evidence recorded during their original work. Automated verification uses mocked providers, HTTP/WS, desktop IPC, speech, local-process fixtures, and memory/telemetry tests.
 
-Latest change-set verification (2026-11-07): 266 changed regression tests passed,
-one optional local-asset test skipped, root and monitor builds passed, and the
-privacy scan reported zero failing files. The preceding full-suite run passed
-1,125 tests with one optional asset skip. Full hardware checks remain below.
+Docker/documentation refresh (2026-11-08): the container now builds the companion
+and Vision Monitor, proxies both backends on loopback, persists settings/memory,
+models, references and tuning in named volumes, and includes Python for explicit
+BGE setup. The bundled PAP reference and README header now show the current
+Witch model, captured from the real renderer with an isolated local preview.
+Compose configuration, both frontend builds, 1,492 tests with two optional skips,
+and the privacy scan passed. Docker build/runtime and nginx validation remain
+unverified because the Docker engine is stopped and WSL access is unavailable.
+No live AI/model downloads were run. See [Docker setup](docker.md).
+
+Latest change-set verification (2026-11-08): the evidence-backed memory change
+passed 1,492 tests with two optional local-asset skips, the root production build,
+and the privacy scan (543 files; zero failing files). A production-build fixture
+with real protected APIs and isolated memory storage verified hybrid retrieval,
+settings persistence, manual insertion and deletion using mocked providers.
+Original model and standalone lab hashes and Git HEAD remained unchanged. No
+model was downloaded or loaded, and no live AI inference ran. Local browser UI
+inspection was disabled in Work settings; native Electron verification failed
+when its GPU child crashed with `-1073741515`. Native BGE timings and VRAM use
+remain unmeasured. See the [memory guide](memory.md) for explicit setup.
 
 ## Done
+- Evidence-backed memory archives completed, acknowledged speech, validates
+  original speaker quotations, handles corrections, and shares one bounded
+  keyword/BGE-M3 retrieval across surface/deep generation. Durable jobs, legacy
+  migration, deletion fencing, optional cached-only local service startup, and
+  the protected **Memori** panel are available. Installation requires explicit
+  CLI setup and license acceptance; existing conversation providers remain in
+  use. See the [memory guide](memory.md).
 - Continuous vision uses independent screen/webcam sessions, scene filtering,
   capture-based freshness and source-labelled conversation context. Capture runs
   only while a Vision Monitor dashboard is connected; closing the last dashboard
   cancels analysis and clears visual context. Webcam monitoring is automatic.
 - Chat streams tone segments with early first-sentence TTS and audio-clock pauses.
-  Quiet conversation is enabled with a 60-second delay, SKIP/topic selection,
+  Quiet conversation is enabled with a 30-second delay, SKIP/topic selection,
   a 30-second decision deadline, two-unanswered limit and voice/typing/PTT takeover.
   The monitor shows waiting, skipped, blocked and failed decisions. See the
   [operator guide](continuous-vision-conversation.md).

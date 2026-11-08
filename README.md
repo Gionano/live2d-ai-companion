@@ -1,6 +1,6 @@
 # Amika Live2D AI Companion
 
-![Amika Live2D AI companion with chat and selfie preview](docs/amikaHeader.png)
+![Amika Live2D companion with the Witch model and chat panel](docs/amikaHeader.png)
 
 Amika is a browser and Windows desktop companion with an official Live2D Cubism avatar, voice and typed chat, webcam/screen perception, persistent memory, and local or Cloudflare PAP/selfie generation.
 
@@ -9,13 +9,14 @@ Amika is a browser and Windows desktop companion with an official Live2D Cubism 
 ## Features
 
 - **Live2D Cubism 5:** WebGL rendering, physics, blinking, breathing, procedural tracking, and model-aware speech gestures driven by actual audio emphasis and pauses. See [speech movement](docs/live2d-speech-motion.md).
-- **Contextual expressions:** each reply can contain multiple tone segments using twelve Indonesian avatar emotions and a separate Fish Audio speech-emotion vocabulary.
-- **Voice and text chat:** browser VAD, mobile push-to-talk, desktop typed input, streamed chat/TTS, early first-sentence playback, configurable segment pauses, synchronized captions, and cancellation across queued speech.
+- **Contextual expressions:** sentence-level tones combine five conversational registers, twelve Indonesian avatar emotions, and a separate Fish Audio speech-emotion vocabulary.
+- **Voice and text chat:** a quick reaction followed by a fuller continuation in separate chat bubbles, browser VAD, mobile push-to-talk, streamed chat/TTS, 200 ms sentence pauses, and cancellation across queued speech. See [conversation behavior](docs/conversation-behavior.md).
 - **Visual perception:** ordinary conversation receives valid screen and webcam descriptions automatically. Explicit requests such as "lihat di kamera" or "coba lihat layar" obtain fresh source-specific detail.
 - **Continuous screen and camera vision:** available sources capture once per second while a Vision Monitor dashboard is connected. Scene filtering reuses unchanged descriptions; AI requests have a two-second minimum spacing per source. Closing the last dashboard stops capture and clears current visual context.
-- **Conversation during silence:** enabled in configuration with a 60-second delay after user activity or playback completion. A topic decision can choose SKIP; at most two unanswered unsolicited turns are allowed. Voice, typing and PTT interrupt unsolicited speech.
+- **Conversation during silence:** starts after 30 quiet seconds once audio is ready, including before the first message. Private reflection can guide future replies or initiate a follow-up; at most two unanswered proactive turns are allowed. Voice, typing and PTT interrupt proactive speech.
+- **Contextual vision routing:** local rules and Groq `openai/gpt-oss-20b` distinguish conversation, screen, and webcam requests without asking for a source. Spontaneous visual comments stay relevant to the discussion. See the [routing guide](docs/vision-routing.md).
 - **Diagnostic logs:** chat/vision/speech and monitor-bridge diagnostics use Jakarta timestamps with milliseconds. Conversation messages and captions display plain text.
-- **Persistent memory:** background extraction stores user facts and episodic recall in the ignored `data/` directory.
+- **Evidence-backed memory:** completed dialogue, literal attributed quotes, corrections, and relevant keyword/BGE-M3 retrieval persist locally. The **Memori** settings page supports review and deletion; local embeddings need explicit setup. See the [memory guide](docs/memory.md).
 - **Windows desktop overlay:** transparent avatar, click-through/edit modes, saved display presets, tray controls, configurable global shortcuts, and protected direct screen capture.
 - **PAP / selfies:** voice or typed requests such as "pap dong" use a character whitelist, prompt planning, and reference images. **Foto / PAP** settings select external ComfyUI, managed ComfyUI, sd.cpp, or Cloudflare Workers AI; legacy automatic selection remains local-only.
 - **Selfie lifecycle:** one active job, a bounded queue, persistent cooldown/daily limits, progress, history-based ETA, cancellation, reconnect snapshots, and shared result auto-close settings.
@@ -24,16 +25,21 @@ Amika is a browser and Windows desktop companion with an official Live2D Cubism 
 
 ## Current AI services
 
-| Role | Provider | Source default |
+| Role | Provider example | Shared configuration |
 | --- | --- | --- |
-| Chat and PAP planner | Experiential Labs | `deepseek-v4.1-flash-uncensored` |
-| Speech recognition | Groq | `whisper-large-v3` |
-| Webcam and screen vision | Groq | `qwen/qwen3.8-27b` |
-| Commentary filter and quiet-conversation topics | 9inference | `deepseek-v4.1-flash` |
-| Streaming speech | Fish Audio | `s2.1-pro-free` |
+| Chat and PAP planner | Experiential Labs or another compatible service | Unassigned; select provider/model in Settings |
+| Quick response and reflection | Same provider as Chat, or separate compatible profiles | Follow Chat by default |
+| Conversation/vision router | Groq | `openai/gpt-oss-20b`; rules fallback when unavailable |
+| Speech recognition | Groq or a configured STT service | Unassigned |
+| Webcam and screen vision | Groq or a configured multimodal service | Unassigned |
+| Commentary filter and quiet-conversation topics | 9inference or a compatible service | Unassigned |
+| Streaming speech | Fish Audio | Unassigned |
+| Memory writing and search | Chat and optional local BGE-M3 | Writer follows Chat; `bge-m3-d768` uses loopback |
 | Image generation | Local providers or Cloudflare Workers AI | ComfyUI, managed ComfyUI, sd.cpp, or FLUX.2 Klein 9B |
 
-`EXPLABS_MODEL` overrides the chat/planner model. API keys remain in the backend environment.
+API keys remain in backend environment or the selected backend secret store.
+Environment overrides apply only when explicitly mapped by a configured profile
+or slot; they never assign a provider automatically.
 
 ## Architecture
 
@@ -51,7 +57,9 @@ Vite serves the browser frontend on port `5173`. The Express/WebSocket backend b
   src/                             Live2D, voice/text chat, capture, and browser PAP dialog
   server/
     index.js                       Express/WebSocket orchestration
-    modelConfig.js                 Chat/planner and commentary model defaults
+    conversationCoordinator.js     Surface/deep replies and private reflection
+    memory/                        Evidence store, durable jobs, keyword/vector retrieval
+    embedding/                     Offline BGE-M3 service and model installer
     selfie/                        Planning, providers, local paths, jobs, and telemetry
     tests/                         node:test regression tests and synthetic fixtures
   desktop-companion/               Electron package, native capture, and popup
@@ -62,6 +70,7 @@ Vite serves the browser frontend on port `5173`. The Express/WebSocket backend b
   workflows/                      ComfyUI API workflows
   setup/                          Manifest schema, setup CLI, hash, and doctor tools
   scripts/checkPrivacy.js          Privacy guard
+  docker/                         Production proxy, process startup and health check
   docs/                           Setup, providers, packaging, and implementation status
   selfie.config.json              Shared portable selfie settings
   selfie.config.local.json        Ignored machine-specific overrides
@@ -88,6 +97,21 @@ npm run dev:all
 ```
 
 Open the companion at [http://localhost:5173](http://localhost:5173). Use `npm run server` or `npm run dev` to start either service independently.
+
+### Docker
+
+With Docker Desktop Linux containers and `.env` prepared:
+
+```sh
+docker compose up --build -d
+docker compose ps
+```
+
+Open the companion on port `5173` and Vision Monitor on `5174`. The production
+container publishes both on localhost, preserves settings/memory/models in
+named volumes, and includes Python for explicit optional BGE setup. Linux uses
+environment credentials by default. See the [Docker guide](docs/docker.md) for
+credentials, CPU/GPU memory setup, host ComfyUI, persistence and verification.
 
 ### First run
 
@@ -295,6 +319,9 @@ Use `npm run selfie:test-b` or `npm run selfie:test-c` for focused planner/job-m
 Managed ComfyUI, sd.cpp hardening, setup tools, Cloudflare request handling, and browser/Electron flows have automated regression coverage. Live image quality, native capture behavior, real engine installation, and the Windows installer still need manual verification. Cloud PAP uses each user's own Cloudflare account with FLUX.2 Klein 9B; connection checks do not generate images. Detailed implementation evidence and remaining work are in [docs/STATUS.md](docs/STATUS.md).
 
 ## License
+
+The 魔女 companion supports [emotion banks and comic symbols](docs/witch-emotion-banks.md)
+in browser and Electron, loaded as separate assets alongside the original model.
 
 The project's original code is licensed under the [MIT License](LICENSE).
 Live2D SDK components, model artwork and binaries, third-party dependencies, and

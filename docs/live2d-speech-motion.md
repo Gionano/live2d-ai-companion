@@ -1,5 +1,10 @@
 # Live2D speech movement
 
+The 魔女 companion also loads the [sidecar emotion banks](witch-emotion-banks.md):
+18 expressions, 16 emotion clips, four additional idle clips, and seven comic
+symbols. Its single idle scheduler now combines 19 variants. The audio-driven
+gesture behavior and gains described below remain in effect.
+
 Speech gestures follow the decoded audio's emphasis and pauses. Emotion banks
 choose from six authored head, gaze, brow, and body gestures, with slower and
 smaller movement for quiet emotions. Head and gaze curves now anticipate turns,
@@ -21,16 +26,40 @@ next one. Speech smoothing samples the curves at 120 Hz independently of the
 render rate; stopping uses a smooth fade of at least 240 ms. Secondary hair/roll
 physics settles on its own clock after the procedural speech pose has returned.
 
-The scheduling approach is inspired by
-[OpenAmika's emotion banks](https://github.com/zeekk0/OpenAmika/blob/5d5e0568aff2de9f200ed2da21d0412efcdf8f79/ui/live2d-engine.js#L521-L595).
-The gesture curves are authored for this project; no external motion assets are needed.
-OpenAmika plays recorded motion banks with many model-specific tracks. 魔女's
-manifest has no such speech or idle bank. Its sibling `Scene1.motion3.json`
+Emotion banks schedule gesture curves authored for this project using supported
+model parameters. 魔女's manifest has no recorded speech or idle bank.
+Its sibling `Scene1.motion3.json`
 animates special effects and hands, so it is not used as neutral speech movement.
 The screenshot's bracketed names are display labels; the scanned IDs still use
 `ParamAngleX`, `ParamBodyAngleX`, and other standard `Param*` names. Its actual
 `ParamBrowLY` height control now receives brow motion when no brow-angle control
 exists; absent controls are not invented.
+
+## Idle movement
+
+Models without a recorded idle group, including 魔女, use fifteen locally authored
+pose variants: glances, head tilts, turns, posture shifts, nods, and settling poses.
+Weighted selection avoids the previous variant and checks for a finished motion
+every 300 ms. Clips last 4.1–8.9 seconds at the default pace and blend from the
+visible pose instead of restarting at neutral.
+
+The bank combines supported head, eye, brow, and torso controls with the existing
+breathing, blinking, and physics. Synthetic tracking is reduced while a bank motion
+is present. Physics-controlled torso channels receive a separate bounded additive
+base before physics evaluates; their speech gains remain independent. Models with
+a recorded idle group retain that group.
+
+Playback-timed speech cues suppress the idle bank. A 400 ms hold after the final
+cue prevents a new motion from starting in a short sentence pause. Stopping speech
+or cancelling it fades the old pose before idle restarts. This animation uses the
+local frame clock and works before audio is unlocked, while disconnected, and
+with vision monitoring off.
+
+In `config/animationConfig.json`, **Kekuatan gerakan diam** (`idle.motionStrength`,
+default `1`, range `0–2`) adjusts pose size; `0` fades the bank out. **Tempo gerakan
+diam** (`idle.motionPace`, default `1`, range `0.5–2`) sets the speed of the next
+selected motion. Neither setting alters mouth animation, speech gesture gains,
+camera framing, or the authored physics.
 
 ## Try it
 
@@ -66,6 +95,10 @@ and breathing through real physics, measuring both motion range and activity.
 The speech-motion tests cover audio
 timing, emphasis and pauses, emotion variation, 30/60 FPS consistency, cancellation,
 decode failures, real parameter availability, bounds, and legacy tuning imports.
+`server/tests/idleMotion.test.js` covers local idle activity, nonrepeating selection,
+speech priority, sentence pauses, pose continuity, tuning, and 30/60 FPS consistency.
+The optional local witch test also verifies the idle bank through the real Cubism
+Core and physics without loading textures or making AI requests.
 Only scanned rig parameters are driven. Mouth and secondary physics outputs
 are excluded from the gesture layer. Real physics-controlled torso channels
 receive a separate smoothed base pose before physics runs, so hair and chest

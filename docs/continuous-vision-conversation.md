@@ -21,8 +21,9 @@ gains. Mouth-form animation and recorded sound effects remain deferred.
   resolution and quality. Continuous inference has a minimum two-second interval
   per source, with one request in flight and only the newest pending changed frame.
 - TTS settings provide **Ucapkan kalimat lengkap pertama lebih cepat** (on by
-  default) and **Jeda antarbagian ucapan (ms)** (150 ms, adjustable from 0 to 400).
-- **Obrolan saat hening** is enabled by default with a 60-second quiet delay.
+  default), a 200 ms sentence pause, and **Jeda antarbagian ucapan (ms)** (150 ms).
+  Both pauses are adjustable from 0 to 400 ms; boundaries use the greater pause.
+- **Obrolan saat hening** is enabled by default with a 30-second quiet delay.
   Refreshing the root page reloads the enabled configuration without a save step.
   It can use conversation history while the monitor is closed; continuous visual
   context is supplied only while the monitor is open.
@@ -47,6 +48,13 @@ unavailable-source context. Modern input carries capture-session identities even
 when the monitor is closed. Legacy screen messages remain accepted.
 The commentary window remains separate from current-scene context.
 
+The [hybrid conversation router](vision-routing.md) resolves visual intent from
+context using local rules or Groq `openai/gpt-oss-20b`. Bare `ini` does not request
+camera inspection. Source selection is automatic; explicit comparisons can
+inspect both sources concurrently. Background context no longer implies that
+the user is showing something. The existing commentary filter admits only
+interesting events relevant to the discussion or an explicit invitation.
+
 The monitor displays per-source freshness, capture/inference ages, changed-frame
 requests, unchanged/rate-limit skips, pending work and inference latency. Its
 analysis interval control does not change the one-second capture cadence.
@@ -57,22 +65,27 @@ response bytes. Neither metric is the configured minimum request interval.
 ## Speech and quiet conversation
 
 Chat streams ordered `segments`, each containing `emotion`, optional
-`speechEmotion`, and `text`. Legacy single objects and plain text become one
+`speechEmotion`, `register`, and `text`. Legacy single objects and plain text become one
 segment. Each synthesized sentence group snapshots its tone, segment identity and
 pause. Avatar expressions and gestures start with actual audio playback; Fish
 metadata remains private to synthesis. Sanitized segment text is concatenated
-into one assistant history entry and one chat message.
+into one assistant history entry. New clients display surface and deep stages
+as separate bubbles; legacy clients receive the combined final reply.
 
-The quiet timer is armed by user interaction and reset by user activity or actual
-playback completion. A connected client and configured chat, TTS and `visionFilter`
-slots are required. The latest active conversation can speak only while all
-conversation clients, speech queues and visual commentary are idle. The small
-decision model chooses SKIP or a topic; a SKIP consumes that quiet interval.
-At most two consecutive unanswered unsolicited turns are allowed. Recent topics
-are checked to limit repetition.
+The quiet timer is armed once a connected client, configured chat/TTS providers
+and audio playback are ready. Browser playback needs its existing activation
+gesture; Electron starts audio automatically. No first message is required.
+User activity and actual playback completion, including pauses, reset the timer.
+The latest active conversation can speak only while conversation clients,
+speech queues and visual commentary are idle. Passive visual analysis does not
+block it. The `reflection` slot follows `llm` by default and returns SKIP, private
+guidance or an instruction to speak. A SKIP consumes that quiet interval.
+Reflection requested by a deep reply runs after playback and may initiate a
+follow-up. Silence and reflection follow-ups share the two-unanswered-turn limit;
+recent assistant speech and topics are checked to limit repetition.
 
-The 60-second delay starts topic selection; it does not guarantee audible speech
-at exactly one minute. A deliberate SKIP consumes that quiet interval. Decision
+The 30-second delay starts reflection; it does not guarantee audible speech
+at exactly 30 seconds. A deliberate SKIP consumes that quiet interval. Decision
 requests have a 30-second deadline in `conversation.proactiveDecisionTimeoutMs`.
 A temporary overlap with commentary discards the proposed topic and evaluates
 fresh context once the conversation is idle. Playback during a decision resets
@@ -121,8 +134,9 @@ resumption. Stop the bridge and check that capture stops too. Ask an explicit
 visual question with the monitor closed and during a source switch.
 
 Request a reply with a meaningful tone change and listen for the first sentence
-and segment pauses. Send a user message to arm quiet conversation, wait
-60 seconds after playback, and interrupt by typing, PTT and voice. Check that
+and sentence/segment pauses. Unlock browser audio without sending a message,
+wait 30 seconds, and interrupt by typing, PTT and voice. Repeat after playback.
+Check that
 speaker echo alone does not interrupt and that two unanswered turns stop further
 unsolicited speech. Live provider/audio quality and physical speaker echo require
 this hardware check; mocked tests do not establish them.

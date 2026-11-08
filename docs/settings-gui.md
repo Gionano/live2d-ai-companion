@@ -10,10 +10,11 @@ remote access.
 
 | Screen | Contents |
 | --- | --- |
-| Connections | Provider list, add/edit/delete form, presets, write-only credentials and capability flags. LLM, Vision, STT and TTS editors; planner/visionFilter appear under Advanced. |
+| Connections | Provider list, add/edit/delete form, presets, write-only credentials and capability flags. LLM, Vision, STT and TTS editors; quick reaction, reflection, conversation router, planner, visionFilter, memory writer and memory embeddings appear under Advanced. |
 | Foto / PAP | Persistent image-provider selection, connection checks, Cloudflare credentials, and reviewed local setup with licenses, progress, and cancellation. |
+| Memori | Local embedding readiness and device selection, CLI setup instructions, original dialogue and quoted facts, corrections, manual/legacy records, search, deletion impact, failed-job retry, and index rebuild. Dialogue is never saved in browser storage. |
 | Status | Per-slot availability with an icon and text, storage backend/version and transport/storage warnings. |
-| Privacy | Current origin-only destinations for microphone audio, chat/memory text, camera/screen frames and spoken text; local image-provider disclosure and links back to existing feature controls. |
+| Privacy | Current origin-only destinations for microphone audio, chat/memory text, router messages and visual descriptions, camera/screen frames and spoken text; local image-provider disclosure and links back to existing feature controls. |
 | Diagnostics | Backend name, safe file-location labels, writability, permission notes, locks, backup count and a dummy-key self-test. |
 | Language | Indonesian or English. The saved choice takes precedence over browser language detection. |
 
@@ -60,8 +61,17 @@ Each slot has a provider dropdown, manually editable model, temperature and toke
 limit. STT adds language; TTS adds voice ID and format. Advanced includes request
 timeouts and a validated JSON editor for bodyExtras/omitParams. Credential-like
 entries trigger a warning and clear on submission; the backend separates private
-values. Planner and visionFilter can follow LLM or use independent assignments.
+values. Quick reaction (`surface`), conversation reflection (`reflection`), planner
+and visionFilter can follow LLM or use independent assignments. Surface and
+reflection follow Chat by default. A fast surface model can reduce initial
+latency; using the main model for both stages may take longer.
 Unassign requires confirmation.
+
+TTS includes **Jeda setelah setiap kalimat (ms)**, default 200, adjustable from
+0–400. Sentence and segment pauses use the longer applicable gap without stacking.
+With a positive sentence pause, short-sentence merging is bypassed to preserve
+sentence playback boundaries. See [conversation behavior](conversation-behavior.md)
+for startup audio readiness, staged bubbles and private reflection.
 
 **Load models** requests names from the selected saved profile. A one-time key in
 the slot's Advanced section is sent only in the request body and is not saved.
