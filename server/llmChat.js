@@ -10,6 +10,7 @@ import { getProviderRegistry, UNAVAILABLE_MESSAGES } from './providers/registry.
 import { logger as console } from '../src/logging.js';
 import { WAIFU_SYSTEM_PROMPT } from './personality.js';
 import { memoryManager } from './memoryManager.js';
+import { recallConversation, renderConversationMemory } from './conversationMemory.js';
 import { speechStylePrompt } from './speechStylePrompt.js';
 import { normalizeSpeechEmotion, normalizeSpeechRegister, speechEmotionPrompt } from './speechEmotionPrompt.js';
 import { resolveTtsParams, StreamingTagSanitizer, SentenceMerger, spokenSentenceCount } from './ttsExpression.js';
@@ -331,8 +332,9 @@ export async function* generateReply(
     ? conversationHistory
     : [];
   const trimmedHistory = trimConversationHistory(rawHistory);
-  const memoryContext = memoryManager.getMemoryPrompt();
-  const systemParts = [WAIFU_SYSTEM_PROMPT, memoryContext];
+  const recall = await recallConversation(memory, userMessage, trimmedHistory, { signal, bundle: memoryBundle });
+  const memoryContext = renderConversationMemory(memory, recall, role);
+  const systemParts = [systemPrompt, memoryContext];
   const ttsParams = resolveTtsParams(registry.getTts?.()?.params);
   const nativeSelection = registry.getSlotStatus('tts').available && ttsParams.expression.selection !== 'mapped';
   if (registry.getSlotStatus('tts').available) {
