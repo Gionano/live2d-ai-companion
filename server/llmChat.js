@@ -13,6 +13,7 @@ import { memoryManager } from './memoryManager.js';
 import { speechStylePrompt } from './speechStylePrompt.js';
 import { normalizeSpeechEmotion, normalizeSpeechRegister, speechEmotionPrompt } from './speechEmotionPrompt.js';
 import { resolveTtsParams, StreamingTagSanitizer, SentenceMerger, spokenSentenceCount } from './ttsExpression.js';
+import { ReplyContinuationGuard } from './replyContinuation.js';
 import { VALID_EMOTIONS } from '../src/expressionMap.js';
 export const HISTORY_MESSAGE_LIMIT = 8;
 export const HISTORY_TOKEN_LIMIT = 700;
@@ -455,7 +456,8 @@ export async function* generateReplyStream(
   conversationHistory,
   userMessage,
   visionDescription,
-  { signal, registry = getProviderRegistry(), internalInstruction } = {},
+  { signal, registry = getProviderRegistry(), internalInstruction, role = 'llm', systemPrompt, maxTokens,
+    continuationText, memory = memoryManager, memoryBundle } = {},
 ) {
   let buf = '';
   let speechEmotion;
@@ -502,12 +504,20 @@ export async function* generateReplyStream(
     buf = '';
     yield* emitSentences(merger.finish());
   };
-  for await (const event of generateReply(
-    conversationHistory,
-    userMessage,
-    visionDescription,
-    { signal, registry, includeSpeechText: true, internalInstruction },
-  )) {
+  const continuation = new ReplyContinuationGuard({ spokenText: continuationText });
+  const acceptedEvents = async function* () {
+    for await (const event of generateReply(conversationHistory, userMessage, visionDescription,
+      { signal, registry, includeSpeechText: true, includeMetadata: true, internalInstruction, role, systemPrompt, maxTokens,
+        memory, memoryBundle })) {
+      signal?.throwIfAborted();
+      if (continuationText && event.type === 'delta') yield { type: 'generation_progress' };
+      yield* continuation.push(event);
+    }
+    signal?.throwIfAborted();
+    yield* continuation.finish();
+    if (continuation.removedSentences > 0) yield { type: 'opening_suppressed' };
+  };
+  for await (const event of acceptedEvents()) {
     signal?.throwIfAborted();
     if (event.type === 'segment_start') {
       yield* flushSegment();
