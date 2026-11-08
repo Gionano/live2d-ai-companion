@@ -1,5 +1,15 @@
 {
   "idle": {
+    "motionStrength": {
+      "value": 1, "default": 1, "min": 0, "max": 2, "step": 0.1,
+      "label": "Kekuatan gerakan diam",
+      "desc": "Besar gerakan kepala, tatapan, dan badan saat Amika tidak berbicara."
+    },
+    "motionPace": {
+      "value": 1, "default": 1, "min": 0.5, "max": 2, "step": 0.1,
+      "label": "Tempo gerakan diam",
+      "desc": "Kecepatan variasi gerakan diam; nilai lebih besar membuat gerakan lebih cepat."
+    },
     "angleXPeak": {
       "value": 8,
       "default": 8,
@@ -126,6 +136,15 @@
       "label": "Idle Fade-In (detik)",
       "desc": "Durasi transisi saat memulai gerakan idle loop"
     }
+  },
+  "banks": {
+    "enabled": { "type": "select", "value": "on", "default": "on", "options": ["on", "off"], "label": "Bank ekspresi", "desc": "Gunakan ekspresi dan gerakan khusus 魔女." },
+    "poseStrength": { "value": 1, "default": 1, "min": 0, "max": 2, "step": 0.05, "label": "Kekuatan pose bank", "desc": "Besar gerak bank tanpa mengubah kekuatan gestur bicara." },
+    "speechBlendWeight": { "value": 0.35, "default": 0.35, "min": 0, "max": 1, "step": 0.05, "label": "Bobot bank saat bicara", "desc": "Gerak bank dipadukan di bawah gestur audio." },
+    "comicEnabled": { "type": "select", "value": "on", "default": "on", "options": ["on", "off"], "label": "Simbol emosi", "desc": "Tampilkan simbol komik saat kalimat diputar." },
+    "symbolSize": { "value": 1, "default": 1, "min": 0.5, "max": 2, "step": 0.05, "label": "Ukuran simbol", "desc": "Ukuran simbol mengikuti kepala dan skala tampilan." },
+    "symbolDurationMs": { "value": 1500, "default": 1500, "min": 200, "max": 5000, "step": 100, "label": "Durasi simbol (ms)", "desc": "Lama simbol terlihat sejak kalimat mulai diputar." },
+    "symbolCooldownMs": { "value": 4000, "default": 4000, "min": 0, "max": 10000, "step": 100, "label": "Jeda simbol berulang (ms)", "desc": "Jeda sebelum emosi yang sama menampilkan simbol kembali." }
   },
   "tracking": {
     "headNoiseSpeedX": {

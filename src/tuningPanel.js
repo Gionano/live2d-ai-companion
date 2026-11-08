@@ -7,6 +7,7 @@
 import { tuning } from './tuningConfig.js';
 
 const GROUP_LABELS = {
+  banks: 'Ekspresi & simbol emosi',
   idle:      '🫁 Gerak diam & napas',
   tracking:  '👀 Gerak kepala & pandangan',
   talking:   '🗣️ Gestur saat bicara',
@@ -16,7 +17,7 @@ const GROUP_LABELS = {
   models:    '🤖 Model & Voice Settings',
 };
 
-const GROUP_ORDER = ['idle', 'tracking', 'talking', 'vad', 'vision', 'conversation', 'models'];
+const GROUP_ORDER = ['idle', 'tracking', 'talking', 'banks', 'vad', 'vision', 'conversation', 'models'];
 
 let panelEl = null;
 let isOpen = false;

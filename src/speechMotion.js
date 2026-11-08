@@ -1,6 +1,5 @@
 // Speech gestures use authored pose curves and the audio playback clock.
-// OpenAmika's emotion-bank scheduling inspired the approach; these curves are
-// authored here for standard Cubism parameters, without external motion assets.
+// Emotion banks schedule curves authored here for standard Cubism parameters.
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
 const SPEECH_HEAD_GAIN = 3.5;
@@ -11,6 +10,7 @@ const zeroPose = () => ({ headX: 0, headY: 0, headZ: 0, eyeX: 0, eyeY: 0,
 export const GESTURES = ['singleNod', 'doubleNod', 'leftTilt', 'rightTilt', 'glance', 'recenterLean'];
 export const MOTION_PROFILES = {
   netral: { strength: 1, pace: 1, weights: [4, 1, 2, 2, 1, 2] },
+  senang: { strength: 1.15, pace: 1.1, weights: [3, 3, 2, 2, 1, 2] },
   terkejut: { strength: 1.25, pace: 1.2, weights: [3, 3, 1, 1, 1, 2] },
   marah: { strength: 1.2, pace: 1.15, weights: [5, 3, 1, 1, 1, 2] },
   bingung: { strength: 0.85, pace: 0.85, weights: [1, 1, 4, 4, 3, 1] },
@@ -332,7 +332,7 @@ export class SpeechMotionController {
       }
     }
     this.cues = this.cues.filter(item => item.endAt > time);
-    return { ...this.pose, active: Boolean(cue), emotion: cue?.emotion ?? 'netral',
+    return { ...this.pose, active: Boolean(cue), cue: cue ?? null, emotion: cue?.emotion ?? 'netral',
       gesture: gesture?.kind ?? null, energy: cue ? energyAt(cue.rhythm, time - cue.startAt) : 0 };
   }
 }

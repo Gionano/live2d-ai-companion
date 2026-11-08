@@ -14,7 +14,10 @@ import { EMOTION_MAP } from './expressionMap.js';
 import { SpeechMotionController, resolveMotionParameters, resolveModelCapabilities, applyMotionOffsets, bodyLeanTransform, bodyLeanMargin } from './speechMotion.js';
 import { BodyMotionController, resolvePhysicsBodyParameters, prepareBodyPhysics } from './bodyMotion.js';
 import { SyntheticTracker } from './syntheticTracking.js';
+import { IdleMotionController, IDLE_MOTION_BANK, composeIdlePose, applyIdlePhysicsBodyOffsets } from './idleMotion.js';
 import { tuning } from './tuningConfig.js';
+import { EmotionBankController, loadEmotionBundle, isWitchModel, authoredIdleClips } from './emotionBanks.js';
+import { ComicEffects } from './comicEffects.js';
 
 // Konfigurasi Framing Half Body (Langsung & Permanen)
 export const HALF_BODY_FRAMING = {
@@ -86,6 +89,9 @@ class CompanionCubismModel extends CubismUserModel {
     this.physicsStats = null;
     this.physicsFrameCount = 0;
     this.ready = false;
+    this.bankAbort = new AbortController();
+    this.banks = null;
+    this.comics = null;
     this.textures = [];
 
     // --- Camera / Viewport framing ---
@@ -104,6 +110,12 @@ class CompanionCubismModel extends CubismUserModel {
     this.physicsOutputs = new Set();
     this.bodyMotion = null;
     this.speechPose = {};
+    this.idlePose = {};
+    this.renderBodyPose = {};
+    this.idleMotion = new IdleMotionController({ getOptions: () => ({
+      strength: tuning.get('idle.motionStrength'),
+      pace: tuning.get('idle.motionPace'),
+    }) });
     this.speechBounds = { minX: -0.5, maxX: 0.5, minY: -0.2, maxY: 0.65 };
     this.speechMotion = new SpeechMotionController({ getOptions: () => ({
       strength: tuning.get('talking.gestureStrength'),
@@ -228,6 +240,22 @@ class CompanionCubismModel extends CubismUserModel {
     this.getRenderer().loadShaders(SHADER_PATH);
     this.ready = true;
     this.startIdleMotion();
+  }
+
+  async loadBanks() {
+    if (!isWitchModel(this.homeDir)) return;
+    try {
+      const bundle = await loadEmotionBundle({ signal: this.bankAbort.signal });
+      if (this.bankAbort.signal.aborted) return;
+      const getOptions = () => tuning.group('banks');
+      this.banks = new EmotionBankController(bundle, { parameters: this.availableParams, getOptions });
+      this.comics = new ComicEffects(bundle, getOptions);
+      this.banks.onClear = () => this.comics?.clear();
+      this.idleMotion.bank = [...IDLE_MOTION_BANK, ...authoredIdleClips(bundle, this.availableParams)];
+      console.log('[Live2D] Witch banks loaded: 18 expressions, 20 clips, 7 symbols.');
+    } catch (error) {
+      if (!this.bankAbort.signal.aborted) console.warn('[Live2D] Emotion banks unavailable; retaining model animations:', error.message);
+    }
   }
 
   async loadExpressions() {
@@ -376,6 +404,8 @@ class CompanionCubismModel extends CubismUserModel {
       hasBodyFollow: Boolean(this.bodyMotion && Object.values(this.bodyMotion.parameters).some(Boolean)),
       speechMotion: { emotion: this.speechPose.emotion, gesture: this.speechPose.gesture,
         active: this.speechPose.active, energy: this.speechPose.energy },
+      idleMotion: { motion: this.idlePose.motion, active: this.idlePose.active,
+        bankCount: this.motionFor('idle') ? 0 : this.idleMotion.bank.length },
     };
   }
 
@@ -384,7 +414,11 @@ class CompanionCubismModel extends CubismUserModel {
    */
   dispose() {
     this.ready = false;
+    this.bankAbort.abort();
+    this.banks?.cancel();
+    this.comics?.dispose();
     this.speechMotion.reset();
+    this.idleMotion.reset();
     this.bodyMotion?.reset();
     this._unsubscribeTuning?.();
 
@@ -451,6 +485,12 @@ class CompanionCubismModel extends CubismUserModel {
     this.currentEmotion = emotion;
     this.currentIntensity = entry.intensity;
 
+    if (this.banks && tuning.get('banks.enabled') !== 'off') {
+      if (emotion === 'netral') this.banks.cancel();
+      this._expressionManager.stopAllMotions();
+      return;
+    }
+
     if (entry.expression === null) {
       this.setExpression(null);
     } else if (this.expressions.has(entry.expression)) {
@@ -474,7 +514,7 @@ class CompanionCubismModel extends CubismUserModel {
   startIdleMotion() {
     const found = this.motionFor('idle');
     if (!found) {
-      console.warn('[Live2D] Idle motion unavailable');
+      // Models without recorded idle motions use the authored local pose bank.
       return;
     }
     found.motion.setLoop(true);
@@ -515,14 +555,36 @@ class CompanionCubismModel extends CubismUserModel {
     if (!this.ready) return;
     this.talking = speaking;
     this.speechPose = this.speechMotion.update(audioTime, delta);
-    if (this.speechPose.active || this._speechWasActive) {
+    const bankState = this.banks?.update(audioTime, delta);
+    const bankEnabled = this.banks && tuning.get('banks.enabled') !== 'off';
+    if (bankEnabled) {
+      this.currentEmotion = this.banks.emotion;
+      this.currentIntensity = EMOTION_MAP[this.currentEmotion]?.intensity ?? 'sedang';
+    } else if (this._bankWasEnabled) {
+      this.setEmotion(this.speechPose.emotion);
+    }
+    this._bankWasEnabled = Boolean(bankEnabled);
+    if (bankState?.event) {
+      this.currentEmotion = bankState.event.emotion;
+      this.comics?.trigger(bankState.event, audioTime);
+    }
+    if (!bankEnabled && (this.speechPose.active || this._speechWasActive)) {
       if (this.currentEmotion !== this.speechPose.emotion) this.setEmotion(this.speechPose.emotion);
     }
     this._speechWasActive = this.speechPose.active;
+    this.idlePose = this.idleMotion.update(delta, {
+      speaking: Boolean(this.speechPose.active || bankState?.voiced),
+      enabled: !this.motionFor('idle') && !bankState?.motionActive,
+    });
+    this.renderBodyPose = { ...this.speechPose,
+      bodyX: (this.speechPose.bodyX || 0) + this.idlePose.bodyX,
+      bodyY: (this.speechPose.bodyY || 0) + this.idlePose.bodyY,
+      bodyZ: (this.speechPose.bodyZ || 0) + this.idlePose.bodyZ,
+    };
 
     this._model.loadParameters();
 
-    if (this._motionManager.isFinished()) this.startIdleMotion();
+    if (this.motionFor('idle') && this._motionManager.isFinished()) this.startIdleMotion();
     this._motionManager.updateMotion(this._model, delta);
     this._model.saveParameters();
 
@@ -534,7 +596,15 @@ class CompanionCubismModel extends CubismUserModel {
     }
 
     if (this.eyeBlink) this.eyeBlink.updateParameters(this._model, delta);
+    const blink = {};
+    if (bankEnabled) {
+      for (const id of ['ParamEyeLOpen', 'ParamEyeROpen']) {
+        const param = this.availableParams.get(id);
+        if (param) blink[id] = this._model.getParameterValueByIndex(param.index);
+      }
+    }
     this._expressionManager.updateMotion(this._model, delta);
+    if (bankEnabled) this.banks.applyFace(this._model, blink);
 
     // Di mode overlay, pastikan arah ekspresi sayap (翅膀.exp3.json / Param41)
     // tetap konsisten meskipun emosi netral memanggil stopAllMotions():
@@ -559,9 +629,15 @@ class CompanionCubismModel extends CubismUserModel {
     }
 
     // Compose head, gaze and brows once, after expressions and before physics.
-    const idle = this.syntheticTracker.sample(delta, this.speechPose.active);
+    const idle = composeIdlePose(this.syntheticTracker.sample(delta, this.speechPose.active), this.idlePose);
     applyMotionOffsets(this._model, this.motionParameters, this.speechPose, idle);
     this.bodyMotion?.update(this._model, this.speechPose, delta);
+    applyIdlePhysicsBodyOffsets(this._model, this.bodyMotion?.parameters, this.idlePose);
+    if (bankEnabled) {
+      this.banks.applyOffsets(this._model);
+      this.banks.applyReaction(this._model, audioTime);
+    }
+    this.bankFrame = { time: audioTime, delta };
 
     if (this._physics) {
       this._physics.evaluate(this._model, delta);
@@ -897,13 +973,22 @@ class CompanionCubismModel extends CubismUserModel {
     if (!this.hasRiggedBody) {
       const bounds = this.isOverlay ? this.measuredPresetBounds.get(this.overlayPresetId) ?? this.speechBounds : this.speechBounds;
       const lean = new CubismMatrix44();
-      lean.setMatrix(bodyLeanTransform(bounds, this.speechPose, tuning.get('talking.bodyLeanStrength')));
+      lean.setMatrix(bodyLeanTransform(bounds, this.renderBodyPose, tuning.get('talking.bodyLeanStrength')));
       projection.multiplyByMatrix(lean);
     }
     const renderer = this.getRenderer();
     renderer.setMvpMatrix(projection);
     renderer.setRenderState(null, [0, 0, width, height]);
     renderer.drawModel(SHADER_PATH);
+    if (this.comics && this.bankFrame) {
+      const values = {};
+      for (const id of ['ParamAngleX', 'ParamAngleY', 'ParamBodyAngleX']) {
+        const p = this.availableParams.get(id);
+        if (p) values[id] = this._model.getParameterValueByIndex(p.index);
+      }
+      this.comics.update(this.bankFrame.time, this.bankFrame.delta, projection.getArray(), this.speechBounds,
+        values, this.canvas.getBoundingClientRect());
+    }
 
     if (this.isOverlay && this._pendingDiagReason) {
       this._pendingDiagFrames = (this._pendingDiagFrames || 0) + 1;
@@ -1254,11 +1339,16 @@ export class Live2DCompanion {
   }
 
   async switchModel(modelPath) {
+    const session = this._modelSession = (this._modelSession ?? 0) + 1;
+    this._pendingModel?.bankAbort.abort();
     if (this.status) this.status.textContent = 'Memuat model...';
     console.log(`[Live2D] Switching model to: ${modelPath}`);
 
     // Clean up previous model instance (Requirement 6)
     if (this.model) {
+      this._retiredSpeechIds ??= new Set();
+      for (const cue of [...this.model.speechMotion.cues, ...(this.model.banks?.cues ?? [])]) this._retiredSpeechIds.add(cue.speechId);
+      if (this._retiredSpeechIds.size > 512) this._retiredSpeechIds.delete(this._retiredSpeechIds.values().next().value);
       this.model.dispose();
       this.model = null;
     }
@@ -1273,8 +1363,19 @@ export class Live2DCompanion {
     const file = url.pathname.split('/').pop();
     const homeDir = url.pathname.slice(0, url.pathname.lastIndexOf('/') + 1);
 
-    this.model = new CompanionCubismModel(this.gl, this.canvas, homeDir);
-    await this.model.load(file);
+    const nextModel = new CompanionCubismModel(this.gl, this.canvas, homeDir);
+    this._pendingModel = nextModel;
+    try {
+      await nextModel.load(file);
+      if (session === this._modelSession) await nextModel.loadBanks();
+    } catch (error) {
+      nextModel.dispose();
+      if (session === this._modelSession) { this._pendingModel = null; throw error; }
+      return null;
+    }
+    if (session !== this._modelSession) { nextModel.dispose(); return null; }
+    this._pendingModel = null;
+    this.model = nextModel;
 
     // Langsung terapkan framing Half Body saat model di-load
     this.currentFramingConfig = getHalfBodyConfig();
@@ -1378,17 +1479,25 @@ export class Live2DCompanion {
 
   setEmotionCue(emotion, endAt) {
     if (this.model?.speechMotion.cues.length) return;
+    if (this.model?.banks && endAt > (window.__waifuAudioTime?.() ?? 0)) {
+      const startAt = window.__waifuAudioTime?.() ?? 0;
+      this.model.banks.queue({ speechId: 'legacy-emotion', emotion, startAt, endAt });
+      return;
+    }
     this.emotionEndsAt = endAt || 0;
     this.model?.setEmotion(emotion);
   }
 
   queueSpeechCue(cue) {
+    if (this._retiredSpeechIds?.has(cue?.speechId)) return;
     this.emotionEndsAt = 0;
     this.model?.speechMotion.queue(cue);
+    this.model?.banks?.queue(cue);
   }
 
   cancelSpeechCue(speechId) {
     this.model?.speechMotion.cancel(speechId);
+    this.model?.banks?.cancel(speechId);
   }
 
   setExpression(name) {

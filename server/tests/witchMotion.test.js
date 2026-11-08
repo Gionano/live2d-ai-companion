@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { SpeechMotionController, resolveMotionParameters, applyMotionOffsets } from '../../src/speechMotion.js';
 import { resolvePhysicsBodyParameters, prepareBodyPhysics, BodyMotionController } from '../../src/bodyMotion.js';
+import { IdleMotionController, composeIdlePose, applyIdlePhysicsBodyOffsets } from '../../src/idleMotion.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const corePath = path.join(root, 'public/vendor/live2d/live2dcubismcore.min.js');
@@ -39,7 +40,7 @@ async function loadRuntime() {
     write: false,
   });
   const context = vm.createContext({ console, process, require: createRequire(import.meta.url),
-    __dirname: path.dirname(corePath), setTimeout, clearTimeout, TextDecoder, TextEncoder, Buffer });
+    __dirname: path.dirname(corePath), setTimeout, clearTimeout, TextDecoder, TextEncoder, Buffer, structuredClone });
   context.Math = Object.create(Math);
   vm.runInContext(fs.readFileSync(corePath, 'utf8'), context, { filename: corePath });
   // Wait for the Core's embedded runtime without rendering or loading textures.
@@ -83,7 +84,7 @@ function createBreath(runtime, parameters) {
   return breath;
 }
 
-function simulate(runtime, emotion, fps, { idleOnly = false } = {}) {
+function simulate(runtime, emotion, fps, { idleOnly = false, withIdleBank = false } = {}) {
   const bytes = fs.readFileSync(modelPath);
   const moc = runtime.core.Moc.fromArrayBuffer(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
   assert.ok(moc, 'The local moc3 must load.');
@@ -114,6 +115,12 @@ function simulate(runtime, emotion, fps, { idleOnly = false } = {}) {
   runtime.seedTracking();
   const tracker = new runtime.SyntheticTracker();
   const breath = createBreath(runtime, parameters);
+  let idleSeed = 123;
+  const idleBank = withIdleBank ? new IdleMotionController({ random: () => {
+    idleSeed = (Math.imul(idleSeed, 1664525) + 1013904223) >>> 0;
+    return idleSeed / 4294967296;
+  } }) : null;
+  const idleNames = new Set();
   const endAt = 9;
   if (!idleOnly) {
     speech.queue({ speechId: 'local-rig-check', startAt: 1, endAt, emotion,
@@ -134,8 +141,12 @@ function simulate(runtime, emotion, fps, { idleOnly = false } = {}) {
       model.saveParameters();
       const pose = speech.update(time, 1 / fps);
       breath.updateParameters(model, 1 / fps);
-      applyMotionOffsets(model, motionParameters, pose, tracker.sample(1 / fps, pose.active));
+      const authored = idleBank?.update(1 / fps, { speaking: pose.active });
+      if (authored?.motion) idleNames.add(authored.motion);
+      const tracked = tracker.sample(1 / fps, pose.active);
+      applyMotionOffsets(model, motionParameters, pose, authored ? composeIdlePose(tracked, authored) : tracked);
       body.update(model, pose, 1 / fps);
+      if (authored) applyIdlePhysicsBodyOffsets(model, body.parameters, authored);
       const settledAt = settleTimes.find(seconds => frame === fps * (endAt + seconds));
       if (settledAt) {
         tail[settledAt] = { base: {}, actual: {} };
@@ -176,7 +187,7 @@ function simulate(runtime, emotion, fps, { idleOnly = false } = {}) {
     const activity = Object.fromEntries(Object.entries(squaredVelocity)
       .map(([group, sum]) => [group, Math.sqrt(sum / activeFrames)]));
     return { peaks, maxStep, final, activity, tail, speechFinal: { ...speech.pose },
-      bodyOffsets: { ...body.offsets } };
+      bodyOffsets: { ...body.offsets }, idleNames: [...idleNames] };
   } finally {
     runtime.CubismPhysics.delete(physics);
     model.release();
@@ -236,6 +247,31 @@ test('local witch rig preserves coordinated speech movement through real Cubism 
     for (const id of trackedIds) {
       assert.ok(Math.abs(lowerFps.peaks[id] - results.netral.peaks[id]) < 0.6,
         `${id} should preserve its range at 30 and 60 FPS.`);
+    }
+  } finally {
+    runtime.CubismFramework.dispose();
+    runtime.CubismFramework.cleanUp();
+  }
+});
+
+test('local witch idle bank moves the real torso smoothly through unchanged Cubism physics', {
+  skip: !hasLocalAssets && 'Optional ignored witch assets or vendored runtime are unavailable.',
+}, async () => {
+  const runtime = await loadRuntime();
+  try {
+    const baseline = simulate(runtime, 'netral', 60, { idleOnly: true });
+    const authored = simulate(runtime, 'netral', 60, { idleOnly: true, withIdleBank: true });
+    const lowerFps = simulate(runtime, 'netral', 30, { idleOnly: true, withIdleBank: true });
+    console.log(`authored idle peak degrees: ${JSON.stringify(authored.peaks)}; `
+      + `baseline peak degrees: ${JSON.stringify(baseline.peaks)}; maximum frame steps: ${JSON.stringify(authored.maxStep)}`);
+    assert.ok(authored.idleNames.length >= 2);
+    assert.ok(authored.peaks.ParamBodyAngleX > baseline.peaks.ParamBodyAngleX * 1.5);
+    // Pitch already follows the existing breath; variety need not amplify it.
+    assert.ok(authored.peaks.ParamBodyAngleY > 0.5);
+    for (const id of trackedIds) {
+      assert.ok(authored.maxStep[id] < 1, `${id} must move without idle pose jumps.`);
+      assert.ok(Math.abs(lowerFps.peaks[id] - authored.peaks[id]) < 0.6,
+        `${id} idle range should remain comparable at 30 and 60 FPS.`);
     }
   } finally {
     runtime.CubismFramework.dispose();
