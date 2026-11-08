@@ -76,7 +76,7 @@ test('the real selfie input branch skips provider and planner while disabled and
   const run = new AsyncFunction('socket', 'speechController', 'history', 'msg',
     'detectSelfieIntent', 'markConversationActivity', 'disabledSelfieResult',
     'prepareSelfieJob', 'jobManager', 'planSelfie', 'playSpokenMessage',
-    'proactiveConversation', 'visionSessions', source.slice(start, end));
+    'proactiveConversation', 'visionSessions', 'visionManager', source.slice(start, end));
   const socket = { selfieEnabled: false };
   const events = [];
   const history = [];
@@ -103,7 +103,7 @@ test('the real selfie input branch skips provider and planner while disabled and
   const input = () => run(socket, controller, history, { type: 'text_input', text: 'pap dong' },
     () => ({ isSelfie: true, matchedKeyword: 'pap' }), () => {}, disabledSelfieResult,
     prepareSelfieJob, jobManager, planner, playSpokenMessage,
-    { updateSettings() {}, setUserActive() {} }, new Map());
+    { updateSettings() {}, setUserActive() {} }, new Map(), { conversationActivity() {} });
   try {
     await input();
     assert.equal(providers, 0);

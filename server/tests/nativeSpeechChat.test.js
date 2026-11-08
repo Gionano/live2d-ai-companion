@@ -27,7 +27,7 @@ function registryFor(parts, { params = {}, available = true, tts } = {}) {
 
 test('native speech prompt accepts exactly the 49 canonical names and preserves avatar labels', () => {
   assert.equal(FISH_EMOTION_NAMES.length, 49);
-  assert.equal(REPLY_EMOTIONS.size, 12);
+  assert.equal(REPLY_EMOTIONS.size, 13);
   for (const name of FISH_EMOTION_NAMES) {
     assert.equal(normalizeSpeechEmotion(name), name);
     assert.ok(speechEmotionPrompt().includes(name));
@@ -70,7 +70,7 @@ for (const [name, json] of [
     const registry = registryFor([json], { params: { expression: { mergeShortSentences: { enabled: false } } } });
     const events = await collect(generateReplyStream([], 'Halo', null, { registry }));
     assert.deepEqual(events.filter(event => event.type === 'emotion'), [{ type: 'emotion', emotion: 'sayang' }]);
-    assert.deepEqual(events.filter(event => event.type === 'sentence'), [{ type: 'sentence', text: 'Halo!' }]);
+    assert.deepEqual(events.filter(event => event.type === 'sentence'), [{ type: 'sentence', text: 'Halo!', pauseAfterMs: 200 }]);
     assert.equal(events.filter(event => event.type === 'delta').map(event => event.text).join(''), 'Halo!');
   });
 }
@@ -138,10 +138,10 @@ test('sentence streaming starts before the provider finishes and never waits for
   const stream = generateReplyStream([], 'Halo', null, { registry });
   assert.equal((await stream.next()).value.type, 'emotion');
   assert.equal((await stream.next()).value.type, 'delta');
-  assert.deepEqual((await stream.next()).value, { type: 'sentence', text: 'Aku di sini.' });
+  assert.deepEqual((await stream.next()).value, { type: 'sentence', text: 'Aku di sini.', pauseAfterMs: 200 });
   release();
   const remaining = await collect(stream);
-  assert.deepEqual(remaining.find(event => event.type === 'sentence'), { type: 'sentence', text: 'Tenang!' });
+  assert.deepEqual(remaining.find(event => event.type === 'sentence'), { type: 'sentence', text: 'Tenang!', pauseAfterMs: 200 });
 });
 
 test('all 49 native chat choices reach fake Fish audio while avatar cues stay sayang', async t => {
@@ -185,5 +185,5 @@ test('cancelled reply metadata does not enter a newer stream', async () => {
   await assert.rejects(stream.next(), { name: 'AbortError' });
   const nextRegistry = registryFor(['{"emotion":"sayang","text":"Halo!"}']);
   const next = await collect(generateReplyStream([], 'Halo', null, { registry: nextRegistry }));
-  assert.deepEqual(next.find(event => event.type === 'sentence'), { type: 'sentence', text: 'Halo!' });
+  assert.deepEqual(next.find(event => event.type === 'sentence'), { type: 'sentence', text: 'Halo!', pauseAfterMs: 200 });
 });

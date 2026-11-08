@@ -12,20 +12,20 @@ import { logger as console } from '../src/logging.js';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
-import {
-  describeFrame,
-  detectVisionIntent,
-  resolveVisionSource,
-} from './visionCapture.js';
+import { describeFrame } from './visionCapture.js';
+import { ConversationVisionRouter } from './visionRouting.js';
+import { inspectVision } from './explicitVision.js';
 import { StreamingVisionManager, streamingVisionManager } from './streamingVisionManager.js';
-import { ProactiveConversation } from './proactiveConversation.js';
+import { ProactiveConversation, proactiveSpeechInstruction } from './proactiveConversation.js';
 import { VisionMonitorPresence } from './visionMonitorPresence.js';
 import { getServerTuning } from './serverConfig.js';
 import {
   generateReply,
-  generateReplyStream,
   HISTORY_MESSAGE_LIMIT,
+  trimConversationHistory,
 } from './llmChat.js';
+import { playConversationReply } from './conversationSpeech.js';
+import { migrateConversationDefaults } from '../src/conversationDefaults.js';
 import { transcribeAudio } from './sttTranscribe.js';
 import { generateSpeech, isSpeechConfigured as isVoiceConfigured } from './ttsGenerate.js';
 import { getProviderRegistry, getSlotStatus, UNAVAILABLE_MESSAGES } from './providers/registry.js';
@@ -33,7 +33,6 @@ import { getSettingsService } from './settings/service.js';
 import { installSettingsRoutes } from './settings/routes.js';
 import { ImageSettingsService } from './settings/imageSettingsService.js';
 import { SpeechController } from './speechController.js';
-import { stripSpeechTags } from './ttsExpression.js';
 import {
   companionSessionClosed,
   companionSessionOpened,
@@ -48,6 +47,8 @@ import {
   extractZipModel,
 } from './modelManager.js';
 import { memoryManager } from './memoryManager.js';
+import { SpeechMemoryRecorder } from './speechMemory.js';
+import { MemoryEmbeddingRuntime } from './memoryEmbeddingRuntime.js';
 import { detectSelfieIntent } from './selfie/intent.js';
 import { planSelfie } from './selfie/planner.js';
 import { jobManager } from './selfie/jobManager.js';
@@ -59,7 +60,15 @@ import { watchSelfieConfig } from './selfie/config.js';
 const app = express();
 const providerSettings = getSettingsService();
 const imageSettings = new ImageSettingsService({ service: providerSettings, manager: jobManager });
-installSettingsRoutes(app, { service: providerSettings, registry: getProviderRegistry(), imageStatus: () => jobManager.getProviderStatus(), imageService: imageSettings });
+const memoryEmbeddingRuntime = new MemoryEmbeddingRuntime({ registry: getProviderRegistry(),
+  getConfig: () => providerSettings.effective().settings.memory });
+memoryManager.configure({ getWriter: () => getProviderRegistry().getLlm('memoryWriter'),
+  getEmbedding: () => getProviderRegistry().getEmbedding() });
+const speechMemoryRecorder = new SpeechMemoryRecorder({ manager: memoryManager,
+  onError: code => console.warn('[memory] Storage operation failed:', code) });
+installSettingsRoutes(app, { service: providerSettings, registry: getProviderRegistry(),
+  imageStatus: () => jobManager.getProviderStatus(), imageService: imageSettings,
+  memoryService: { manager: memoryManager, runtime: memoryEmbeddingRuntime } });
 installSelfieImagePolicy(app, jobManager);
 // Frame base64 bisa lumayan besar — naikkan limit body JSON.
 app.use(express.json({ limit: '12mb' }));
@@ -75,7 +84,7 @@ const CONFIG_FILE_PATH = path.resolve(__serverDir, '../config/animationConfig.js
 app.get('/api/config', async (req, res) => {
   try {
     const raw = await fs.promises.readFile(CONFIG_FILE_PATH, 'utf-8');
-    res.json(JSON.parse(raw));
+    res.json(migrateConversationDefaults(JSON.parse(raw)));
   } catch (err) {
     console.error('[config] Failed to read config:', err.message);
     res.status(500).json({ error: err.message });
@@ -91,7 +100,7 @@ app.post('/api/config', async (req, res) => {
 
     let current = {};
     try {
-      current = JSON.parse(await fs.promises.readFile(CONFIG_FILE_PATH, 'utf-8'));
+      current = migrateConversationDefaults(JSON.parse(await fs.promises.readFile(CONFIG_FILE_PATH, 'utf-8')));
     } catch (_) {}
 
     // Merge values while keeping schema metadata (min, max, step, desc, default)
@@ -188,31 +197,6 @@ app.post('/api/vision', async (req, res) => {
   }
 });
 
-// --- Long-Term Memory & Episodic Recall APIs ---
-app.get('/api/memory', (req, res) => {
-  res.json({
-    lastSeen: memoryManager.memory.lastSeen,
-    lastSeenText: memoryManager.formatTimeElapsed(memoryManager.memory.lastSeen),
-    profile: memoryManager.memory.profile,
-    episodes: memoryManager.memory.episodes,
-    promptPreview: memoryManager.getMemoryPrompt(),
-  });
-});
-
-app.post('/api/memory/clear', (req, res) => {
-  memoryManager.clearMemory();
-  res.json({ success: true, message: 'Memori jangka panjang berhasil di-reset.' });
-});
-
-app.post('/api/memory/fact', (req, res) => {
-  const { text, category } = req.body ?? {};
-  if (!text) {
-    return res.status(400).json({ error: 'Field "text" wajib diisi.' });
-  }
-  memoryManager.addFact(text, category || 'manual');
-  res.json({ success: true, facts: memoryManager.memory.profile.facts });
-});
-
 app.post('/api/chat', async (req, res) => {
   const controller = new AbortController();
   res.on('close', () => controller.abort());
@@ -271,7 +255,7 @@ const SCREEN_FRAME_MAX_BASE64_CHARS = 8 * 1024 * 1024; // batas keamanan ~6 MB b
 const SCREEN_FAIL_SPOKEN = 'layarnya tidak bisa kulihat, coba mode borderless';
 
 // Pesan berat khusus Vision Monitor — jangan dikirim ke browser companion.
-const MONITOR_ONLY_TYPES = new Set(['monitor_frame']);
+const MONITOR_ONLY_TYPES = new Set(['monitor_frame', 'routing_status']);
 // Socket companion yang sedang share screen (untuk deteksi putus koneksi).
 const sharingSockets = new Set();
 // Socket Vision Monitor yang terhubung (untuk conditional continuous capture).
@@ -300,7 +284,13 @@ function broadcastToCompanions(obj) {
 
 // Hubungkan broadcaster JobManager ke semua socket companion
 jobManager.setBroadcaster(broadcastToCompanions);
-providerSettings.setBroadcaster(broadcastToCompanions);
+providerSettings.setBroadcaster(event => {
+  broadcastToCompanions(event);
+  if (event.type === 'settings_changed') {
+    void memoryEmbeddingRuntime.reconcile().catch(error =>
+      console.warn('[memory] Embedding settings could not be applied:', error.code ?? 'EMBEDDING_UNAVAILABLE'));
+  }
+});
 void imageSettings.reload().catch((err) => {
   console.warn(`[selfie] Provider startup check failed: ${err.message}`);
 });
@@ -313,14 +303,15 @@ const stopSelfieConfigWatch = watchSelfieConfig(
 
 // One controller owns turn state and speech IDs for every spoken output.
 const speechController = new SpeechController({ generateSpeech, isVoiceConfigured,
-  onPlaybackReleased: ({ recipients, ...info }) => {
+  onPlaybackReleased: ({ recipients, memoryContext, spokenText, ...info }) => {
+    speechMemoryRecorder.released({ ...info, memoryContext, spokenText });
     for (const socket of recipients) proactiveConversation.playbackCompleted(socket, info);
   } });
 const proactiveConversation = new ProactiveConversation({ registry: getProviderRegistry(),
   enabled: getServerTuning('conversation', 'proactiveEnabled', 'on') === 'on',
   decisionTimeoutMs: getServerTuning('conversation', 'proactiveDecisionTimeoutMs', 30000),
   onError: error => console.warn('[proactive] Decision failed:', error.code ?? error.name),
-  delaySeconds: getServerTuning('conversation', 'proactiveDelaySeconds', 60) });
+  delaySeconds: getServerTuning('conversation', 'proactiveDelaySeconds', 30) });
 
 function playSpokenMessage(text, emotion = 'sayang', socket, turnId) {
   return speechController.play({ text, emotion, recipients: [socket], turnId });
@@ -345,6 +336,7 @@ function sendVisionInit(sock, manager = [...visionSessions.values()].at(-1) || s
     settings: manager.settings,
     stats: manager.stats,
     sources: manager.getSourceSnapshot(),
+    routing: manager.routingStatus,
     bufferCount: manager.buffer.length,
     sync: manager.syncInfo(),
   }));
@@ -383,6 +375,12 @@ wss.on('connection', (socket, req) => {
       } else if (msg.type === 'reset_stats') {
         streamingVisionManager.resetStats();
         for (const manager of visionSessions.values()) manager.resetStats();
+      } else if (msg.type === 'spontaneous_vision_comment') {
+        const conversation = msg.conversationId
+          ? [...visionSessions.keys()].find(client => client.visionSessionId === msg.conversationId)
+          : proactiveConversation.latestSession;
+        if (conversation) void visionSessions.get(conversation)?.considerExternalCommentary(msg)
+          .catch(() => console.warn('[vision] External commentary skipped.'));
       }
     });
     socket.once('close', () => {
@@ -402,6 +400,13 @@ wss.on('connection', (socket, req) => {
   speechController.register(socket, send);
   const history = []; // Conversation and visual caches belong to this connection.
   const visionManager = new StreamingVisionManager();
+  const visionRouter = new ConversationVisionRouter({ onStatus: status => {
+    visionManager.routingStatus = status;
+    console.info('[routing]', status.status, { method: status.method, target: status.target,
+      latencyMs: status.latencyMs, ready: status.ready, reason: status.reason });
+    const event = JSON.stringify({ ...status, conversationId: socket.visionSessionId });
+    for (const monitor of monitorSockets) if (monitor.readyState === WebSocket.OPEN) monitor.send(event);
+  } });
   visionManager.setMonitorConnected(visionMonitorPresence.active);
   visionSessions.set(socket, visionManager);
   socket.visionSessionId = randomUUID();
@@ -409,16 +414,17 @@ wss.on('connection', (socket, req) => {
   socket.explicitVisionControllers = new Map();
   socket.userInputActive = false;
   socket.proactiveEnabled = getServerTuning('conversation', 'proactiveEnabled', 'on') === 'on';
-  socket.proactiveDelaySeconds = getServerTuning('conversation', 'proactiveDelaySeconds', 60);
+  socket.proactiveDelaySeconds = getServerTuning('conversation', 'proactiveDelaySeconds', 30);
 
   socket.once('close', () => {
+    visionRouter.dispose();
     for (const controller of socket.explicitVisionControllers.values()) controller.abort();
     socket.explicitVisionControllers.clear();
     proactiveConversation.unregister(socket);
     visionManager.dispose();
     visionSessions.delete(socket);
     proactiveConversation.updateSettings({ enabled: [...visionSessions.keys()].some(client => client.proactiveEnabled),
-      delaySeconds: proactiveConversation.latestSession?.proactiveDelaySeconds ?? 60 });
+      delaySeconds: proactiveConversation.latestSession?.proactiveDelaySeconds ?? 30 });
     speechController.unregister(socket);
     companionSessionClosed();
     for (const pending of pendingCaptures.values()) {
@@ -505,16 +511,23 @@ wss.on('connection', (socket, req) => {
     }
   });
   visionManager.setHistoryRef(history);
-  visionManager.setSpeechHandler((text, emotion, { speechEmotion, signal } = {}) => {
-    if (signal?.aborted) return;
-    return speechController.play({ text, emotion, speechEmotion, signal, recipients: [socket], deferred: true, origin: 'vision' });
+  visionManager.setCommentaryAdmission(() => !socket.userInputActive && !speechController.isBusy(socket)
+    && !speechController.activeSpeech && speechController.queue.length === 0
+    && [...visionSessions.keys()].every(client => !client.userInputActive && !speechController.isBusy(client)));
+  visionManager.setSpeechHandler((text, emotion, { speechEmotion, signal, onAdmitted } = {}) => {
+    if (signal?.aborted || !visionManager.commentaryAvailable()) return;
+    return speechController.play({ signal, recipients: [socket], origin: 'vision',
+      memoryContext: speechMemoryRecorder.context({ sessionId: socket.visionSessionId, origin: 'vision' }),
+      produce: async ({ say, signal: playbackSignal }) => {
+        if (!playbackSignal.aborted && onAdmitted?.()) await say(text, emotion, () => {}, { speechEmotion });
+      } });
   });
   proactiveConversation.register(socket, {
     history: () => history,
     getVisionContext: () => visionManager.getConversationContext(),
     isAvailable: () => socket.proactiveEnabled && getSlotStatus('llm').available && getSlotStatus('tts').available,
     isBusy: () => socket.userInputActive || speechController.isBusy(socket)
-      || Boolean(speechController.activeSpeech) || speechController.queue.length > 0 || visionManager.isFilteringInProgress,
+      || Boolean(speechController.activeSpeech) || speechController.queue.length > 0,
     onStatus: status => {
       const key = status.status + ':' + status.reason;
       if (socket.lastProactiveLogKey !== key) {
@@ -530,39 +543,27 @@ wss.on('connection', (socket, req) => {
       }
     },
     onCancel: ({ reason }) => speechController.cancelProactive(socket, { drain: reason !== 'user_activity' }),
-    onSpeak: async ({ topic, signal, visionContext }) => {
+    onSpeak: async ({ topic, cue, reason, signal, visionContext }) => {
       const turn = speechController.beginTurn(socket, { origin: 'proactive' });
       if (!turn || signal.aborted) return { ok: false };
       const abort = () => speechController.cancelProactive(socket, { drain: false });
       signal.addEventListener('abort', abort, { once: true });
-      let full = '';
-      let emotion = 'netral';
       try {
-        const result = await speechController.play({ origin: 'proactive', recipients: [socket], turnId: turn.turnId,
-          produce: async ({ say, signal: speechSignal }) => {
-            let chain = Promise.resolve();
-            try {
-              for await (const event of generateReplyStream(history, null, visionContext, {
-                signal: speechSignal,
-                internalInstruction: `Mulai obrolan singkat secara alami tentang topik ini: ${topic}. Jangan mengaku user baru saja mengatakan sesuatu.`,
-              })) {
-                if (event.type === 'delta') full += event.text;
-                else if (event.type === 'emotion') emotion = event.emotion;
-                else if (event.type === 'sentence') {
-                  const snapshot = { ...event };
-                  const selectedEmotion = snapshot.emotion ?? emotion;
-                  chain = chain.then(() => say(snapshot.text, selectedEmotion, () => {}, snapshot));
-                }
-              }
-            } finally { await chain; }
-            if (!speechSignal.aborted) speechController.sendTurn(socket, turn.turnId,
-              { type: 'amika_replied', text: full, emotion });
-          } });
-        if (signal.aborted || !speechController.isCurrentTurn(socket, turn.turnId) || !full.trim()) return { ok: false };
-        history.push({ role: 'assistant', content: full });
+        const result = await playConversationReply({ controller: speechController, socket, turnId: turn.turnId,
+          history, userMessage: null, vision: visionContext, origin: 'proactive',
+          memoryContext: speechMemoryRecorder.context({ sessionId: socket.visionSessionId,
+            turnId: turn.turnId, origin: 'proactive' }),
+          guidance: () => proactiveConversation.consumeGuidance(socket),
+          internalInstruction: proactiveSpeechInstruction({ reason, topic, cue }),
+        });
+        if (signal.aborted || !speechController.isCurrentTurn(socket, turn.turnId) || !result.text.trim()) return { ok: false };
+        history.push({ role: 'assistant', content: result.text });
         if (history.length > HISTORY_MESSAGE_LIMIT) history.splice(0, history.length - HISTORY_MESSAGE_LIMIT);
-        visionManager.setAssistantContext(full);
-        return { ok: true, text: full, speechId: result.speechId };
+        visionManager.setAssistantContext(result.text);
+        if (result.reflectionRequest) proactiveConversation.requestReflection(socket, {
+          request: result.reflectionRequest, turnId: turn.turnId, speechId: result.speechId,
+        });
+        return { ...result, ok: result.ok !== false };
       } finally {
         signal.removeEventListener('abort', abort);
         speechController.completeTurn(socket, turn.turnId);
@@ -590,9 +591,19 @@ wss.on('connection', (socket, req) => {
     if (!msg || typeof msg !== 'object') return;
     if (handleSelfieFeature(msg)) return;
 
+    if (msg.type === 'conversation_ready') {
+      if (typeof msg.audioReady !== 'boolean') return;
+      proactiveConversation.setReady(socket, msg.audioReady);
+      proactiveConversation.updateSettings({ enabled: [...visionSessions.keys()].some(client => client.proactiveEnabled),
+        delaySeconds: proactiveConversation.latestSession?.proactiveDelaySeconds ?? socket.proactiveDelaySeconds });
+      if (!msg.audioReady) speechController.cancelProactive(socket, { drain: false });
+      return;
+    }
+
     if (msg.type === 'user_activity') {
       if (!['start', 'end'].includes(msg.phase)) return;
       socket.userInputActive = msg.phase === 'start';
+      if (socket.userInputActive) visionManager.conversationActivity();
       proactiveConversation.updateSettings({ enabled: [...visionSessions.keys()].some(client => client.proactiveEnabled),
         delaySeconds: socket.proactiveDelaySeconds });
       proactiveConversation.setUserActive(socket, socket.userInputActive);
@@ -602,7 +613,7 @@ wss.on('connection', (socket, req) => {
     if (msg.type === 'proactive_config') {
       if (typeof msg.enabled !== 'boolean') return;
       socket.proactiveEnabled = msg.enabled;
-      socket.proactiveDelaySeconds = Number.isFinite(msg.delaySeconds) ? Math.max(30, Math.min(300, msg.delaySeconds)) : 60;
+      socket.proactiveDelaySeconds = Number.isFinite(msg.delaySeconds) ? Math.max(30, Math.min(300, msg.delaySeconds)) : 30;
       proactiveConversation.updateSettings({ enabled: [...visionSessions.keys()].some(client => client.proactiveEnabled),
         delaySeconds: proactiveConversation.latestSession?.proactiveDelaySeconds ?? socket.proactiveDelaySeconds });
       if (!msg.enabled) {
@@ -615,7 +626,7 @@ wss.on('connection', (socket, req) => {
     if (msg.type === 'mic_mute') {
       if (typeof msg.muted !== 'boolean') return;
       socket.micMuted = msg.muted;
-      if (socket.micMuted) {
+      if (socket.micMuted && socket.userInputActive) {
         socket.userInputActive = false;
         proactiveConversation.setUserActive(socket, false);
       }
@@ -658,6 +669,7 @@ wss.on('connection', (socket, req) => {
       const previous = socket.captureSessions[msg.source];
       socket.captureSessions[msg.source] = { sessionId: msg.sessionId, active: msg.active };
       if (previous.sessionId !== msg.sessionId || previous.active !== msg.active) {
+        visionRouter.retireSource(msg.source);
         socket.explicitVisionControllers.get(msg.source)?.abort();
       }
       return;
@@ -665,6 +677,8 @@ wss.on('connection', (socket, req) => {
 
     if (msg.type === 'vision_source_status') {
       if (!['screen', 'webcam'].includes(msg.source) || typeof msg.active !== 'boolean') return;
+      const previous = visionManager.getSourceSnapshot()[msg.source];
+      if (!msg.active || previous?.sessionId !== msg.sessionId) visionRouter.retireSource(msg.source);
       visionManager.setSourceStatus(msg.source, msg.active, msg.sessionId);
       return;
     }
@@ -685,34 +699,25 @@ wss.on('connection', (socket, req) => {
       return;
     }
 
-    // 4. Handler untuk komentar spontan eksternal (jika ada)
+    // External proposals use the same relevance and admission gate as continuous observations.
     if (msg.type === 'spontaneous_vision_comment') {
-      if (speechController.isBusy(socket)) {
-        console.log(`[spontaneous] Diabaikan: percakapan sedang "${socket.conversationState}"`);
-        return;
-      }
-      const { text, emotion = 'netral', speechEmotion } = msg;
-      if (!text) return;
-      const displayText = stripSpeechTags(text);
-      console.log(`[spontaneous] Komentar visual diterima dari vision-monitor: "${displayText}" (${emotion})`);
-
-      markConversationActivity();
-      history.push({ role: 'assistant', content: displayText });
-      if (history.length > HISTORY_MESSAGE_LIMIT) {
-        history.splice(0, history.length - HISTORY_MESSAGE_LIMIT);
-      }
-
-      send({ type: 'vision', text: `[Spontan] ${displayText}` });
-      await speechController.play({ text, emotion, speechEmotion, recipients: [socket], deferred: true, origin: 'vision' });
+      await visionManager.considerExternalCommentary(msg);
       return;
     }
 
     if (msg.type !== 'audio_input' && msg.type !== 'text_input') return;
+    visionManager.conversationActivity();
     const isTyped = msg.type === 'text_input';
     if (!isTyped && socket.micMuted) {
       speechController.rejectInput(socket, 'MIC_MUTED');
       return;
     }
+
+    const { data, mime, image, screenImage, durationMs } = msg;
+    const typedText = isTyped ? String(msg.text ?? '').trim().slice(0, 1000) : '';
+    if (isTyped ? !typedText : typeof data !== 'string' || !data || (typeof durationMs === 'number' && durationMs < 400)) return;
+    const audioBuffer = isTyped ? null : Buffer.from(data, 'base64');
+    if (audioBuffer && audioBuffer.length < 512) return;
 
     // Reject input explicitly so the client can restore its optimistic UI.
     proactiveConversation.updateSettings({ enabled: [...visionSessions.keys()].some(client => client.proactiveEnabled),
@@ -725,24 +730,9 @@ wss.on('connection', (socket, req) => {
       return;
     }
 
-    const { data, mime, image, screenImage, durationMs } = msg;
-    const typedText = isTyped ? String(msg.text ?? '').trim().slice(0, 1000) : '';
-
-    // Guard: audio kosong / terlalu pendek -> skip diam-diam. VAD kadang kirim
-    // blip pendek; jangan spam error di log hands-free.
-    if (isTyped) {
-      if (!typedText) return;
-    } else if (!data || (typeof durationMs === 'number' && durationMs < 400)) {
-      return;
-    }
-
     let turn = null;
     try {
-      let buf = null;
-      if (!isTyped) {
-        buf = Buffer.from(data, 'base64');
-        if (buf.length < 512) return;
-      }
+      const buf = audioBuffer;
 
       turn = speechController.beginTurn(socket);
       if (!turn) return;
@@ -819,225 +809,69 @@ wss.on('connection', (socket, req) => {
         return;
       }
 
-      // 2) Vision — periksa intent & pisahkan source (screen vs webcam)
+      // 2) Vision routing is private and precedes explicit inspection and spoken stages.
+      const memoryContext = speechMemoryRecorder.context({ sessionId: socket.visionSessionId,
+        turnId: turn.turnId, userText: text });
+      // Retrieval overlaps routing and fresh inspection whenever those are needed.
+      const memoryBundle = Promise.resolve().then(() => memoryManager.retrieve(text,
+        { history: trimConversationHistory(history), signal: turn.signal })).catch(() => null);
+      const inspectionSnapshot = structuredClone({ captureSessions: socket.captureSessions,
+        sources: visionManager.getSourceSnapshot() });
+      const decision = await visionRouter.route(text, { history, signal: turn.signal, turnId: turn.turnId,
+        availability: { webcam: Boolean(image), screen: Boolean(screenImage) || msg.desktop === true && msg.screenVisionOn === true },
+        observations: visionManager.getRoutingObservations(), captureSessions: socket.captureSessions });
+      if (!isCurrent()) return;
       let vision = visionManager.getConversationContext();
-      if (detectVisionIntent(text) && !getSlotStatus('vision').available) {
+      if (decision.sources.length && !getSlotStatus('vision').available) {
         await playSpokenMessage(UNAVAILABLE_MESSAGES.vision, 'netral', socket, turn.turnId);
         return;
       }
-      if (detectVisionIntent(text)) {
-        // Explicit inspection must never fall back to the automatic scene cache.
-        vision = null;
-        // Klien Electron: layar "aktif" = Screen Vision di tray ON; frame diminta
-        // on-demand lewat request_screen_capture (bukan Share Screen browser).
-        const isDesktop = msg.desktop === true;
-        const desktopScreenOn = isDesktop && msg.screenVisionOn === true;
-        const route = resolveVisionSource(text, {
-          hasCamera: Boolean(image),
-          hasScreen: Boolean(screenImage) || desktopScreenOn,
-        });
-        const { source, requested, available } = route;
-        console.log(
-          `[vision] intent: diminta=${requested ?? 'ambigu'}, dipakai=${source ?? 'none'},` +
-            ` kamera aktif=${Boolean(image)}, layar aktif=${Boolean(screenImage) || desktopScreenOn}` +
-            (isDesktop ? ' (desktop)' : ''),
-        );
-
-        if (isDesktop && (source === null || (!available && source === 'screen'))) {
-          // Electron: JANGAN minta klik Share Screen — toggle ada di tray.
-          if (source === null) {
-            vision = 'KAMERA_DAN_LAYAR_MATI: user minta kamu melihat sesuatu, tetapi kamera belum aktif dan fitur lihat layar sedang dimatikan di pengaturan tray. Minta user menyalakan kamera atau mengaktifkan Screen Vision lewat ikon tray. Jangan menyebut Share Screen.';
-            send({ type: 'vision', text: 'Kamera belum aktif dan Screen Vision sedang off.' });
-          } else {
-            vision = 'LAYAR_DIMATIKAN: user meminta kamu melihat layar/game/aplikasinya, tetapi fitur lihat layar sedang dimatikan di pengaturan tray. Minta user mengaktifkan Screen Vision lewat ikon tray. Jangan menyebut Share Screen.';
-            send({ type: 'vision', text: 'Screen Vision sedang off. Aktifkan lewat menu tray.' });
-          }
-        } else if (source === null) {
-          // Ambigu & tidak ada sumber aktif. JANGAN sebut Share Screen saja.
-          vision = 'KAMERA_DAN_LAYAR_MATI: user minta kamu melihat sesuatu, tetapi kamera dan share screen sama-sama belum aktif. Minta user menyalakan kamera atau share screen.';
-          send({ type: 'vision', text: '⚠️ Kamera dan layar belum aktif.' });
-        } else if (!available) {
-          if (source === 'screen') {
-            // Hanya muncul kalau user EKSPLISIT minta layar & layar mati.
-            vision = 'LAYAR_MATI: user meminta kamu melihat layar/game/aplikasinya, tetapi Share Screen belum diaktifkan. Minta user klik tombol Share Screen.';
-            send({ type: 'vision', text: '⚠️ Layar belum di-share. Aktifkan tombol "Share Screen" terlebih dahulu.' });
-          } else {
-            vision = 'KAMERA_MATI: user meminta kamu melihat lewat kamera, tetapi kamera belum aktif/diizinkan. Minta user menyalakan kamera. Jangan menyebut Share Screen.';
-            send({ type: 'vision', text: '⚠️ Kamera belum aktif.' });
-          }
-        } else {
-          let frame = source === 'screen' ? screenImage : image;
-          const label = source === 'screen' ? 'Layar' : 'Kamera';
-          const initialSource = visionManager.getSourceSnapshot()[source];
-          const captureSessionId = initialSource?.active ? initialSource.sessionId : null;
-          const inputCaptureSessions = msg.captureSessions;
-          const hasCaptureToken = inputCaptureSessions && typeof inputCaptureSessions === 'object'
-            && !Array.isArray(inputCaptureSessions) && Object.hasOwn(inputCaptureSessions, source);
-          const inputCaptureToken = hasCaptureToken ? inputCaptureSessions[source] : null;
-          const sourceController = new AbortController();
-          socket.explicitVisionControllers.get(source)?.abort();
-          socket.explicitVisionControllers.set(source, sourceController);
-          const sourceSignals = [turn.signal, sourceController.signal];
-          const unlinkSignals = [];
-          let observationSignal;
-          if (typeof AbortSignal.any === 'function') {
-            observationSignal = AbortSignal.any(sourceSignals);
-          } else {
-            const combinedController = new AbortController();
-            for (const signal of sourceSignals) {
-              const abort = () => combinedController.abort(signal.reason);
-              if (signal.aborted) abort();
-              else {
-                signal.addEventListener('abort', abort, { once: true });
-                unlinkSignals.push(() => signal.removeEventListener('abort', abort));
-              }
-            }
-            observationSignal = combinedController.signal;
-          }
-          const requireCurrentSource = () => {
-            const actualCapture = socket.captureSessions[source];
-            const currentSource = captureSessionId ? visionManager.getSourceSnapshot()[source] : null;
-            if (sourceController.signal.aborted || hasCaptureToken && (typeof inputCaptureToken !== 'string'
-              || !actualCapture?.active || actualCapture.sessionId !== inputCaptureToken)
-              || !hasCaptureToken && captureSessionId && (!currentSource?.active
-                || currentSource.sessionId !== captureSessionId)) {
-              const error = new Error('The capture source changed during inspection.');
-              error.code = 'VISION_SOURCE_RETIRED';
-              throw error;
-            }
-          };
-          try {
-            requireCurrentSource();
-            const tVisStart = performance.now();
-            let desc;
-            let captureFailure = null;
-
-            // Electron: minta frame layar langsung ke klien (timeout 5 dtk)
-            if (!desc && source === 'screen' && !frame && desktopScreenOn) {
-              const cap = await requestScreenCapture();
-              if (!isCurrent()) return;
-              requireCurrentSource();
-              if (cap.ok) frame = cap.dataUrl;
-              else captureFailure = cap;
-            }
-
-            if (captureFailure) {
-              console.warn(`[vision] capture layar gagal (${captureFailure.code})`);
-              vision = `LAYAR_GAGAL: user meminta kamu melihat layarnya, tetapi layar tidak berhasil ditangkap (${captureFailure.code}). Sampaikan dengan natural, kurang lebih: "${captureFailure.spoken}". Jangan pura-pura melihat dan jangan menyebut Share Screen.`;
-              send({ type: 'vision', text: captureFailure.spoken });
-            } else {
-              requireCurrentSource();
-              if (!desc) {
-                desc = await describeFrame(frame, source, { signal: observationSignal });
-                if (!isCurrent()) return;
-                requireCurrentSource();
-              }
-
-              console.log(`[timing] vision (${source}): ${ms(tVisStart)}ms (t+${ms(tPipe)})`);
-              send({ type: 'vision', text: `[${label}] ${desc}` });
-              // Konteks eksplisit: vision BERHASIL, jawab berdasarkan ini.
-              vision = `(${label} aktif & berhasil dilihat) ${desc}`;
-            }
-          } catch (err) {
-            if (!isCurrent()) return;
-            if (err?.code === 'VISION_SOURCE_RETIRED' || sourceController.signal.aborted) {
-              vision = `VISION_SOURCE_RETIRED: ${label} dimatikan atau sumbernya diganti saat pengamatan berlangsung. Pengamatan tadi tidak berlaku. Jangan mengaku melihat keadaan saat ini atau memakai deskripsi sebelumnya. Minta user mengulang pertanyaannya setelah sumber siap.`;
-              send({ type: 'vision', text: `${label} berubah saat sedang dilihat. Coba tanyakan sekali lagi ya.` });
-            } else {
-              console.error(`[vision:${source}] error:`, err);
-              vision = `VISION_FRESH_FAILED: Pengamatan baru dari ${label.toLowerCase()} gagal. Tidak ada deskripsi baru yang berhasil diverifikasi. Jangan mengaku melihat keadaan saat ini atau memakai deskripsi sebelumnya. Sampaikan bahwa pengamatan gagal dan minta user mencoba lagi.`;
-              send({ type: 'error', message: `Vision ${label.toLowerCase()} gagal. Coba sekali lagi ya.` });
-            }
-          } finally {
-            for (const unlink of unlinkSignals) unlink();
-            if (socket.explicitVisionControllers.get(source) === sourceController) socket.explicitVisionControllers.delete(source);
-          }
-        }
+      if (decision.sources.length) {
+        const successfulSources = [];
+        vision = await inspectVision({ decision, socket, manager: visionManager, input: msg, image, screenImage,
+          captureSnapshot: inspectionSnapshot,
+          signal: turn.signal, isCurrent, send, captureScreen: requestScreenCapture,
+          onSuccess: source => successfulSources.push(source) });
+        if (!isCurrent()) return;
+        visionRouter.remember(successfulSources, socket.captureSessions);
       }
 
-      // 3) Chat streaming + TTS per kalimat. generateReplyStream yield
-      // {type:'delta'} (akumulasi teks) & {type:'sentence'} (kalimat utuh ->
-      // TTS). Audio antar-kalimat di-serialize lewat ttsChain biar urut.
-      // Streaming SUDAH benar: TTS kalimat pertama jalan begitu {sentence}
-      // pertama muncul, tak nunggu LLM selesai (lihat [timing] di bawah).
-      let full = '';
-      let ttsChain = Promise.resolve();
-
-      // Milestone timing (di-set sekali; 0 = belum kejadian).
+      // Surface and deeper speech share one turn, ordered audio, and history.
       let tLlmFirstToken = 0;
       let tLlmFirstSentence = 0;
       let tTtsStart = 0;
-      let tTtsFirstChunk = 0;
       let tFirstAudioOut = 0;
-      let sentenceIdx = 0;
-
-      let replyEmotion = 'netral';
-
-      async function speak(sentence, idx, say, emotion, speechEmotion, options = {}) {
-        const isFirst = idx === 0;
-        if (isFirst) tTtsStart = performance.now();
-        await say(sentence, emotion, () => {
-          if (isFirst && !tTtsFirstChunk) tTtsFirstChunk = performance.now();
-          if (isFirst && !tFirstAudioOut) {
+      const reply = await playConversationReply({ controller: speechController, socket, turnId: turn.turnId,
+        history, userMessage: text, vision, memoryContext, memoryBundle,
+        guidance: () => proactiveConversation.consumeGuidance(socket),
+        onEvent: event => {
+          if (event.type === 'delta' && !tLlmFirstToken) tLlmFirstToken = performance.now();
+          if (event.type === 'sentence' && !tLlmFirstSentence) tLlmFirstSentence = performance.now();
+          if (event.type === 'tts_start' && !tTtsStart) tTtsStart = performance.now();
+          if (event.type === 'tts_chunk' && !tFirstAudioOut) {
             tFirstAudioOut = performance.now();
-            console.log(
-              `[timing] STT selesai: ${ms(tPipe, tSttEnd)}ms` +
-                ` | LLM first token: ${ms(tPipe, tLlmFirstToken)}ms` +
-                ` | LLM first sentence: ${ms(tPipe, tLlmFirstSentence)}ms` +
-                ` | TTS req->first chunk: ${ms(tTtsStart, tTtsFirstChunk)}ms` +
-                ` | total to first audio: ${ms(tPipe, tFirstAudioOut)}ms`,
-            );
+            console.log(`[timing] STT: ${ms(tPipe, tSttEnd)}ms` +
+              ` | first token: ${ms(tPipe, tLlmFirstToken)}ms` +
+              ` | first sentence: ${ms(tPipe, tLlmFirstSentence)}ms` +
+              ` | TTS first chunk: ${ms(tTtsStart, tFirstAudioOut)}ms` +
+              ` | total first audio: ${ms(tPipe, tFirstAudioOut)}ms`);
           }
-        }, { ...options, speechEmotion });
-      }
-
-      await speechController.play({
-        recipients: [socket],
-        turnId: turn.turnId,
-        produce: async ({ say, signal }) => {
-          try {
-            const tLlmStart = performance.now(); // = saat request LLM dimulai
-            for await (const ev of generateReplyStream(history, text, vision, { signal })) {
-              if (signal.aborted || !isCurrent()) break;
-              if (ev.type === 'emotion') {
-                replyEmotion = ev.emotion;
-                send({ type: 'emotion', emotion: replyEmotion });
-                console.log(`[emotion] LLM selected: ${replyEmotion}`);
-              } else if (ev.type === 'delta') {
-                if (!tLlmFirstToken) {
-                  tLlmFirstToken = performance.now();
-                  console.log(`[timing] LLM first token: ${ms(tLlmStart, tLlmFirstToken)}ms (req->ttft, t+${ms(tPipe)})`);
-                }
-                full += ev.text;
-              } else if (ev.type === 'sentence') {
-                if (!tLlmFirstSentence) {
-                  tLlmFirstSentence = performance.now();
-                  console.log(`[timing] LLM first sentence: ${ms(tLlmStart, tLlmFirstSentence)}ms (req->sentence, t+${ms(tPipe)})`);
-                }
-                const idx = sentenceIdx++;
-                const emotion = ev.emotion ?? replyEmotion;
-                const speechEmotion = ev.speechEmotion;
-                const options = { speechEmotion, segmentId: ev.segmentId, pauseBeforeMs: ev.pauseBeforeMs };
-                ttsChain = ttsChain.then(() => speak(ev.text, idx, say, emotion, speechEmotion, options));
-              }
-            }
-          } finally {
-            await ttsChain;
-            if (!signal.aborted && isCurrent()) send({ type: 'amika_replied', text: full, emotion: replyEmotion });
-          }
+          if (event.type === 'stage_error') console.warn('[conversation]', event.stage, 'stage failed');
         },
       });
       if (!isCurrent()) return;
 
       history.push({ role: 'user', content: text });
-      history.push({ role: 'assistant', content: full });
-      visionManager.setAssistantContext(full);
+      if (reply.text.trim()) history.push({ role: 'assistant', content: reply.text });
+      visionManager.setAssistantContext(reply.text);
       if (history.length > HISTORY_MESSAGE_LIMIT) {
         history.splice(0, history.length - HISTORY_MESSAGE_LIMIT);
       }
 
-      // Catat & ekstrak memori jangka panjang di latar belakang (non-blocking)
-      void memoryManager.recordTurnAndExtract(text, full);
+      // Original dialogue is archived by the playback-release callback.
+      if (reply.reflectionRequest) proactiveConversation.requestReflection(socket, {
+        request: reply.reflectionRequest, turnId: turn.turnId, speechId: reply.speechId,
+      });
     } catch (err) {
       if (!turn || !speechController.isCurrentTurn(socket, turn.turnId)) return;
       console.error('[stt] error:', err);
@@ -1049,10 +883,16 @@ wss.on('connection', (socket, req) => {
 });
 
 // Install after role assignment so monitor sockets do not receive selfie snapshots.
-installSelfieLifecycle({ manager: jobManager, server, wss, beforeShutdown: () => imageSettings.shutdown() });
+installSelfieLifecycle({ manager: jobManager, server, wss, beforeShutdown: async () => {
+  memoryManager.dispose();
+  await memoryEmbeddingRuntime.dispose();
+  await imageSettings.shutdown();
+} });
 server.once('close', stopSelfieConfigWatch);
 server.once('close', () => {
   proactiveConversation.dispose();
+  memoryManager.dispose();
+  void memoryEmbeddingRuntime.dispose();
   for (const manager of visionSessions.values()) manager.dispose();
 });
 
@@ -1061,5 +901,9 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(
     `[server] 9inference + STT proxy jalan di http://localhost:${PORT} (ws: /ws)`,
   );
+  try { memoryManager.start(); } catch (error) {
+    console.warn('[memory] Background processing unavailable:', error.code ?? 'MEMORY_STORAGE');
+  }
+  void memoryEmbeddingRuntime.start().catch(error => console.warn('[memory] Embedding service unavailable:', error.code ?? 'EMBEDDING_UNAVAILABLE'));
   void warmUpModels();
 });

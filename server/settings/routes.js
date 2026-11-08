@@ -35,7 +35,8 @@ export function isSettingsRequestAllowed(req) {
 }
 
 export function installSettingsRoutes(app, { service = getSettingsService(), registry,
-  probe = testSlot, models = listModels, imageStatus = () => null, imageService = null, now = Date.now, testLimit = 5, testWindowMs = 60000, testTimeoutMs = 20000 } = {}) {
+  probe = testSlot, models = listModels, imageStatus = () => null, imageService = null, memoryService = null,
+  now = Date.now, testLimit = 5, testWindowMs = 60000, testTimeoutMs = 20000 } = {}) {
   registry ||= new ProviderRegistry({ config: service.config(), secretResolver: service.resolver() });
   service.attach(registry);
   const token = randomBytes(32).toString('hex');
@@ -53,7 +54,7 @@ export function installSettingsRoutes(app, { service = getSettingsService(), reg
     return value;
   };
   const router = express.Router();
-  router.use((req, res, next) => {
+  const authorize = (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     for (const name of res.getHeaderNames()) if (String(name).toLowerCase().startsWith('access-control-')) res.removeHeader(name);
@@ -69,7 +70,8 @@ export function installSettingsRoutes(app, { service = getSettingsService(), reg
         || !timingSafeEqual(Buffer.from(supplied), Buffer.from(token))) return next(new SettingsError('FORBIDDEN', 403));
     }
     next();
-  });
+  };
+  router.use(authorize);
   router.use(express.json({ limit: SETTINGS_LIMIT, strict: true, inflate: false }));
   const respond = operation => (req, res, next) => {
     try { res.json(operation(req)); } catch (error) { next(error); }
@@ -81,10 +83,93 @@ export function installSettingsRoutes(app, { service = getSettingsService(), reg
     if (!imageService) throw new SettingsError('NOT_FOUND', 404);
     return imageService;
   };
+  const requireMemory = () => {
+    if (!memoryService?.manager) throw new SettingsError('NOT_FOUND', 404);
+    return memoryService.manager;
+  };
+  const memoryStatus = () => ({ version: service.effective().version, configuration: service.config().memory,
+    status: requireMemory().status(), embedding: memoryService.runtime?.status() || { state: 'unavailable' } });
+  const revision = (body, fields = [], optional = false) => {
+    object(body, [...fields, 'memoryRevision']);
+    if (optional && body.memoryRevision === undefined) return {};
+    if (!Number.isSafeInteger(body.memoryRevision) || body.memoryRevision < 0) invalid();
+    return { expectedRevision: body.memoryRevision };
+  };
+  const memoryText = (value, max = 4096) => {
+    if (typeof value !== 'string' || !value.trim() || value.length > max || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value)) invalid();
+    return value.trim();
+  };
+  const pagination = req => {
+    object(req.query, ['cursor', 'limit']);
+    const cursor = req.query.cursor;
+    if (cursor !== undefined && (typeof cursor !== 'string' || cursor.length > 256 || /[\x00-\x1f\x7f]/.test(cursor))) invalid();
+    if (req.query.limit !== undefined && typeof req.query.limit !== 'string') invalid();
+    const limit = req.query.limit === undefined ? 20 : Number(req.query.limit);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) invalid();
+    return { ...(cursor !== undefined && { cursor }), limit };
+  };
+  const legacyMemory = () => {
+    const manager = requireMemory();
+    const memory = manager.memory;
+    return { lastSeen: memory.lastSeen, lastSeenText: manager.formatTimeElapsed(memory.lastSeen),
+      profile: memory.profile, episodes: memory.episodes, promptPreview: manager.getMemoryPrompt() };
+  };
   router.get('/bootstrap', respond(() => ({ token })));
   router.get('/', respond(() => service.effective()));
   router.get('/status', respond(() => service.status()));
   router.get('/legacy', respond(() => service.legacy()));
+  router.get('/memory', respond(memoryStatus));
+  router.put('/memory/config', respond(req => { service.putMemory(req.body); return memoryStatus(); }));
+  router.get('/memory/events', respond(req => requireMemory().listEvents(pagination(req))));
+  router.get('/memory/facts', respond(req => requireMemory().listFacts(pagination(req))));
+  router.post('/memory/search', respondAsync(async req => {
+    object(req.body, ['query']);
+    const query = memoryText(req.body.query);
+    const controller = new AbortController();
+    const abort = () => { if (!req.res.writableEnded) controller.abort(); };
+    req.res.on('close', abort);
+    try { return await requireMemory().search(query, { signal: controller.signal }); }
+    finally { controller.abort(); req.res.removeListener('close', abort); }
+  }));
+  router.post('/memory/fact', respond(req => {
+    const options = revision(req.body, ['text', 'category']);
+    const category = req.body.category === undefined ? 'manual' : text(req.body.category, 64);
+    requireMemory().addFact(memoryText(req.body.text), category, options);
+    return { success: true, ...memoryStatus() };
+  }));
+  router.get('/memory/:kind/:id/impact', respond(req => {
+    if (!['facts', 'events'].includes(req.params.kind)) invalid();
+    identifier(req.params.id);
+    return requireMemory().deletionImpact(req.params.kind, req.params.id);
+  }));
+  for (const kind of ['facts', 'events']) router.delete('/memory/' + kind + '/:id', respond(req => {
+    identifier(req.params.id);
+    const options = revision(req.body);
+    const manager = requireMemory();
+    if (kind === 'facts') manager.deleteFact(req.params.id, options);
+    else manager.deleteEvent(req.params.id, options);
+    return { success: true, ...memoryStatus() };
+  }));
+  router.post('/memory/clear', respond(req => {
+    requireMemory().clearMemory(revision(req.body));
+    return { success: true, ...memoryStatus() };
+  }));
+  router.post('/memory/jobs/:id/retry', respond(req => {
+    identifier(req.params.id);
+    const job = requireMemory().retryJob(req.params.id, revision(req.body));
+    return { job, ...memoryStatus() };
+  }));
+  router.post('/memory/reindex', respond(req => {
+    const job = requireMemory().reindex(revision(req.body));
+    return { job, ...memoryStatus() };
+  }));
+  router.post('/memory/embedding/retry', respondAsync(async req => {
+    object(req.body, []);
+    requireMemory();
+    if (!memoryService.runtime) throw new SettingsError('NOT_FOUND', 404);
+    await memoryService.runtime.retry();
+    return memoryStatus();
+  }));
   router.get('/images', respondAsync(() => {
     if (imageService) return imageService.status();
     const current = imageStatus();
@@ -229,13 +314,35 @@ export function installSettingsRoutes(app, { service = getSettingsService(), reg
     }
   });
   router.use((_req, _res, next) => next(new SettingsError('NOT_FOUND', 404)));
-  router.use((error, _req, res, _next) => {
-    const installCodes = { CONFLICT: 409, IN_USE: 409, LOCK_BUSY: 409, NOT_FOUND: 404, STORAGE: 503, INVALID_SETTINGS: 400 };
+  const errorHandler = (error, _req, res, _next) => {
+    const installCodes = { CONFLICT: 409, IN_USE: 409, LOCK_BUSY: 409, LOCK_UNKNOWN: 409, NOT_FOUND: 404,
+      STORAGE: 503, INVALID_SETTINGS: 400, INVALID_MEMORY: 400, MEMORY_STALE: 409, MEMORY_STORAGE: 503,
+      MEMORY_CORRUPT: 503, LEGACY_MEMORY_CORRUPT: 503, LEGACY_MEMORY_CHANGED: 409, REINDEX_REQUIRED: 409,
+      INVALID_EVIDENCE: 400, INVALID_CORRECTION: 400, INVALID_EMBEDDING: 400, DUPLICATE_MEMORY_EVENT: 409 };
     const safe = error instanceof SettingsError ? error : Object.hasOwn(installCodes, error.code)
       ? new SettingsError(error.code, installCodes[error.code])
       : new SettingsError(error.type === 'entity.too.large' ? 'TOO_LARGE' : 'INVALID_SETTINGS', error.type === 'entity.too.large' ? 413 : 400);
     if (!res.headersSent) res.status(safe.status).json({ error: { code: safe.code, message: safe.message } });
-  });
+  };
+  router.use(errorHandler);
   app.use('/api/settings', router);
-  return { service, registry };
+  if (memoryService) {
+    const legacy = express.Router();
+    legacy.use(authorize);
+    legacy.use(express.json({ limit: SETTINGS_LIMIT, strict: true, inflate: false }));
+    legacy.get('/', respond(legacyMemory));
+    legacy.post('/fact', respond(req => {
+      const options = revision(req.body, ['text', 'category'], true);
+      requireMemory().addFact(memoryText(req.body.text), req.body.category === undefined ? 'manual' : text(req.body.category, 64), options);
+      return { success: true, facts: requireMemory().memory.profile.facts };
+    }));
+    legacy.post('/clear', respond(req => {
+      requireMemory().clearMemory(revision(req.body || {}, [], true));
+      return { success: true, message: 'Memori jangka panjang berhasil di-reset.' };
+    }));
+    legacy.use((_req, _res, next) => next(new SettingsError('NOT_FOUND', 404)));
+    legacy.use(errorHandler);
+    app.use('/api/memory', legacy);
+  }
+  return { service, registry, memoryService };
 }

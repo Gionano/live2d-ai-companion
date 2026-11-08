@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import { settingsMenuItem } from '../../desktop-companion/src/main/settingsWindowManager.js';
+import { ConversationReadiness } from '../../src/conversationReadiness.js';
 
 const companionSource = fs.readFileSync(new URL('../../src/companion.js', import.meta.url), 'utf8');
 const mainSource = fs.readFileSync(new URL('../../desktop-companion/src/main/index.js', import.meta.url), 'utf8');
@@ -76,7 +77,7 @@ function companionHarness({ desktop = true, initialState = Promise.resolve({ sel
     send(raw) {
       if (this.failSend) throw new Error('Disconnected');
       const message = JSON.parse(raw);
-      if (message.type !== 'proactive_config') this.sent.push(message);
+      if (!['proactive_config', 'conversation_ready'].includes(message.type)) this.sent.push(message);
     }
     open() {
       this.readyState = FakeWebSocket.OPEN;
@@ -95,6 +96,7 @@ function companionHarness({ desktop = true, initialState = Promise.resolve({ sel
     window: { desktopBridge: desktop ? bridge : undefined },
     location: { protocol: 'http:', host: 'localhost:5173' },
     WebSocket: FakeWebSocket,
+    ConversationReadiness,
     ContinuousVisionCapture: class {
       setActive() {}
       setMonitorActive(active) { monitorStates.push(active); }

@@ -392,10 +392,10 @@ test('microphone mute aborts current STT and rejects new audio without affecting
   const proactive = { updateSettings() {}, setUserActive() {} };
   const sessions = new Map();
   const runInputBody = new AsyncFunction('socket', 'speechController', 'transcribeAudio', 'msg', 'extFromMime', 'getSlotStatus',
-    'proactiveConversation', 'visionSessions',
+    'proactiveConversation', 'visionSessions', 'visionManager',
     section(serverSource, "    if (msg.type !== 'audio_input' && msg.type !== 'text_input') return;", '\n      // Filter noise:')
       + '\n    } finally { if (turn) speechController.completeTurn(socket, turn.turnId); }');
-  const runInput = (...args) => runInputBody(...args, () => ({ available: true }), proactive, sessions);
+  const runInput = (...args) => runInputBody(...args, () => ({ available: true }), proactive, sessions, { conversationActivity() {} });
   const muteBody = new Function('socket', 'speechController', 'msg', 'proactiveConversation',
     section(serverSource, "    if (msg.type === 'mic_mute')", '\n    // 0.'));
   const mute = (...args) => muteBody(...args, proactive);
