@@ -6,6 +6,7 @@ import { SpeechPlayback } from '../../src/speechPlayback.js';
 import { SpeechMotionController, analyzeSpeechRhythm } from '../../src/speechMotion.js';
 import { SpeechController } from '../speechController.js';
 import { generateReplyStream } from '../llmChat.js';
+import { scheduleAudioBuffer } from '../../src/audioClock.js';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const companion = fs.readFileSync(new URL('../../src/companion.js', import.meta.url), 'utf8');
@@ -13,13 +14,15 @@ const audioFunctions = companion.slice(companion.indexOf('async function playSen
   companion.indexOf('// WebSocket:', companion.indexOf('async function playSentenceAudio(')));
 
 function browser(decode) {
-  const sources = [], events = [], timers = new Map();
-  let timerId = 0;
+  const sources = [], events = [];
   const samples = Float32Array.from({ length: 1000 }, (_, i) => Math.sin(i) * 0.2);
   const buffer = { duration: 1, sampleRate: 1000, length: samples.length, numberOfChannels: 1,
     getChannelData: () => samples };
   const motion = new SpeechMotionController({ random: () => 0.1 });
-  const context = { currentTime: 10, state: 'running', decodeAudioData: decode ?? (async () => buffer),
+  const context = { currentTime: 10, state: 'running', sampleRate: 1000, decodeAudioData: decode ?? (async () => buffer),
+    createBuffer(numberOfChannels, length, sampleRate) {
+      return { duration: length / sampleRate, sampleRate, length, numberOfChannels };
+    },
     createBufferSource() {
       const node = { connect() {}, disconnect() {}, start(time) { this.startAt = time; },
         stop() { this.stopped = true; this.onended?.(); } };
@@ -27,9 +30,7 @@ function browser(decode) {
       return node;
     } };
   const state = { audioCtx: context, analyser: {}, playCursor: 10, scheduledEmotionEnd: 0,
-    activeAudioSources: new Set(), Uint8Array, analyzeSpeechRhythm, ensureAudio() {}, log() {},
-    setTimeout(callback, delay) { const id = ++timerId; timers.set(id, { at: context.currentTime + delay / 1000, callback }); return id; },
-    clearTimeout(id) { timers.delete(id); }, performance: { now: () => context.currentTime * 1000 },
+    activeAudioSources: new Set(), Uint8Array, analyzeSpeechRhythm, scheduleAudioBuffer, ensureAudio() {}, log() {},
     CustomEvent: class { constructor(type, { detail }) { this.type = type; this.detail = detail; } },
     window: { dispatchEvent(event) {
       events.push(event);
@@ -41,13 +42,13 @@ function browser(decode) {
   vm.createContext(state);
   vm.runInContext(audioFunctions, state);
   return { sources, events, context, buffer, state, motion,
-    finish(node) { context.currentTime = node.startAt + buffer.duration; node.onended(); },
+    finish(node) { context.currentTime = node.startAt + node.buffer.duration; node.onended?.(); },
   };
 }
 
-function queueFile(playback, speechId, emotion, segmentId, pauseBeforeMs, data = new Uint8Array([1])) {
+function queueFile(playback, speechId, emotion, segmentId, pauseBeforeMs, data = new Uint8Array([1]), pauseAfterMs = 200) {
   playback.handle({ type: 'audio_output', speechId, data });
-  const boundary = { type: 'audio_end', speechId, emotion, segmentId, pauseBeforeMs };
+  const boundary = { type: 'audio_end', speechId, emotion, segmentId, pauseBeforeMs, pauseAfterMs };
   playback.handle(boundary);
   return boundary;
 }
@@ -58,9 +59,11 @@ test('segment boundaries snapshot metadata and apply emotions at their scheduled
     h.state.playSentenceAudio(chunks, emotion, options), onFinished: id => finished.push(id) });
   playback.handle({ type: 'speech_start', speechId: 'reply' });
   const first = queueFile(playback, 'reply', 'kagum', 0, 0);
-  const second = queueFile(playback, 'reply', 'sayang', 1, 150);
+  // A 300 ms segment transition needs only 100 ms beyond the preceding sentence tail.
+  const second = queueFile(playback, 'reply', 'sayang', 1, 100);
   queueFile(playback, 'reply', 'sayang', 1, 0);
   first.emotion = second.emotion = 'marah';
+  first.pauseAfterMs = 400;
   second.pauseBeforeMs = 400;
   playback.handle({ type: 'emotion', speechId: 'reply', emotion: 'sedih' });
   playback.handle({ type: 'speech_end', speechId: 'reply' });
@@ -70,16 +73,24 @@ test('segment boundaries snapshot metadata and apply emotions at their scheduled
   assert.deepEqual(finished, []);
   h.finish(h.sources[0]);
   await tick();
-  assert.equal(h.sources[1].startAt, 11.15);
-  assert.equal(h.motion.update(11.2, 1 / 60).emotion, 'sayang');
+  assert.equal(h.sources.length, 2, 'the next voice waits for the first sentence tail');
+  assert.equal(h.sources[1].buffer.duration, 0.2, 'queued metadata cannot change the existing tail');
   h.finish(h.sources[1]);
   await tick();
-  assert.equal(h.sources[2].startAt, 12.15);
+  assert.ok(Math.abs(h.sources[2].startAt - 11.3) < 1e-9);
+  assert.equal(h.motion.update(11.35, 1 / 60).emotion, 'sayang');
+  h.finish(h.sources[2]);
+  h.finish(h.sources[3]);
+  await tick();
+  assert.ok(Math.abs(h.sources[4].startAt - 12.5) < 1e-9);
   const cues = h.events.filter(event => event.type === 'waifu-speech-cue');
   assert.deepEqual(cues.map(event => event.detail.segmentId), [0, 1, 1]);
   assert.deepEqual(cues.map(event => event.detail.emotion), ['kagum', 'sayang', 'sayang']);
   assert.deepEqual(finished, []);
-  h.finish(h.sources[2]);
+  h.finish(h.sources[4]);
+  await tick();
+  assert.deepEqual(finished, [], 'final playback includes its sentence tail');
+  h.finish(h.sources[5]);
   await playback.chain;
   assert.deepEqual(finished, ['reply']);
   assert.equal(playback.busy, false);
@@ -98,7 +109,8 @@ test('cancelling during a segment pause stops the scheduled source and discards 
   playback.handle({ type: 'stop_speech', speechId: 'reply' });
   await playback.chain;
   assert.equal(h.sources[0].stopped, true);
-  assert.equal(h.sources.length, 1);
+  assert.equal(h.sources.length, 2);
+  assert.ok(h.sources.every(source => source.stopped), 'voice and scheduled sentence tail are cancelled');
   assert.equal(h.motion.cues.length, 0);
   assert.deepEqual(cancelled, ['reply']);
   assert.equal(h.state.playCursor, h.context.currentTime);
@@ -121,12 +133,13 @@ test('an abandoned pending decoder cannot block a new reply after reset', async 
   queueFile(playback, 'new', 'sayang', 0, 0);
   playback.handle({ type: 'speech_end', speechId: 'new' });
   await tick();
-  assert.equal(h.sources.length, 1);
+  assert.equal(h.sources.length, 2);
   assert.equal(h.events.find(event => event.type === 'waifu-speech-cue').detail.speechId, 'new');
   finishOldDecode(h.buffer);
   await tick();
-  assert.equal(h.sources.length, 1);
+  assert.equal(h.sources.length, 2);
   h.finish(h.sources[0]);
+  h.finish(h.sources[1]);
   await playback.chain;
   assert.deepEqual(finished, ['new']);
 });
@@ -142,7 +155,8 @@ test('the parser, speech controller and playback preserve one reply ID and share
     } });
   const played = [];
   const playback = new SpeechPlayback({ playAudio: async (chunks, emotion, options) => {
-    played.push({ emotion, segmentId: options.segmentId, pauseBeforeMs: options.pauseBeforeMs, speechId: options.speechId });
+    played.push({ emotion, segmentId: options.segmentId, pauseBeforeMs: options.pauseBeforeMs,
+      pauseAfterMs: options.pauseAfterMs, speechId: options.speechId });
   }, onFinished: id => queueMicrotask(() => controller.acknowledge(socket, id)) });
   controller.register(socket, event => { events.push(event); playback.handle(event); });
   t.after(() => controller.unregister(socket));
@@ -161,7 +175,8 @@ test('the parser, speech controller and playback preserve one reply ID and share
   await playback.chain;
   assert.equal(result.ok, true);
   assert.deepEqual(played.map(item => item.segmentId), [0, 0, 1, 1]);
-  assert.deepEqual(played.map(item => item.pauseBeforeMs), [0, 0, 150, 0]);
+  assert.deepEqual(played.map(item => item.pauseBeforeMs), [0, 0, 0, 0], 'the 200 ms sentence pause already exceeds the 150 ms segment pause');
+  assert.deepEqual(played.map(item => item.pauseAfterMs), [200, 200, 200, 200]);
   assert.deepEqual(calls.map(item => [item.emotion, item.speechEmotion]),
     [['kagum', 'excited'], ['kagum', 'excited'], ['sayang', 'compassionate'], ['sayang', 'compassionate']]);
   assert.ok(played.every(item => item.speechId === result.speechId));

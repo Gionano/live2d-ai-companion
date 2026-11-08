@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { logger as console } from '../src/logging.js';
 import { stripSpeechTags, spokenSentenceCount } from './ttsExpression.js';
-import { normalizeSpeechEmotion } from './speechEmotionPrompt.js';
+import { normalizeSpeechEmotion, normalizeSpeechRegister } from './speechEmotionPrompt.js';
+
+const NORMAL_PLAYBACK_BUDGET_MS = 30000;
+const MAX_PLAYBACK_BUDGET_MS = 10 * 60 * 1000;
+const ESTIMATED_SPOKEN_CHARACTER_MS = 110;
 
 export class SpeechController {
   constructor({ generateSpeech, isVoiceConfigured, safetyTimeoutMs = 30000, onPlaybackReleased = () => {} }) {
@@ -183,6 +187,7 @@ export class SpeechController {
     const speech = {
       speechId: randomUUID(), turnId: item.turnId, origin: item.origin, recipients, pending: new Set(recipients),
       ended: false, hasAudio: false, controller: new AbortController(),
+      spokenCharacters: 0, pauseMs: 0, memorySentences: [],
       resolve: item.resolve, timer: null, item,
     };
     this.activeSpeech = speech;
@@ -193,6 +198,10 @@ export class SpeechController {
   }
 
   emit(speech, event) {
+    // Healthy stage text and audio can span several model calls. Expire only
+    // stalled generation, without changing the provider's own request timeout.
+    if (this.activeSpeech === speech && !speech.ended
+      && !['speech_start', 'stop_speech'].includes(event.type)) this.armSpeechTimeout(speech);
     for (const socket of speech.recipients) {
       this.sessions.get(socket)?.send({ ...event, speechId: speech.speechId, turnId: speech.turnId });
     }
@@ -207,12 +216,18 @@ export class SpeechController {
       sentenceIndex += spokenSentenceCount(text);
       let endedRequest = false;
       let pendingAudio = false;
+      let countedAudio = false;
+      let sentenceOk = true;
       const speechEmotion = Object.hasOwn(options, 'speechEmotion')
         ? normalizeSpeechEmotion(options.speechEmotion) : item.speechEmotion;
       const metadata = {
         segmentId: typeof options.segmentId === 'string' || Number.isSafeInteger(options.segmentId) && options.segmentId >= 0
           ? options.segmentId : `${speech.speechId}:${index}`,
         pauseBeforeMs: Math.max(0, Math.min(400, Number(options.pauseBeforeMs) || 0)),
+        pauseAfterMs: Math.max(0, Math.min(400, Number(options.pauseAfterMs) || 0)),
+        register: normalizeSpeechRegister(options.register),
+        ...(options.stage && { stage: options.stage }),
+        ...(options.partId && { partId: options.partId }),
       };
       this.emit(speech, { type: 'emotion', emotion });
       try {
@@ -220,14 +235,24 @@ export class SpeechController {
           let format = 'mp3';
           for await (const chunk of this.generateSpeech(text, emotion, { signal: speech.controller.signal,
             speechEmotion,
-            sentenceIndex: index, onAudioFormat: value => { format = value; pendingAudio = true; },
+            sentenceIndex: index, onAudioFormat: value => {
+              format = value;
+              pendingAudio = true;
+              if (!speech.ended) this.armSpeechTimeout(speech);
+            },
             onAudioEnd: () => {
               endedRequest = true; pendingAudio = false;
               if (!speech.ended) this.emit(speech, { type: 'audio_end', emotion, ...metadata });
               metadata.pauseBeforeMs = 0;
             } })) {
             if (speech.ended) break;
+            if (!chunk.length) continue;
             speech.hasAudio = true;
+            if (!countedAudio) {
+              countedAudio = true;
+              speech.spokenCharacters += stripSpeechTags(text).replace(/\s+/g, ' ').trim().length;
+              speech.pauseMs += metadata.pauseBeforeMs + metadata.pauseAfterMs;
+            }
             this.emit(speech, { type: 'audio_output', data: chunk.toString('base64'), format });
             onChunk();
           }
@@ -240,7 +265,9 @@ export class SpeechController {
       }
     };
     try {
-      if (item.produce) await item.produce({ say, signal: speech.controller.signal });
+      if (item.produce) await item.produce({ say, signal: speech.controller.signal,
+        speechId: speech.speechId, emit: event => { if (!speech.ended) this.emit(speech, event); },
+        touch: () => { if (this.activeSpeech === speech && !speech.ended) this.armSpeechTimeout(speech); } });
       else {
         this.emit(speech, { type: 'amika_replied', text: stripSpeechTags(item.text), emotion: item.emotion });
         await say(item.text, item.emotion);
@@ -267,6 +294,14 @@ export class SpeechController {
 
   armSpeechTimeout(speech) {
     clearTimeout(speech.timer);
+    // The browser acknowledges after all queued sentences and scheduled pauses.
+    // Allow a conservative full-utterance duration beyond the normal 30s budget;
+    // an absent acknowledgment still has a bounded cleanup deadline.
+    const estimatedPlaybackMs = speech.spokenCharacters * ESTIMATED_SPOKEN_CHARACTER_MS + speech.pauseMs;
+    const timeoutMs = speech.ended
+      ? Math.max(this.safetyTimeoutMs, Math.min(MAX_PLAYBACK_BUDGET_MS,
+        this.safetyTimeoutMs + Math.max(0, estimatedPlaybackMs - NORMAL_PLAYBACK_BUDGET_MS)))
+      : this.safetyTimeoutMs;
     speech.timer = setTimeout(() => {
       if (speech.turnId && !speech.ended) {
         const socket = [...speech.recipients][0];
@@ -274,7 +309,7 @@ export class SpeechController {
       }
       this.stopSpeech(speech, 'timeout');
       this.releaseSpeech(speech, 'timeout');
-    }, this.safetyTimeoutMs);
+    }, timeoutMs);
   }
 
   stopSpeech(speech, reason = 'cancelled') {

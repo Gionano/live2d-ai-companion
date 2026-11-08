@@ -190,6 +190,8 @@ export async function mountSettings({ document = window.document, api = createSe
       ttsFields.maxTagsPerSentence = field(expressionBox, 'tts.tagCap', expression.maxTagsPerSentence, { type: 'number', min: 0, max: 2, step: 1 });
       ttsFields.earlyFirstSentence = checkbox(expressionBox, 'tts.earlyFirstSentence', expression.earlyFirstSentence);
       ttsFields.segmentPauseMs = field(expressionBox, 'tts.segmentPauseMs', expression.segmentPauseMs, { type: 'number', min: 0, max: 400, step: 1 });
+      ttsFields.sentencePauseMs = field(expressionBox, 'tts.sentencePauseMs', expression.sentencePauseMs, { type: 'number', min: 0, max: 400, step: 1 });
+      expressionBox.append(el('p', t('tts.sentencePauseHelp')));
       const catalogueBox = details(expressionBox, 'tts.emotionPresets');
       catalogueBox.append(el('p', t('tts.emotionPresetsHelp')));
       const mappingBox = details(expressionBox, 'tts.customEmotionMap');

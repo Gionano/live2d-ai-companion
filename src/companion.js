@@ -24,6 +24,7 @@ import { analyzeSpeechRhythm } from './speechMotion.js';
 import { ProactiveVoiceGate } from './proactiveVoiceGate.js';
 import { ContinuousVisionCapture, captureSignature } from './continuousVision.js';
 import { handleBrowserSelfieModal } from './browserSelfieModal.js';
+import { scheduleAudioBuffer } from './audioClock.js';
 
 const isOverlay = new URLSearchParams(window.location.search).get('mode') === 'overlay';
 // Wait for the main-process mute snapshot before opening the desktop microphone.
@@ -477,7 +478,7 @@ function b64ToUint8(b64) {
   return arr;
 }
 
-async function playSentenceAudio(chunks, emotion = 'netral', { signal, speechId, pauseBeforeMs = 0, segmentId } = {}) {
+async function playSentenceAudio(chunks, emotion = 'netral', { signal, speechId, pauseBeforeMs = 0, pauseAfterMs = 0, segmentId, register, stage, partId } = {}) {
   if (signal?.aborted) return;
   ensureAudio();
   if (audioCtx.state === 'suspended') await audioCtx.resume();
@@ -513,45 +514,34 @@ async function playSentenceAudio(chunks, emotion = 'netral', { signal, speechId,
   }
 
   if (!buffer || signal?.aborted) return;
-  return playDecodedAudio(buffer, emotion, { signal, speechId, pauseBeforeMs, segmentId });
+  return playDecodedAudio(buffer, emotion, { signal, speechId, pauseBeforeMs, pauseAfterMs, segmentId, register, stage, partId });
 }
 
-async function playDecodedAudio(buffer, emotion, { signal, speechId, pauseBeforeMs = 0, segmentId }) {
+async function playDecodedAudio(buffer, emotion, { signal, speechId, pauseBeforeMs = 0, pauseAfterMs = 0, segmentId, register, stage, partId }) {
   if (signal?.aborted) return;
   const rhythm = analyzeSpeechRhythm(buffer);
-  const src = audioCtx.createBufferSource();
-  src.buffer = buffer;
-  src.connect(analyser);
-  const startAt = Math.max(audioCtx.currentTime, playCursor) + Math.max(0, Math.min(400, pauseBeforeMs)) / 1000;
-  const endAt = startAt + buffer.duration;
-  let resolvePlayed;
-  const played = new Promise(resolve => { resolvePlayed = resolve; });
-  const onAbort = () => {
-    cancelSpeechMotion(speechId);
-    try { src.stop(); } catch {}
-    playCursor = audioCtx.currentTime;
-    scheduledEmotionEnd = audioCtx.currentTime;
-    resolvePlayed();
-  };
-  src.onended = resolvePlayed;
-  signal?.addEventListener('abort', onAbort, { once: true });
-  activeAudioSources.add(src);
+  const scheduled = scheduleAudioBuffer(audioCtx, buffer, {
+    destination: analyser, earliestStart: playCursor, pauseBeforeMs, pauseAfterMs, signal,
+    onCancel: () => {
+      cancelSpeechMotion(speechId);
+      playCursor = scheduledEmotionEnd = audioCtx.currentTime;
+    },
+  });
+  const { startAt, endAt, finishedAt, sources, done } = scheduled;
+  for (const source of sources) activeAudioSources.add(source);
   try {
     if (signal?.aborted) return;
-    src.start(startAt);
-    playCursor = endAt;
+    playCursor = finishedAt;
     scheduledEmotionEnd = Math.max(scheduledEmotionEnd, endAt);
     window.dispatchEvent(new CustomEvent('waifu-speech-cue', {
-      detail: { speechId, segmentId, emotion, startAt, endAt, rhythm },
+      detail: { speechId, segmentId, emotion, register, stage, partId, startAt, endAt, rhythm },
     }));
-    await played;
+    await done;
   } catch (error) {
     cancelSpeechMotion(speechId);
     throw error;
   } finally {
-    signal?.removeEventListener('abort', onAbort);
-    activeAudioSources.delete(src);
-    src.disconnect();
+    for (const source of sources) activeAudioSources.delete(source);
   }
 }
 

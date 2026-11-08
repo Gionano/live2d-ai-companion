@@ -51,6 +51,8 @@ export class SpeechPlayback {
     speech.pending++;
     const options = { signal: speech.controller.signal, speechId: speech.speechId,
       segmentId: metadata.segmentId, pauseBeforeMs: Math.max(0, Math.min(400, Number(metadata.pauseBeforeMs) || 0)),
+      pauseAfterMs: Math.max(0, Math.min(400, Number(metadata.pauseAfterMs) || 0)),
+      register: metadata.register, stage: metadata.stage, partId: metadata.partId,
       origin: speech.origin };
     this.chain = this.chain.then(async () => {
       if (this.speeches.get(speech.speechId) !== speech) return;

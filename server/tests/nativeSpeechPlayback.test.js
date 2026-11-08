@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { SpeechController } from '../speechController.js';
 import { generateSpeech } from '../ttsGenerate.js';
 import { generateReplyStream } from '../llmChat.js';
+import { playConversationReply } from '../conversationSpeech.js';
 import { prepareTtsText } from '../ttsExpression.js';
 import { fixture, ADAPTER_CASES, collect, SECRET } from './providerFixtures.js';
 
@@ -181,27 +182,30 @@ test('actual chat handler forwards each queued sentence choice into say options'
   const end = source.indexOf('\n  });\n});', start);
   assert.ok(start >= 0 && end > start);
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-  const run = new AsyncFunction('socket', 'speechController', 'transcribeAudio', 'generateReplyStream',
-    'history', 'msg', 'extFromMime', 'detectSelfieIntent', 'detectVisionIntent',
+  const run = new AsyncFunction('socket', 'speechController', 'transcribeAudio', 'playConversationReply',
+    'history', 'msg', 'extFromMime', 'detectSelfieIntent', 'visionRouter',
     'markConversationActivity', 'HISTORY_MESSAGE_LIMIT', 'memoryManager', 'getSlotStatus',
-    'proactiveConversation', 'visionManager', 'visionSessions', source.slice(start, end));
+    'proactiveConversation', 'visionManager', 'visionSessions',
+    'speechMemoryRecorder', 'trimConversationHistory', source.slice(start, end));
   const calls = [];
   const h = speechHarness(t, async function* (text, emotion, options) {
     calls.push([text, emotion, options.speechEmotion]);
   });
   const history = [];
   for (const speechEmotion of ['compassionate', 'nostalgic']) {
-    const registry = { getSlotStatus: () => ({ available: true }), getTts: () => ({ params: {
+    const registry = { getSlotStatus: role => ({ available: role !== 'surface' }), getTts: () => ({ params: {
       expression: { mergeShortSentences: { enabled: false } },
     } }), getLlm: () => ({ async *stream() {
       yield { type: 'text', delta: JSON.stringify({ emotion: 'sayang', speechEmotion, text: 'Aku di sini. Tenang, ya!' }) };
     } }) };
-    await run(h.socket, h.controller, () => {}, (previous, text, vision, options) =>
-      generateReplyStream(previous, text, vision, { ...options, registry }), history,
-    { type: 'text_input', text: 'Halo' }, () => 'webm', () => ({ isSelfie: false }), () => false,
+    await run(h.socket, h.controller, () => {}, options =>
+      playConversationReply({ ...options, registry }), history,
+    { type: 'text_input', text: 'Halo' }, () => 'webm', () => ({ isSelfie: false }), { route: async () => ({ sources: [] }) },
     () => {}, 8, { recordTurnAndExtract() {} }, () => ({ available: true }),
-    { updateSettings() {}, setUserActive() {} },
-    { getConversationContext: () => null, setAssistantContext() {} }, new Map());
+    { updateSettings() {}, setUserActive() {}, consumeGuidance: () => ({}) },
+    { getConversationContext: () => null, getRoutingObservations: () => [], getSourceSnapshot: () => ({}),
+      setAssistantContext() {}, conversationActivity() {} }, new Map(),
+      { context: () => null }, history => history);
   }
   assert.deepEqual(calls, [['Aku di sini.', 'sayang', 'compassionate'], ['Tenang, ya!', 'sayang', 'compassionate'],
     ['Aku di sini.', 'sayang', 'nostalgic'], ['Tenang, ya!', 'sayang', 'nostalgic']]);

@@ -96,6 +96,10 @@ export function makeTtsParams(fields, previous = {}) {
     ? previous.expression?.segmentPauseMs ?? DEFAULT_TTS_PARAMS.expression.segmentPauseMs
     : numeric('segmentPauseMs', 0, 400, true);
   if (!Number.isSafeInteger(segmentPauseMs) || segmentPauseMs < 0 || segmentPauseMs > 400) invalid();
+  const sentencePauseMs = fields.sentencePauseMs === undefined
+    ? previous.expression?.sentencePauseMs ?? DEFAULT_TTS_PARAMS.expression.sentencePauseMs
+    : numeric('sentencePauseMs', 0, 400, true);
+  if (!Number.isSafeInteger(sentencePauseMs) || sentencePauseMs < 0 || sentencePauseMs > 400) invalid();
   const allowList = String(fields.inlineAllowList || '').split(',').map(value => value.trim()).filter(Boolean);
   if (allowList.length > 32 || allowList.some(value => value.length > 80 || !/^[a-z][a-z0-9 _-]*$/.test(value))) invalid();
   for (const key of ['mergeEnabled', 'inlineEnabled', 'speechStyleEnabled', 'debug']) if (typeof fields[key] !== 'boolean') invalid();
@@ -103,7 +107,7 @@ export function makeTtsParams(fields, previous = {}) {
     topP, latency: fields.latency,
     prosody: { ...previous.prosody, speed: numeric('speed', 0.5, 2), volume: numeric('volume', -20, 20) },
     expression: { ...previous.expression, selection, emotionTagMap, tagPlacement: fields.tagPlacement,
-      earlyFirstSentence, segmentPauseMs,
+      earlyFirstSentence, segmentPauseMs, sentencePauseMs,
       maxTagsPerSentence: numeric('maxTagsPerSentence', 0, 2, true),
       mergeShortSentences: { enabled: fields.mergeEnabled, minChars, maxChars } },
     inlineTags: { enabled: fields.inlineEnabled, allowList: [...new Set(allowList)],

@@ -464,15 +464,23 @@ export async function* generateReplyStream(
   let firstSentenceSent = false;
   let spokeAny = false;
   const params = resolveTtsParams(registry.getTts?.()?.params);
-  if (!registry.getSlotStatus('tts').available) params.expression.mergeShortSentences.enabled = false;
+  // A sentence pause needs an individual audio boundary; merging sentences
+  // would hide those boundaries inside one provider request.
+  if (!registry.getSlotStatus('tts').available || params.expression.sentencePauseMs > 0) {
+    params.expression.mergeShortSentences.enabled = false;
+  }
   let merger = new SentenceMerger(params);
   const emitSentences = function* (sentences) {
     for (const text of sentences) {
       if (!spokenSentenceCount(text)) continue;
       const metadata = segment ? { emotion: segment.emotion, segmentId: segment.segmentId,
-        pauseBeforeMs: !segment.emitted && spokeAny ? params.expression.segmentPauseMs : 0 } : {};
+        pauseBeforeMs: !segment.emitted && spokeAny
+          ? Math.max(0, params.expression.segmentPauseMs - params.expression.sentencePauseMs) : 0 } : {};
       const nativeEmotion = segment ? segment.speechEmotion : speechEmotion;
-      yield { type: 'sentence', text, ...metadata, ...(nativeEmotion && { speechEmotion: nativeEmotion }) };
+      const selectedRegister = segment ? segment.register : register;
+      yield { type: 'sentence', text, ...metadata, pauseAfterMs: params.expression.sentencePauseMs,
+        ...(selectedRegister !== undefined && { register: selectedRegister }),
+        ...(nativeEmotion && { speechEmotion: nativeEmotion }) };
       if (segment) segment.emitted = true;
       firstSentenceSent = true;
       spokeAny = true;
