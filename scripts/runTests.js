@@ -9,7 +9,8 @@ const repoRoot = fileURLToPath(new URL('../', import.meta.url));
 const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'waifu-tests-'));
 const sourceRoot = path.join(runRoot, 'source');
 const directories = ['server/', 'src/', 'config/', 'workflows/', 'setup/', 'scripts/',
-  'desktop-companion/src/', 'desktop-companion/scripts/', 'vision-monitor/src/', 'vision-monitor/server/'];
+  'desktop-companion/src/', 'desktop-companion/scripts/', 'vision-monitor/src/', 'vision-monitor/server/',
+  'public/animationBanks/witch/'];
 const files = new Set(['.gitignore', 'package.json', 'index.html', 'providers.config.json', 'selfie.config.json',
   'selfie.mapping.json', 'vite.config.js', 'desktop-companion/package.json', 'vision-monitor/vite.config.js']);
 
