@@ -24,6 +24,7 @@ import { analyzeSpeechRhythm } from './speechMotion.js';
 import { ProactiveVoiceGate } from './proactiveVoiceGate.js';
 import { ContinuousVisionCapture, captureSignature } from './continuousVision.js';
 import { handleBrowserSelfieModal } from './browserSelfieModal.js';
+import { ConversationReadiness } from './conversationReadiness.js';
 import { ReplyParts } from './replyParts.js';
 import { scheduleAudioBuffer } from './audioClock.js';
 
@@ -437,6 +438,9 @@ function updateUiForState(state, isPttRecording = false) {
 function ensureAudio() {
   if (audioCtx) return;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const reportAudioReady = () => conversationReadiness.setAudioReady(audioCtx.state === 'running');
+  audioCtx.addEventListener('statechange', reportAudioReady);
+  reportAudioReady();
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 256;
   analyser.smoothingTimeConstant = 0.6;
@@ -563,6 +567,11 @@ async function playDecodedAudio(buffer, emotion, { signal, speechId, pauseBefore
 // WebSocket: terima user_said / amika_replied (log) + audio_output (suara).
 // ---------------------------------------------------------------------------
 let ws = null;
+const conversationReadiness = new ConversationReadiness(message => {
+  if (ws?.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify(message));
+  return true;
+});
 let desktopSelfieEnabled = true;
 let proactiveSpeechActive = false;
 const proactiveVoiceGate = new ProactiveVoiceGate();
@@ -644,6 +653,7 @@ function connectWS() {
   const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
   ws.addEventListener('open', () => {
+    conversationReadiness.connected();
     if (window.desktopBridge) {
       ws.send(JSON.stringify({ type: 'mic_mute', muted: isMicMutedByDesktop }));
     }
@@ -804,6 +814,7 @@ function connectWS() {
     }
   });
   ws.addEventListener('close', () => {
+    conversationReadiness.disconnected();
     replyParts.reset();
     continuousVision.disconnect();
     proactiveSpeechActive = false;
@@ -1238,7 +1249,6 @@ async function startListening() {
   if (micStartPromise) return micStartPromise;
   if (listening && micStream) return;
   listening = true;
-  if (isMicMutedByDesktop) return;
   micStartPromise = (async () => {
     try {
       ensureAudio();
