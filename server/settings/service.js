@@ -1,5 +1,5 @@
 import { deepMerge, createLocalPaths } from '../selfie/localPaths.js';
-import { readProviderLayers, resolveSlot } from '../providers/config.js';
+import { readProviderLayers, resolveSlot, FOLLOW_LLM_SLOTS, DEFAULT_CONFIG } from '../providers/config.js';
 import { validateBaseUrl } from '../providers/baseUrl.js';
 import { settingsDoctor } from './doctor.js';
 import { SettingsStore } from './store.js';
@@ -7,7 +7,7 @@ import { EnvSecretStore, SecretStore, validateSecretValues } from './secretStore
 import { CLOUD_IMAGE_ORIGIN, CLOUD_IMAGE_SECRET_ID, validateImageSettings } from './imageFields.js';
 import { bounded, CAPABILITIES, FLAGS, headerName, identifier, invalid, isObject, looksLikeLocalPath,
   looksLikeSecret, MODEL_FIELDS, object, PARAMS, PROFILE_FIELDS, SettingsError, SLOT_NAMES, splitExtras, validateDocument,
-  validateProfile, validateSlot } from './schema.js';
+  validateProfile, validateSlot, validateMemorySettings, DEFAULT_MEMORY_SETTINGS } from './schema.js';
 
 const KNOWN_ENV = ['EXPLABS_API_KEY', 'NINEINFERENCE_API_KEY', 'GROQ_API_KEY', 'FISH_API_KEY',
   'ANTHROPIC_API_KEY', 'PROVIDER_API_KEY', 'EXPLABS_BASE_URL', 'EXPLABS_MODEL', 'GROQ_BASE_URL'];
@@ -65,8 +65,9 @@ function profileFields(raw) {
       continue;
     }
     try {
-      const checked = validateProfile({ adapter: 'openaiCompatible', baseUrl: key === 'adapter' && value === 'fishAudio'
-        ? 'wss://example.invalid' : 'https://example.invalid', [key]: value });
+      const checked = validateProfile({ adapter: 'openaiCompatible', baseUrl: key === 'adapter' && value === 'localEmbedding'
+        ? 'http://127.0.0.1:8011' : key === 'adapter' && value === 'fishAudio'
+          ? 'wss://example.invalid' : 'https://example.invalid', [key]: value });
       result[key] = checked.profile[key];
     } catch { /* Ignore unsupported developer fields without returning their contents. */ }
   }
@@ -88,6 +89,9 @@ function slotFields(raw) {
 
 function publicLayer(layer = {}) {
   const output = { profiles: {}, slots: {} };
+  if (layer.memory !== undefined) {
+    try { output.memory = validateMemorySettings(layer.memory); } catch { /* Unsupported developer memory settings. */ }
+  }
   const secrets = {};
   for (const [id, raw] of Object.entries(layer.profiles || {})) {
     try { identifier(id); } catch { continue; }
@@ -111,7 +115,7 @@ function publicLayer(layer = {}) {
     const raw = layer.slots[name];
     if (raw === null) { output.slots[name] = null; continue; }
     if (!isObject(raw)) continue;
-    if (raw.followLlm === true && ['planner', 'visionFilter'].includes(name)) {
+    if (raw.followLlm === true && FOLLOW_LLM_SLOTS.includes(name)) {
       output.slots[name] = { followLlm: true }; continue;
     }
     const slot = slotFields(raw);
@@ -131,6 +135,7 @@ function publicLayer(layer = {}) {
 function exportDocument(config) {
   const data = { schemaVersion: 1, profiles: {}, slots: {}, ui: config.ui || { language: 'id' } };
   if (config.images !== undefined) data.images = structuredClone(config.images);
+  if (config.memory !== undefined) data.memory = structuredClone(config.memory);
   for (const [id, profile] of Object.entries(config.profiles || {})) {
     if (!profile || !originOf(profile)) continue;
     try { data.profiles[id] = validateProfile(profile).profile; } catch { /* Unsupported developer extension. */ }
@@ -175,20 +180,29 @@ export class SettingsService {
 
   refresh() {
     this.#layers = this.#loadLayers();
+    this.#layers = { ...this.#layers, defaults: deepMerge({
+      profiles: { localBge: DEFAULT_CONFIG.profiles.localBge || {
+        adapter: 'localEmbedding', baseUrl: 'http://127.0.0.1:8011', capabilities: { embeddings: true },
+      } },
+      slots: { memoryWriter: { followLlm: true }, memoryEmbedding: DEFAULT_CONFIG.slots.memoryEmbedding
+        || { profile: 'localBge', model: 'bge-m3-d768' } },
+      memory: DEFAULT_MEMORY_SETTINGS,
+    }, this.#layers.defaults) };
     this.#document = this.store.read();
     const defaults = publicLayer(this.#layers.defaults);
     const dev = publicLayer(deepMerge(this.#layers.defaults, this.#layers.dev));
     // The developer file is trusted input, but credential values never enter registry config.
     this.#devSecrets = dev.secrets;
-    const { profiles, slots, ui, images } = this.#document;
-    this.#config = deepMerge(dev.config, { profiles, slots, ui, ...(images !== undefined && { images }) });
+    const { profiles, slots, ui, images, memory } = this.#document;
+    this.#config = deepMerge(dev.config, { profiles, slots, ui, ...(images !== undefined && { images }),
+      ...(memory !== undefined && { memory }) });
     for (const [name, slot] of Object.entries(slots)) {
       if (slot?.followLlm) this.#config.slots[name] = { followLlm: true };
       else if (slot?.profile) delete this.#config.slots[name].followLlm;
     }
     const declared = sourcesFor(defaults.config, 'default');
     sourcesFor(publicLayer(this.#layers.dev).config, 'dev-file', '', declared);
-    sourcesFor({ profiles, slots, ui, ...(images !== undefined && { images }) }, 'settings', '', declared);
+    sourcesFor({ profiles, slots, ui, ...(images !== undefined && { images }), ...(memory !== undefined && { memory }) }, 'settings', '', declared);
     this.#sources = Object.fromEntries(Object.keys(sourcesFor(this.#config, '')).map(key => [key, declared[key] || 'default']));
     if (this.#document.version === 0) this.#sources['ui.language'] = 'default';
     const stored = this.secrets.snapshot();
@@ -277,7 +291,7 @@ export class SettingsService {
   status() {
     const slots = Object.fromEntries(SLOT_NAMES.map(slot => [slot, this.#registry?.getSlotStatus(slot) || { available: false } ]));
     return this.#redact({ version: this.#document.version, backendName: this.secrets.backendName,
-      firstRun: !SLOT_NAMES.some(name => this.#config.slots?.[name]?.profile), slots,
+      firstRun: !SLOT_NAMES.some(name => !['router', 'memoryWriter', 'memoryEmbedding'].includes(name) && this.#config.slots?.[name]?.profile), slots,
       warningCodes: [...(this.secrets.error ? ['SECRET_STORAGE'] : []),
         ...(this.store.recovered ? ['SETTINGS_RECOVERED'] : [])],
       warnings: [...(this.secrets.warning ? [this.secrets.warning] : []),
@@ -420,6 +434,15 @@ export class SettingsService {
       return current;
     }, true);
   }
+  putMemory(request) {
+    object(request, ['version', 'memory']);
+    const memory = validateMemorySettings(request.memory);
+    return this.#update(request.version, current => {
+      current.memory = memory;
+      this.#validatePublic(current);
+      return current;
+    });
+  }
   putImageSecret(request) {
     object(request, ['version', 'key']);
     const values = validateSecretValues({ apiKey: request.key });
@@ -447,6 +470,15 @@ export class SettingsService {
     return this.#update(request.version, current => {
       this.refresh();
       const next = { ...input, profiles: { ...input.profiles }, version: current.version };
+      const legacyRouter = !Object.hasOwn(next.slots, 'router');
+      if (legacyRouter && !Object.hasOwn(next.profiles, 'groq')) {
+        next.profiles.groq = this.#config.profiles.groq === null ? null
+          : structuredClone(this.#config.profiles.groq || DEFAULT_CONFIG.profiles.groq);
+      }
+      if (!Object.hasOwn(next.slots, 'memoryEmbedding') && !Object.hasOwn(next.profiles, 'localBge')) {
+        next.profiles.localBge = this.#config.profiles.localBge === null ? null
+          : structuredClone(this.#config.profiles.localBge || DEFAULT_CONFIG.profiles.localBge);
+      }
       // Import replaces the settings selection. Tombstones keep omitted lower
       // layers from silently restoring old profiles or credentials.
       for (const id of Object.keys(this.#config.profiles)) next.profiles[id] ??= null;
@@ -457,7 +489,13 @@ export class SettingsService {
           throw new SettingsError('ORIGIN_CHANGE', 409);
         }
       }
-      for (const name of SLOT_NAMES) next.slots[name] ??= null;
+      for (const name of SLOT_NAMES) if (!Object.hasOwn(next.slots, name)) {
+        next.slots[name] = name === 'router' && next.profiles.groq
+          ? structuredClone(DEFAULT_CONFIG.slots.router)
+          : name === 'memoryEmbedding' && next.profiles.localBge
+            ? structuredClone(DEFAULT_CONFIG.slots.memoryEmbedding || { profile: 'localBge', model: 'bge-m3-d768' })
+            : ['surface', 'reflection', 'memoryWriter'].includes(name) ? { followLlm: true } : null;
+      }
       const effective = deepMerge(publicLayer(deepMerge(this.#layers.defaults, this.#layers.dev)).config, next);
       for (const slot of Object.values(next.slots)) if (slot && !slot.followLlm && !effective.profiles[slot.profile]) invalid();
       this.#validatePublic(next);

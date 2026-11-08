@@ -2,10 +2,11 @@ import { loadProvidersConfig, resolveSlot, effectiveProfile, slotProblem } from 
 import { OpenAiCompatible } from './adapters/openaiCompatible.js';
 import { AnthropicNative } from './adapters/anthropicNative.js';
 import { FishAudio } from './adapters/fishAudio.js';
+import { LocalEmbedding } from './adapters/localEmbedding.js';
 import { validateBaseUrl } from './baseUrl.js';
 import { getSettingsService } from '../settings/service.js';
 
-export const ADAPTERS = { openaiCompatible: OpenAiCompatible, anthropicNative: AnthropicNative, fishAudio: FishAudio };
+export const ADAPTERS = { openaiCompatible: OpenAiCompatible, anthropicNative: AnthropicNative, fishAudio: FishAudio, localEmbedding: LocalEmbedding };
 export const envSecretResolver = { resolve: name => process.env[name] };
 
 export class ProviderRegistry {
@@ -46,7 +47,8 @@ export class ProviderRegistry {
     return this.instances.get(slot);
   }
 
-  getLlm(role = 'llm') { return ['llm', 'vision', 'planner', 'visionFilter'].includes(role) ? this.get(role) : null; }
+  getLlm(role = 'llm') { return ['llm', 'surface', 'reflection', 'router', 'vision', 'planner', 'visionFilter', 'memoryWriter'].includes(role) ? this.get(role) : null; }
+  getEmbedding() { return this.get('memoryEmbedding'); }
   getStt() { return this.get('stt'); }
   getTts() { return this.get('tts'); }
 
@@ -76,6 +78,7 @@ export const getSlotStatus = slot => getProviderRegistry().getSlotStatus(slot);
 export const getLlm = role => getProviderRegistry().getLlm(role);
 export const getStt = () => getProviderRegistry().getStt();
 export const getTts = () => getProviderRegistry().getTts();
+export const getEmbedding = () => getProviderRegistry().getEmbedding();
 export const reload = () => {
   const registry = getProviderRegistry();
   const settings = getSettingsService();

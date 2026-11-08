@@ -382,7 +382,8 @@ export async function mountSettings({ document = window.document, api = createSe
     else if (tab === 'connections') {
       providers(content); content.append(el('h2', t('slot.title')));
       for (const name of ['llm', 'vision', 'stt', 'tts']) slotEditor(content, name);
-      const advanced = details(content, 'slot.advanced'); for (const name of ['planner', 'visionFilter']) slotEditor(advanced, name);
+      const advanced = details(content, 'slot.advanced'); for (const name of ['surface', 'reflection', 'router', 'planner', 'visionFilter', 'memoryWriter', 'memoryEmbedding']) slotEditor(advanced, name);
+      advanced.append(el('p', t('slot.conversationRolesHelp')));
     } else if (tab === 'images') imageController = mountImageSettings(content, { document, api, t, fail, onVersion: version => { effective.version = version; } });
     else if (tab === 'status') statusView(content);
     else if (tab === 'privacy') privacy(content);

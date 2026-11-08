@@ -131,9 +131,15 @@ export function updateEmotionSelection(map, emotion, first, second) {
 }
 export function privacyFlows(settings) {
   return [['privacy.microphone', 'stt', '#mic-status'], ['privacy.chat', 'llm', '#chat-form'],
-    ['privacy.frames', 'vision', '#screen-share-btn'], ['privacy.spoken', 'tts', '#mic-status']].map(([label, slot, toggle]) => ({
-    label, origin: profileOrigin(settings.profiles?.[settings.slots?.[slot]?.profile] || {}), toggle,
-  }));
+    ['privacy.reaction', 'surface', '#chat-form'], ['privacy.reflection', 'reflection', '#chat-form'],
+    ['privacy.routing', 'router', '#chat-form'],
+    ['privacy.memoryWriter', 'memoryWriter', '?settings=1'], ['privacy.memoryEmbedding', 'memoryEmbedding', '?settings=1'],
+    ['privacy.frames', 'vision', '#screen-share-btn'], ['privacy.spoken', 'tts', '#mic-status']].map(([label, slot, toggle]) => {
+    const current = settings.slots?.[slot];
+    const assignment = current?.followLlm || current === undefined && ['surface', 'reflection', 'memoryWriter'].includes(slot)
+      ? settings.slots?.llm : current;
+    return { label, origin: profileOrigin(settings.profiles?.[assignment?.profile] || {}), toggle };
+  });
 }
 export async function withSecret(field, operation) {
   let value = field.value;

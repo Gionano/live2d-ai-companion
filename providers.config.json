@@ -1,5 +1,16 @@
 {
   "profiles": {
+    "localBge": {
+      "adapter": "localEmbedding",
+      "baseUrl": "http://127.0.0.1:8011",
+      "models": { "bge-m3-d768": { "capabilities": { "embeddings": true } } }
+    },
+    "groq": {
+      "adapter": "openaiCompatible",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "apiKeyEnv": "GROQ_API_KEY",
+      "flags": { "supportsImages": false, "supportsStt": false, "supportsJsonMode": false, "supportsStreamUsage": false }
+    },
     "openai-compatible": {
       "adapter": "openaiCompatible",
       "baseUrl": "REPLACE_WITH_HTTPS_BASE_URL",
@@ -22,6 +33,16 @@
   },
   "slots": {
     "llm": null,
+    "surface": { "followLlm": true },
+    "reflection": { "followLlm": true },
+    "memoryWriter": { "followLlm": true },
+    "memoryEmbedding": { "profile": "localBge", "model": "bge-m3-d768" },
+    "router": {
+      "profile": "groq",
+      "model": "openai/gpt-oss-20b",
+      "params": { "temperature": 0, "maxTokens": 512, "json": true, "bodyExtras": { "reasoning_effort": "low" } },
+      "timeouts": { "firstByteMs": 5000, "idleMs": 5000, "totalMs": 5000 }
+    },
     "planner": null,
     "vision": null,
     "visionFilter": null,

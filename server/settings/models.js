@@ -7,6 +7,9 @@ export async function listModels(service, { profile: id, apiKey, signal, fetchIm
   try {
     const profile = service.config().profiles[id];
     if (!profile || profile.adapter === 'fishAudio') return { models: [], reason: 'UNSUPPORTED' };
+    if (profile.adapter === 'localEmbedding') {
+      return { models: ['bge-m3-d768'], reason: null };
+    }
     const base = validateBaseUrl(profile.baseUrl);
     const credentials = service.resolver().profileSecrets(id, profile);
     const key = apiKey || credentials.apiKey;

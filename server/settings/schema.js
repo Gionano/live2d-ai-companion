@@ -1,19 +1,21 @@
 import { validateBaseUrl, validateProviderHeaders } from '../providers/baseUrl.js';
 import { FISH_EMOTION_NAMES } from '../fishEmotionTags.js';
 import { validateImageSettings } from './imageFields.js';
+import { FOLLOW_LLM_SLOTS } from '../providers/config.js';
 
 export const SETTINGS_LIMIT = 64 * 1024;
-export const SLOT_NAMES = ['llm', 'planner', 'vision', 'visionFilter', 'stt', 'tts'];
-export const ADAPTER_NAMES = ['openaiCompatible', 'anthropicNative', 'fishAudio'];
+export const SLOT_NAMES = ['llm', 'surface', 'reflection', 'router', 'planner', 'vision', 'visionFilter', 'stt', 'tts', 'memoryWriter', 'memoryEmbedding'];
+export const ADAPTER_NAMES = ['openaiCompatible', 'anthropicNative', 'fishAudio', 'localEmbedding'];
 export const PROFILE_FIELDS = ['id', 'adapter', 'baseUrl', 'apiKeyEnv', 'flags', 'headerNames',
   'bodyExtras', 'omitParams', 'capabilities', 'anthropicVersion', 'defaultMaxTokens', 'models'];
 export const MODEL_FIELDS = ['flags', 'capabilities', 'bodyExtras', 'omitParams', 'anthropicVersion', 'defaultMaxTokens'];
 export const FLAGS = ['supportsImages', 'supportsStt', 'supportsVerboseStt', 'supportsJsonMode', 'supportsStreamUsage'];
-export const CAPABILITIES = ['llm', 'images', 'jsonMode', 'stt', 'tts'];
+export const CAPABILITIES = ['llm', 'images', 'jsonMode', 'stt', 'tts', 'embeddings'];
+export const DEFAULT_MEMORY_SETTINGS = Object.freeze({ managedEmbedding: true, embeddingDevice: 'auto' });
 export const PARAMS = ['temperature', 'maxTokens', 'json', 'language', 'prompt', 'voice', 'format', 'bodyExtras', 'omitParams',
   'topP', 'latency', 'prosody', 'expression', 'inlineTags', 'speechStyle', 'debug'];
 const TTS_EMOTIONS = [...new Set(['terkejut', 'marah', 'bingung', 'jengkel', 'malu', 'kesal', 'sedih', 'kagum',
-  'sayang', 'jahil', 'penasaran', 'netral', 'shy', 'neutral', ...FISH_EMOTION_NAMES])];
+  'sayang', 'jahil', 'penasaran', 'netral', 'senang', 'shy', 'neutral', ...FISH_EMOTION_NAMES])];
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype', 'safety', 'moderation', 'selfiemoderation',
   'persona', 'personality', 'system', 'instructions', 'messages', 'tools', 'toolchoice']);
 
@@ -106,12 +108,13 @@ export function validateTtsParams(params) {
   }
   if (params.expression !== undefined) {
     const expression = object(params.expression, ['selection', 'emotionTagMap', 'tagPlacement', 'maxTagsPerSentence', 'mergeShortSentences',
-      'earlyFirstSentence', 'segmentPauseMs']);
+      'earlyFirstSentence', 'segmentPauseMs', 'sentencePauseMs']);
     if (expression.selection !== undefined && !['native', 'mapped'].includes(expression.selection)) invalid();
     if (expression.tagPlacement !== undefined && !['every-sentence', 'first-only'].includes(expression.tagPlacement)) invalid();
     if (expression.maxTagsPerSentence !== undefined) integer(expression.maxTagsPerSentence, 0, 2);
     if (expression.earlyFirstSentence !== undefined && typeof expression.earlyFirstSentence !== 'boolean') invalid();
     if (expression.segmentPauseMs !== undefined) integer(expression.segmentPauseMs, 0, 400);
+    if (expression.sentencePauseMs !== undefined) integer(expression.sentencePauseMs, 0, 400);
     if (expression.emotionTagMap !== undefined) {
       object(expression.emotionTagMap, TTS_EMOTIONS);
       for (const tags of Object.values(expression.emotionTagMap)) {
@@ -176,6 +179,8 @@ export function validateProfile(value, { allowSecrets = false } = {}) {
   object(value, PROFILE_FIELDS);
   if (!ADAPTER_NAMES.includes(value.adapter)) invalid();
   try { validateBaseUrl(value.baseUrl, { websocket: value.adapter === 'fishAudio' }); } catch { invalid(); }
+  if (value.adapter === 'localEmbedding'
+    && !['localhost', '127.0.0.1', '[::1]'].includes(new URL(value.baseUrl).hostname.toLowerCase())) invalid();
   if (value.id !== undefined) identifier(value.id);
   if (value.apiKeyEnv != null && (typeof value.apiKeyEnv !== 'string' || !/^[A-Z_][A-Z0-9_]{0,79}$/.test(value.apiKeyEnv))) invalid();
   if (value.flags !== undefined) booleans(value.flags, FLAGS);
@@ -226,10 +231,17 @@ export function validateSlot(value, { allowSecrets = false } = {}) {
   return { slot: bounded(result), secrets: extras.secrets };
 }
 
+export function validateMemorySettings(value) {
+  object(value, ['managedEmbedding', 'embeddingDevice']);
+  if (value.managedEmbedding !== undefined && typeof value.managedEmbedding !== 'boolean') invalid();
+  if (value.embeddingDevice !== undefined && !['auto', 'cpu', 'cuda'].includes(value.embeddingDevice)) invalid();
+  return structuredClone(value);
+}
+
 export const emptySettings = () => ({ schemaVersion: 1, version: 0, profiles: {}, slots: {}, ui: { language: 'id' } });
 export function validateDocument(value, { persisted = false } = {}) {
   bounded(value);
-  object(value, persisted ? ['schemaVersion', 'version', 'profiles', 'slots', 'ui', 'images'] : ['schemaVersion', 'profiles', 'slots', 'ui', 'images']);
+  object(value, persisted ? ['schemaVersion', 'version', 'profiles', 'slots', 'ui', 'images', 'memory'] : ['schemaVersion', 'profiles', 'slots', 'ui', 'images', 'memory']);
   if (value.schemaVersion !== 1) invalid();
   if (persisted && (!Number.isSafeInteger(value.version) || value.version < 0)) invalid();
   if (!isObject(value.profiles) || Object.keys(value.profiles).length > 32) invalid();
@@ -243,10 +255,11 @@ export function validateDocument(value, { persisted = false } = {}) {
   object(value.slots, SLOT_NAMES);
   Object.entries(value.slots).forEach(([name, slot]) => {
     validateSlot(slot);
-    if (slot?.followLlm && !['planner', 'visionFilter'].includes(name)) invalid();
+    if (slot?.followLlm && !FOLLOW_LLM_SLOTS.includes(name)) invalid();
   });
   object(value.ui, ['language']);
   if (!['id', 'en'].includes(value.ui.language)) invalid();
   if (value.images !== undefined) validateImageSettings(value.images);
+  if (value.memory !== undefined) validateMemorySettings(value.memory);
   return structuredClone(value);
 }

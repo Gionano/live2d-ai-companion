@@ -60,7 +60,7 @@ test('environment seeding requires an explicit shared mapping and local values t
   assert.equal(local.slots.planner.model, 'env-model');
 });
 
-test('public templates never assign slots, including when legacy provider env values exist', t => {
+test('public templates default router and local embeddings without assigning conversation providers', t => {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'providers-neutral-'));
   t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
   const config = loadProvidersConfig({ repoRoot, env: {
@@ -69,17 +69,35 @@ test('public templates never assign slots, including when legacy provider env va
     GROQ_API_KEY: SECRET, NINEINFERENCE_API_KEY: SECRET, FISH_API_KEY: SECRET,
   } });
   assert.deepEqual(config, DEFAULT_CONFIG);
-  assert.deepEqual(Object.keys(config.profiles).sort(), ['anthropic-native', 'fish-audio', 'openai-compatible']);
-  for (const profile of Object.values(config.profiles)) {
+  assert.deepEqual(Object.keys(config.profiles).sort(), ['anthropic-native', 'fish-audio', 'groq', 'localBge', 'openai-compatible']);
+  for (const [id, profile] of Object.entries(config.profiles)) {
+    if (id === 'groq') {
+      assert.equal(profile.baseUrl, 'https://api.groq.com/openai/v1');
+      assert.equal(profile.apiKeyEnv, 'GROQ_API_KEY');
+      continue;
+    }
+    if (id === 'localBge') {
+      assert.equal(profile.baseUrl, 'http://127.0.0.1:8011');
+      assert.equal(profile.apiKeyEnv, undefined);
+      continue;
+    }
     assert.match(profile.baseUrl, /^REPLACE_WITH_/);
     assert.equal(profile.model, 'REPLACE_WITH_MODEL');
   }
-  const registry = new ProviderRegistry({ config });
-  assert.deepEqual(Object.keys(config.slots).sort(), ['llm', 'planner', 'stt', 'tts', 'vision', 'visionFilter']);
+  const registry = new ProviderRegistry({ config, secretResolver: { resolve: () => undefined } });
+  assert.deepEqual(Object.keys(config.slots).sort(), ['llm', 'memoryEmbedding', 'memoryWriter', 'planner', 'reflection', 'router', 'stt', 'surface', 'tts', 'vision', 'visionFilter']);
   for (const slot of Object.keys(config.slots)) {
-    assert.equal(config.slots[slot], null);
+    if (slot === 'router') assert.equal(config.slots.router.model, 'openai/gpt-oss-20b');
+    else if (slot === 'memoryEmbedding') {
+      assert.deepEqual(config.slots[slot], { profile: 'localBge', model: 'bge-m3-d768' });
+      assert.equal(registry.getEmbedding().capabilities.embeddings, true);
+      continue;
+    }
+    else if (['surface', 'reflection', 'memoryWriter'].includes(slot)) assert.deepEqual(config.slots[slot], { followLlm: true });
+    else assert.equal(config.slots[slot], null);
     assert.equal(registry.get(slot), null);
-    assert.match(registry.getSlotStatus(slot).reason, /Set its profile and model in providers\.config\.local\.json/);
+    if (slot === 'router') assert.match(registry.getSlotStatus(slot).reason, /GROQ_API_KEY/);
+    else assert.match(registry.getSlotStatus(slot).reason, /Set its profile and model in providers\.config\.local\.json/);
   }
 });
 
@@ -246,6 +264,7 @@ test('unconfigured slots degrade gracefully without calling an adapter', async (
   assert.deepEqual(await collect(generateSpeech('Halo', 'neutral', { registry })), []);
   assert.equal(await describeFrame('unused', 'screen', { registry }), UNAVAILABLE_MESSAGES.vision);
   const manager = new StreamingVisionManager({ registry, startTimer: false });
+  manager.setHistoryRef([{ role: 'user', content: 'Watch my screen and comment.' }]);
   await manager.handleContinuousFrame('unused');
   assert.equal(manager.stats.totalVisionCalls, 0);
   assert.equal((await manager.evaluateFilter([])).action, 'SKIP');
@@ -258,13 +277,14 @@ test('vision describe and monitor filter use their roles, image parts and canoni
     roles.push(role);
     return { async complete(request) {
       requests.push(request);
-      return { text: role === 'vision' ? 'Layar terbuka.' : '{"action":"COMMENT","text":"Wah, keren!","emotion":"kagum"}',
+      return { text: role === 'vision' ? 'Layar terbuka.' : '{"action":"COMMENT","relevant":true,"text":"Wah, keren!","emotion":"kagum"}',
         inputTokens: 10, outputTokens: 4 };
     } };
   } };
   const image = `data:image/png;base64,${tinyPng().toString('base64')}`;
   assert.equal(await describeFrame(image, 'screen', { registry }), 'Layar terbuka.');
   const manager = new StreamingVisionManager({ registry, startTimer: false });
+  manager.setHistoryRef([{ role: 'user', content: 'Comment on my screen.' }]);
   manager.monitorConnected = true;
   await manager.handleContinuousFrame(image);
   const result = await manager.evaluateFilter(manager.buffer);

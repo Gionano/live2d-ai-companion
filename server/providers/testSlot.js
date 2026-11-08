@@ -52,7 +52,14 @@ export async function testSlot(slot, { profile, model, signal, onProgress = () =
       result.error = { code: status.reason?.startsWith('Missing key') ? 'AUTH' : 'UNSUPPORTED', message: status.reason };
       return result;
     }
-    if (slot === 'stt') {
+    if (slot === 'memoryEmbedding') {
+      const provider = active.getEmbedding();
+      const health = await provider.health({ signal });
+      const response = await provider.embed({ texts: ['A synthetic memory connection check.'], taskType: 'query', signal });
+      result.details.dimensions = response.dimensions;
+      result.details.device = health.device;
+      result.ttftMs = Math.round(performance.now() - startedAt);
+    } else if (slot === 'stt') {
       const response = await active.getStt().transcribe({ audio: shortWav(), filename: 'probe.wav', mime: 'audio/wav', signal, onProgress });
       if (typeof response.text !== 'string') throw new ProviderError('BAD_RESPONSE');
       result.details.characters = response.text.length;
@@ -66,8 +73,10 @@ export async function testSlot(slot, { profile, model, signal, onProgress = () =
       if (result.ttftMs === undefined) throw new ProviderError('BAD_RESPONSE');
     } else {
       const content = slot === 'vision' ? [{ type: 'image', mime: 'image/png', base64: tinyPng().toString('base64') },
-        { type: 'text', text: 'Name the main color in one word.' }] : 'Reply with OK.';
-      for await (const event of active.getLlm(slot).stream({ messages: [{ role: 'user', content }], maxTokens: 16, signal, onProgress })) {
+        { type: 'text', text: 'Name the main color in one word.' }]
+        : slot === 'router' ? 'Return exactly one JSON object with ok set to true.' : 'Reply with OK.';
+      for await (const event of active.getLlm(slot).stream({ messages: [{ role: 'user', content }],
+        maxTokens: slot === 'router' ? 512 : 16, signal, onProgress })) {
         if (event.type === 'text' && event.delta && result.ttftMs === undefined) result.ttftMs = Math.round(performance.now() - startedAt);
         if (event.type === 'usage') {
           result.tokens ??= {};

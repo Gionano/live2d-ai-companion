@@ -6,10 +6,12 @@ import { providerCapabilities } from './contracts.js';
 import { capabilities as openai } from './adapters/openaiCompatible.js';
 import { capabilities as anthropic } from './adapters/anthropicNative.js';
 import { capabilities as fish } from './adapters/fishAudio.js';
+import { capabilities as embedding, validateLocalEmbeddingUrl } from './adapters/localEmbedding.js';
 import { validateBaseUrl, validateProviderHeaders } from './baseUrl.js';
 
-export const ADAPTER_CAPABILITIES = { openaiCompatible: openai, anthropicNative: anthropic, fishAudio: fish };
-export const SLOT_CAPABILITIES = { llm: 'llm', planner: 'llm', visionFilter: 'llm', vision: 'images', stt: 'stt', tts: 'tts' };
+export const ADAPTER_CAPABILITIES = { openaiCompatible: openai, anthropicNative: anthropic, fishAudio: fish, localEmbedding: embedding };
+export const FOLLOW_LLM_SLOTS = ['planner', 'visionFilter', 'surface', 'reflection', 'memoryWriter'];
+export const SLOT_CAPABILITIES = { llm: 'llm', surface: 'llm', reflection: 'llm', router: 'llm', planner: 'llm', visionFilter: 'llm', memoryWriter: 'llm', memoryEmbedding: 'embeddings', vision: 'images', stt: 'stt', tts: 'tts' };
 export const DEFAULT_CONFIG = JSON.parse(fs.readFileSync(new URL('../../providers.config.json', import.meta.url), 'utf8'));
 
 function readConfig(filename) {
@@ -54,7 +56,9 @@ export function loadProvidersConfig({ repoRoot = ROOT_DIR, env = process.env,
 
 export function resolveSlot(config, slot) {
   const value = config.slots?.[slot];
-  return (value === undefined || value?.followLlm) && ['planner', 'visionFilter'].includes(slot) ? config.slots?.llm : value;
+  if (slot === 'router' && value === undefined) return DEFAULT_CONFIG.slots.router;
+  if (slot === 'memoryEmbedding' && value === undefined) return DEFAULT_CONFIG.slots.memoryEmbedding;
+  return (value === undefined || value?.followLlm) && FOLLOW_LLM_SLOTS.includes(slot) ? config.slots?.llm : value;
 }
 
 export function effectiveProfile(config, slotConfig) {
@@ -63,14 +67,17 @@ export function effectiveProfile(config, slotConfig) {
 }
 
 export function slotProblem(config, slot, resolver = { resolve: name => process.env[name] }) {
-  if (!Object.hasOwn(SLOT_CAPABILITIES, slot)) return 'Unknown slot. Use llm, planner, vision, visionFilter, stt or tts.';
+  if (!Object.hasOwn(SLOT_CAPABILITIES, slot)) return 'Unknown slot. Use llm, surface, reflection, router, planner, vision, visionFilter, memoryWriter, memoryEmbedding, stt or tts.';
   const settings = resolveSlot(config, slot);
   if (!settings?.profile) return 'Slot is unconfigured. Set its profile and model in providers.config.local.json.';
   const profile = effectiveProfile(config, settings);
   if (!profile) return 'Unknown profile. Add the referenced profile to providers.config.local.json.';
-  if (!Object.hasOwn(ADAPTER_CAPABILITIES, profile.adapter)) return 'Unknown adapter. Use openaiCompatible, anthropicNative or fishAudio.';
+  if (!Object.hasOwn(ADAPTER_CAPABILITIES, profile.adapter)) return 'Unknown adapter. Use openaiCompatible, anthropicNative, fishAudio or localEmbedding.';
   if (typeof settings.model !== 'string' || !settings.model.trim() || settings.model.startsWith('REPLACE_WITH_')) {
     return 'Missing model. Replace the template value in slots.<slot>.model.';
+  }
+  if (profile.adapter === 'localEmbedding' && settings.model !== 'bge-m3-d768') {
+    return 'Local embedding adapter supports only bge-m3-d768.';
   }
   const capabilities = providerCapabilities(ADAPTER_CAPABILITIES[profile.adapter], profile, settings.model);
   const operation = slot === 'vision' ? 'llm' : SLOT_CAPABILITIES[slot];
@@ -88,6 +95,7 @@ export function slotProblem(config, slot, resolver = { resolve: name => process.
   }
   try {
     validateBaseUrl(profile.baseUrl, { websocket: profile.adapter === 'fishAudio' });
+    if (profile.adapter === 'localEmbedding') validateLocalEmbeddingUrl(profile.baseUrl);
     validateProviderHeaders(profile.extraHeaders);
   } catch (error) { return error.message; }
   for (const [key, value] of Object.entries(settings.timeouts ?? {})) {

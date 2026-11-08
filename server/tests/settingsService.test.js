@@ -104,7 +104,7 @@ test('secrets stay private while presence and per-field sources remain available
     assert.equal(settings.includes(secret), false);
     assert.equal(publicData.includes(secret), false);
   }
-  assert.deepEqual(events[0], { type: 'settings_changed', slots: ['llm', 'planner', 'vision', 'visionFilter', 'stt', 'tts'] });
+  assert.deepEqual(events[0], { type: 'settings_changed', slots: ['llm', 'surface', 'reflection', 'router', 'planner', 'vision', 'visionFilter', 'stt', 'tts', 'memoryWriter', 'memoryEmbedding'] });
 });
 
 test('known secret duplication is rejected before public persistence', t => {

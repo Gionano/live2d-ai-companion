@@ -12,7 +12,7 @@ export function parseArgs(args) {
     if (!value || value.startsWith('--')) throw new Error('Each option needs a value.');
     options[flag.slice(2)] = value;
   }
-  if (options.slot && !Object.hasOwn(SLOT_CAPABILITIES, options.slot)) throw new Error('Unknown slot. Use llm, planner, vision, visionFilter, stt or tts.');
+  if (options.slot && !Object.hasOwn(SLOT_CAPABILITIES, options.slot)) throw new Error('Unknown slot. Use llm, surface, reflection, router, planner, vision, visionFilter, stt or tts.');
   return options;
 }
 
