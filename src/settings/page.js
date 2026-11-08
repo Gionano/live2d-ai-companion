@@ -6,6 +6,7 @@ import { translator, detectLanguage } from './i18n.js';
 import { createSettingsClient } from './apiClient.js';
 import { node } from './dom.js';
 import { mountImageSettings } from './imageSettings.js';
+import { mountMemorySettings } from './memorySettings.js';
 import { TAB_LABELS, SLOT_LABELS, STATUS_WARNING_KEYS, DEFAULT_TTS_PARAMS, FISH_EMOTION_GROUPS, FISH_EMOTION_TAGS, emotionMapSelections, updateEmotionSelection, friendlyError, validateBaseUrl, originNeedsConfirmation, parseAdvanced, makeSlot, privacyFlows, withSecret } from './viewModel.js';
 import { WIZARD_STEPS, WIZARD_LABELS, WIZARD_STORAGE_KEY, needsWizard, readWizard, moveWizard, saveWizard } from './wizard.js';
 import './settings.css';
@@ -22,6 +23,7 @@ export async function mountSettings({ document = window.document, api = createSe
   let fieldId = 0;
   let wizard;
   let imageController;
+  let memoryController;
   try { wizard = readWizard(storage.getItem(WIZARD_STORAGE_KEY)); } catch { wizard = readWizard(null); }
   let showWizard = !wizard.completed;
   const root = node(document, 'main', undefined, { id: 'settings-page' });
@@ -81,6 +83,7 @@ export async function mountSettings({ document = window.document, api = createSe
     identifier.disabled = Boolean(selected);
     const adapter = field(form, 'provider.adapter', previous?.adapter || 'openaiCompatible', { options: [
       ['openaiCompatible', t('preset.compatible')], ['anthropicNative', t('preset.anthropic')], ['fishAudio', t('preset.fish')],
+      ['localEmbedding', t('preset.localEmbedding')],
     ] });
     const url = field(form, 'provider.url', previous?.baseUrl?.startsWith('REPLACE_WITH_') ? '' : previous?.baseUrl || '', { required: '' });
     const environment = field(form, 'provider.environment', previous?.apiKeyEnv || '', { maxlength: 80 });
@@ -140,11 +143,12 @@ export async function mountSettings({ document = window.document, api = createSe
     const previous = current?.followLlm ? effective.settings.slots.llm : current;
     const form = el('form', undefined, { class: 'settings-card', autocomplete: 'off' }); parent.append(form);
     form.append(el('h3', t(SLOT_LABELS[name])));
-    if (['planner', 'visionFilter'].includes(name)) {
+    if (['planner', 'visionFilter', 'surface', 'reflection', 'memoryWriter'].includes(name)) {
       const follow = checkbox(form, 'slot.follow', current?.followLlm || (!current && effective.sources['slots.' + name] === 'default'));
       follow.addEventListener('change', () => change(() => write('/slots/' + name, { slot: follow.checked ? { followLlm: true } : previous || null })).catch(fail));
     }
-    const options = [['', t('slot.unassigned')], ...Object.entries(effective.settings.profiles).filter(([, value]) => value).map(([id]) => [id, id])];
+    const options = [['', t('slot.unassigned')], ...Object.entries(effective.settings.profiles)
+      .filter(([, value]) => value && (name === 'memoryEmbedding' ? value.adapter === 'localEmbedding' : value.adapter !== 'localEmbedding')).map(([id]) => [id, id])];
     const profile = field(form, 'slot.profile', previous?.profile || selected || '', { options });
     const model = field(form, 'slot.model', previous?.model || '', { required: '', maxlength: 256 });
     const models = el('datalist', undefined, { id: 'settings-models-' + name }); form.append(models); model.setAttribute('list', models.id);
@@ -159,8 +163,9 @@ export async function mountSettings({ document = window.document, api = createSe
       } finally { busy = false; }
     }), form);
     const params = previous?.params || {};
-    const temperature = field(form, 'slot.temperature', params.temperature ?? (name === 'tts' ? DEFAULT_TTS_PARAMS.temperature : ''), { type: 'number', min: 0, max: 2, step: name === 'tts' ? 'any' : 0.1 });
-    const maxTokens = field(form, 'slot.maxTokens', params.maxTokens ?? '', { type: 'number', min: 1, max: 1000000 });
+    const temperature = name === 'memoryEmbedding' ? { value: '' } : field(form, 'slot.temperature', params.temperature ?? (name === 'tts' ? DEFAULT_TTS_PARAMS.temperature : ''), { type: 'number', min: 0, max: 2, step: name === 'tts' ? 'any' : 0.1 });
+    const maxTokens = name === 'memoryEmbedding' ? { value: '' } : field(form, 'slot.maxTokens', params.maxTokens ?? '', { type: 'number', min: 1, max: 1000000 });
+    if (name === 'memoryEmbedding') form.append(el('p', t('memory.providerHelp')));
     const extra = {};
     const ttsFields = {};
     if (name === 'stt') extra.language = field(form, 'slot.language', params.language || 'id');
@@ -266,7 +271,7 @@ export async function mountSettings({ document = window.document, api = createSe
         ...Object.fromEntries(Object.entries(timeouts).map(([name, input]) => [name, input.value])) }, previous || {});
       await change(async () => {
         await write('/slots/' + name, { slot });
-        if (name === 'llm') for (const advancedName of ['planner', 'visionFilter']) {
+        if (name === 'llm') for (const advancedName of ['planner', 'visionFilter', 'surface', 'reflection', 'memoryWriter']) {
           if (!effective.settings.slots[advancedName] && effective.sources['slots.' + advancedName] === 'default') {
             await write('/slots/' + advancedName, { slot: { followLlm: true } });
           }
@@ -362,6 +367,7 @@ export async function mountSettings({ document = window.document, api = createSe
   function advance(action) { wizard = moveWizard(wizard, action); saveWizard(storage, wizard); render(); }
   function render() {
     imageController?.dispose(); imageController = undefined;
+    memoryController?.dispose(); memoryController = undefined;
     document.documentElement.lang = language; document.title = t('app.title');
     root.replaceChildren(el('h1', t('app.title')), el('a', t('app.back'), { href: '/' }), toast);
     const controls = el('div', undefined, { class: 'settings-actions' }); root.append(controls);
@@ -385,6 +391,8 @@ export async function mountSettings({ document = window.document, api = createSe
       const advanced = details(content, 'slot.advanced'); for (const name of ['surface', 'reflection', 'router', 'planner', 'visionFilter', 'memoryWriter', 'memoryEmbedding']) slotEditor(advanced, name);
       advanced.append(el('p', t('slot.conversationRolesHelp')));
     } else if (tab === 'images') imageController = mountImageSettings(content, { document, api, t, fail, onVersion: version => { effective.version = version; } });
+    else if (tab === 'memory') memoryController = mountMemorySettings(content, { document, api, t, fail, confirm,
+      onVersion: version => { effective.version = version; } });
     else if (tab === 'status') statusView(content);
     else if (tab === 'privacy') privacy(content);
     else if (tab === 'diagnostics') diagnostics(content);

@@ -4,12 +4,14 @@ import { FISH_EMOTION_GROUPS, FISH_EMOTION_NAMES, FISH_EMOTION_TAGS } from '../.
 export { validateBaseUrl };
 export { DEFAULT_TTS_PARAMS };
 export { FISH_EMOTION_GROUPS, FISH_EMOTION_TAGS };
-export const SLOT_LABELS = { llm: 'slot.llm', vision: 'slot.vision', stt: 'slot.stt', tts: 'slot.tts', planner: 'slot.planner', visionFilter: 'slot.visionFilter' };
-export const TAB_LABELS = { connections: 'tab.connections', images: 'tab.images', status: 'tab.status', privacy: 'tab.privacy', diagnostics: 'tab.diagnostics', language: 'tab.language' };
+export const SLOT_LABELS = { llm: 'slot.llm', surface: 'slot.surface', reflection: 'slot.reflection', router: 'slot.router', vision: 'slot.vision', stt: 'slot.stt', tts: 'slot.tts', planner: 'slot.planner', visionFilter: 'slot.visionFilter', memoryWriter: 'slot.memoryWriter', memoryEmbedding: 'slot.memoryEmbedding' };
+export const TAB_LABELS = { connections: 'tab.connections', images: 'tab.images', memory: 'tab.memory', status: 'tab.status', privacy: 'tab.privacy', diagnostics: 'tab.diagnostics', language: 'tab.language' };
 export const ERROR_KEYS = { CONFLICT: 'error.conflict', ORIGIN_CHANGE: 'error.origin', IN_USE: 'error.inUse',
   FORBIDDEN: 'error.forbidden', AUTH: 'error.auth', RATE_LIMIT: 'error.rate', TIMEOUT: 'error.timeout',
   LOCK_BUSY: 'error.lockBusy', LOCK_UNKNOWN: 'error.lockUnknown', LOCK_RECOVERY: 'error.lockRecovery',
-  READ_ONLY: 'error.readOnly', INVALID_SETTINGS: 'error.invalid', NETWORK: 'error.network' };
+  READ_ONLY: 'error.readOnly', INVALID_SETTINGS: 'error.invalid', NETWORK: 'error.network',
+  INVALID_MEMORY: 'error.invalid', MEMORY_STALE: 'error.conflict', MEMORY_STORAGE: 'error.generic', MEMORY_CORRUPT: 'error.generic',
+  LEGACY_MEMORY_CORRUPT: 'error.generic', LEGACY_MEMORY_CHANGED: 'error.conflict', REINDEX_REQUIRED: 'memory.reindexRequired' };
 export const friendlyError = code => ERROR_KEYS[code] || 'error.generic';
 export const STATUS_WARNING_KEYS = { SECRET_STORAGE: 'warning.secretStorage', SETTINGS_RECOVERED: 'warning.recovered' };
 export function canOpenSettings({ hostname, mobile = false }) {

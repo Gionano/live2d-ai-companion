@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import { translator, detectLanguage } from '../../src/settings/i18n.js';
 import { createSettingsClient } from '../../src/settings/apiClient.js';
 import { mountImageSettings } from '../../src/settings/imageSettings.js';
+import { mountMemorySettings } from '../../src/settings/memorySettings.js';
 import { node } from '../../src/settings/dom.js';
 import * as view from '../../src/settings/viewModel.js';
 import * as wizard from '../../src/settings/wizard.js';
@@ -152,7 +153,7 @@ async function pageFixture(ttsParams = null, language = 'en') {
       if (path.startsWith('/slots/')) state.settings.slots[path.slice('/slots/'.length)] = body.slot;
       return { version: ++state.version };
     } };
-  const bindings = { id, en, presets, setupGuide: '/docs/setup.md', translator, detectLanguage, createSettingsClient, mountImageSettings, node, ...view, ...wizard };
+  const bindings = { id, en, presets, setupGuide: '/docs/setup.md', translator, detectLanguage, createSettingsClient, mountImageSettings, mountMemorySettings, node, ...view, ...wizard };
   const code = source('src/settings/page.js').replace(/^import .+;\r?\n/gm, '').replace('export async function', 'async function');
   const mount = vm.compileFunction(code + '\nreturn mountSettings;', Object.keys(bindings))(...Object.values(bindings));
   await mount({ document, api, storage: { getItem: () => '{"step":"finish","completed":true}', setItem() {} }, navigatorLanguage: 'en', confirm: () => true });
@@ -173,7 +174,7 @@ test('Fish preset selectors show every Basic and Advanced tag in both languages'
   for (const language of ['id', 'en']) {
     const page = await pageFixture({}, language);
     const rows = page.nodes().filter(item => item.attributes['data-avatar-emotion']);
-    assert.equal(rows.length, 12);
+    assert.equal(rows.length, 13);
     const inputs = walk(rows[0]).filter(item => item.tagName === 'select');
     assert.equal(inputs.length, 2);
     for (const input of inputs) {
