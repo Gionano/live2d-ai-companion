@@ -1,6 +1,7 @@
 // Pure text/config helpers shared by the backend and local settings editor.
 import { FISH_EMOTION_NAMES } from './fishEmotionTags.js';
 export const DEFAULT_EMOTION_TAG_MAP = {
+  senang: '[happy]',
   terkejut: '[surprised]', marah: '[angry]', bingung: '[confused]',
   jengkel: '[frustrated]', malu: '[embarrassed]', kesal: '[upset]',
   sedih: '[sad]', kagum: '[excited]', sayang: '[empathetic]',
@@ -11,7 +12,7 @@ export const DEFAULT_TTS_PARAMS = {
   temperature: 0.8, topP: 0.7, latency: 'balanced',
   prosody: { speed: 1, volume: 0 }, debug: false,
   expression: { selection: 'native', emotionTagMap: DEFAULT_EMOTION_TAG_MAP, tagPlacement: 'every-sentence',
-    earlyFirstSentence: true, segmentPauseMs: 150,
+    earlyFirstSentence: true, sentencePauseMs: 200, segmentPauseMs: 150,
     maxTagsPerSentence: 2, mergeShortSentences: { enabled: true, minChars: 25, maxChars: 180 } },
   inlineTags: { enabled: false, allowList: ['laughs', 'sigh', 'pause', 'whisper', 'chuckle', 'emphasis', 'break'], maxPerSentence: 2 },
   speechStyle: { enabled: true },
@@ -30,6 +31,8 @@ export function resolveTtsParams(params = {}, overrides = {}) {
   const result = merge(merge(structuredClone(DEFAULT_TTS_PARAMS), params), overrides);
   const pause = result.expression.segmentPauseMs;
   result.expression.segmentPauseMs = Number.isFinite(pause) ? Math.max(0, Math.min(400, pause)) : 150;
+  const sentencePause = result.expression.sentencePauseMs;
+  result.expression.sentencePauseMs = Number.isFinite(sentencePause) ? Math.max(0, Math.min(400, sentencePause)) : 200;
   return result;
 }
 

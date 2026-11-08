@@ -68,21 +68,22 @@ test('segmented speech streams its first complete sentence before the provider f
   assert.equal((await stream.next()).value.type, 'emotion');
   assert.equal((await stream.next()).value.type, 'delta');
   assert.deepEqual((await stream.next()).value, { type: 'sentence', text: 'Wah!', emotion: 'kagum',
-    segmentId: 0, pauseBeforeMs: 0, speechEmotion: 'excited' });
+    segmentId: 0, pauseBeforeMs: 0, pauseAfterMs: 200, speechEmotion: 'excited' });
   release();
   const rest = await collect(stream);
-  assert.equal(rest.find(event => event.type === 'sentence' && event.segmentId === 1).pauseBeforeMs, 150);
+  assert.equal(rest.find(event => event.type === 'sentence' && event.segmentId === 1).pauseBeforeMs, 0);
+  assert.equal(rest.find(event => event.type === 'sentence' && event.segmentId === 1).pauseAfterMs, 200);
 });
 
 test('segment boundaries flush short sentences and snapshot both emotion choices', async () => {
   const registry = registryFor([JSON.stringify({ segments: [
     { emotion: 'sedih', speechEmotion: 'sad', text: 'Aku sedih. Masih kepikiran.' },
     { emotion: 'sayang', speechEmotion: 'compassionate', text: 'Tapi kamu di sini. Aku lebih tenang.' },
-  ] })], { expression: { earlyFirstSentence: false, mergeShortSentences: { minChars: 100, maxChars: 180 } } });
+  ] })], { expression: { sentencePauseMs: 0, earlyFirstSentence: false, mergeShortSentences: { minChars: 100, maxChars: 180 } } });
   const events = await collect(generateReplyStream([], 'Halo', null, { registry }));
   assert.deepEqual(events.filter(event => event.type === 'sentence'), [
-    { type: 'sentence', text: 'Aku sedih. Masih kepikiran.', emotion: 'sedih', speechEmotion: 'sad', segmentId: 0, pauseBeforeMs: 0 },
-    { type: 'sentence', text: 'Tapi kamu di sini. Aku lebih tenang.', emotion: 'sayang', speechEmotion: 'compassionate', segmentId: 1, pauseBeforeMs: 150 },
+    { type: 'sentence', text: 'Aku sedih. Masih kepikiran.', emotion: 'sedih', speechEmotion: 'sad', segmentId: 0, pauseBeforeMs: 0, pauseAfterMs: 0 },
+    { type: 'sentence', text: 'Tapi kamu di sini. Aku lebih tenang.', emotion: 'sayang', speechEmotion: 'compassionate', segmentId: 1, pauseBeforeMs: 150, pauseAfterMs: 0 },
   ]);
   assert.equal(events.filter(event => event.type === 'delta').map(event => event.text).join(''),
     'Aku sedih. Masih kepikiran. Tapi kamu di sini. Aku lebih tenang.');
@@ -107,13 +108,14 @@ test('empty segments do not add pauses and sentence groups inside one segment ha
     { text: '[unknown]' }, { emotion: 'kagum', text: 'Wah! Kamu berhasil.' }, { emotion: 'sayang', text: 'Aku senang. Terima kasih.' },
   ] })], { expression: { mergeShortSentences: { enabled: false }, segmentPauseMs: 240 } });
   const events = (await collect(generateReplyStream([], 'Halo', null, { registry }))).filter(event => event.type === 'sentence');
-  assert.deepEqual(events.map(event => event.pauseBeforeMs), [0, 0, 240, 0]);
+  assert.deepEqual(events.map(event => event.pauseBeforeMs), [0, 0, 40, 0]);
+  assert.ok(events.every(event => event.pauseAfterMs === 200));
 });
 
 test('only the first naturally complete sentence bypasses short-sentence merging', async () => {
   for (const earlyFirstSentence of [true, false]) {
     const registry = registryFor(['{"emotion":"sayang","text":"Ya! Baiklah. Besok kita pergi bersama."}'],
-      { expression: { earlyFirstSentence, mergeShortSentences: { minChars: 40, maxChars: 180 } } });
+      { expression: { sentencePauseMs: 0, earlyFirstSentence, mergeShortSentences: { minChars: 40, maxChars: 180 } } });
     const events = await collect(generateReplyStream([], 'Halo', null, { registry }));
     assert.deepEqual(events.filter(event => event.type === 'sentence').map(event => event.text), earlyFirstSentence
       ? ['Ya!', 'Baiklah. Besok kita pergi bersama.'] : ['Ya! Baiklah. Besok kita pergi bersama.']);
@@ -154,7 +156,7 @@ test('aborted segmented replies cannot flush queued tone metadata into a new rep
     '{"segments":[{"emotion":"sayang","speechEmotion":"calm","text":"Aku di sini."}]}',
   ]) }));
   assert.deepEqual(next.filter(event => event.type === 'sentence'), [
-    { type: 'sentence', text: 'Aku di sini.', emotion: 'sayang', speechEmotion: 'calm', segmentId: 0, pauseBeforeMs: 0 },
+    { type: 'sentence', text: 'Aku di sini.', emotion: 'sayang', speechEmotion: 'calm', segmentId: 0, pauseBeforeMs: 0, pauseAfterMs: 200 },
   ]);
 });
 

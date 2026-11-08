@@ -24,6 +24,7 @@ const ADVANCED_EMOTIONS = [
   'contemptuous', 'sympathetic', 'compassionate', 'determined', 'resigned',
 ];
 const AVATAR_EMOTIONS = [
+  'senang',
   'terkejut', 'marah', 'bingung', 'jengkel', 'malu', 'kesal',
   'sedih', 'kagum', 'sayang', 'jahil', 'penasaran', 'netral',
 ];
@@ -84,7 +85,7 @@ test('catalogue support rejects unknown map keys and does not invent a TTS tag f
   assert.equal(prepareTtsText('Halo!', 'unknown'), 'Halo!');
 });
 
-test('full Fish catalogue preserves the twelve avatar emotions and experimental neutral default', () => {
+test('full Fish catalogue preserves the avatar emotions and experimental neutral default', () => {
   assert.deepEqual([...REPLY_EMOTIONS], AVATAR_EMOTIONS);
   assert.deepEqual(Object.keys(DEFAULT_EMOTION_TAG_MAP), AVATAR_EMOTIONS);
   for (const emotion of AVATAR_EMOTIONS) {

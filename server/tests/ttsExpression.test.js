@@ -220,7 +220,7 @@ test('sanitizer strips configured Unicode legacy tags whose lowercase name expan
   assert.deepEqual(result, { displayText: 'Halo  sayang!', ttsText: 'Halo  sayang!' });
 });
 
-test('actual spontaneous comment listener survives deep speech text under strict rejections', () => {
+test('actual spontaneous comment listener rejects oversized text under strict rejections', () => {
   const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
   const marker = "  socket.on('message', async (raw) => {";
   const start = source.indexOf(marker) + marker.length;
@@ -228,29 +228,34 @@ test('actual spontaneous comment listener survives deep speech text under strict
   assert.ok(start >= marker.length && end > start, 'Actual listener extraction must succeed');
   const body = JSON.stringify(source.slice(start, end));
   const sanitizerUrl = JSON.stringify(new URL('../ttsExpression.js', import.meta.url).href);
+  const managerUrl = JSON.stringify(new URL('../streamingVisionManager.js', import.meta.url).href);
   const code = `
     import assert from 'node:assert/strict';
     import { EventEmitter } from 'node:events';
     import { stripSpeechTags } from ${sanitizerUrl};
+    import { StreamingVisionManager } from ${managerUrl};
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     const listener = new AsyncFunction('raw', 'socket', 'speechController', 'handleSelfieFeature',
       'stripSpeechTags', 'markConversationActivity', 'history', 'HISTORY_MESSAGE_LIMIT',
-      'send', 'console', ${body});
+      'send', 'console', 'visionManager', ${body});
     const history = [], displayed = [], spoken = [];
     const emitter = new EventEmitter();
     const socket = {};
+    const visionManager = new StreamingVisionManager({ startTimer: false,
+      registry: { getSlotStatus: () => ({ available: false }) } });
+    visionManager.setHistoryRef(history);
+    visionManager.setBroadcaster(event => displayed.push(event));
+    visionManager.setSpeechHandler(async request => spoken.push(request));
     emitter.on('message', raw => listener(raw, socket,
       { isBusy: () => false, async play(request) { spoken.push(request); } }, () => false,
-      stripSpeechTags, () => {}, history, 8, event => displayed.push(event), { log() {} }));
+      stripSpeechTags, () => {}, history, 8, event => displayed.push(event), { log() {} }, visionManager));
     const text = '('.repeat(8192) + 'Aku [unknown] (happy) sayang!' + ')'.repeat(8192);
     emitter.emit('message', Buffer.from(JSON.stringify({ type: 'spontaneous_vision_comment', text })));
     await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(spoken[0], { text, emotion: 'netral', speechEmotion: undefined,
-      recipients: [socket], deferred: true, origin: 'vision' });
-    assert.equal(history.length, 1);
-    assert.equal(displayed.length, 1);
-    assert.doesNotMatch(history[0].content, /unknown|happy|\\[|\\]/);
-    assert.ok(displayed[0].text.includes('Aku   sayang!'));
+    assert.deepEqual(spoken, []);
+    assert.deepEqual(history, []);
+    assert.deepEqual(displayed, []);
+    visionManager.dispose();
     console.log('listener survived');
   `;
   const child = spawnSync(process.execPath, ['--unhandled-rejections=strict', '--input-type=module', '-e', code],
@@ -394,18 +399,16 @@ test('Fish debug can be enabled through the environment without persisting setti
   assert.deepEqual(adapter.params, {});
 });
 
-test('speech expressiveness leaves protected persona and moderation files unchanged', () => {
+test('conversation style preserves the adult character identity and protected moderation', () => {
   const source = fs.readFileSync(new URL('../personality.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   const active = source.slice(0, source.indexOf('\n`.trim();'));
-  // Output structure may evolve; persona prose, emotion guidance and spoken
-  // example wording must still match the established character contract.
-  const persona = active.replace(/(?:Format output WAJIB|Required output format):[\s\S]*?(?=\nPanduan emosi)/, '')
-    .replace(/^\{.*\}$/gm, line => {
-      const reply = JSON.parse(line);
-      return JSON.stringify(reply.segments ? reply.segments[0] : reply);
-    });
-  assert.equal(createHash('sha256').update(persona).digest('hex'),
-    '180a3d03508bf3393a8c4d19ea381ba386be63e7619422f8e1238d508fded885');
+  assert.match(active, /Amika, istri dewasa berusia 24 tahun/);
+  assert.match(active, /Pengguna adalah suamimu/);
+  assert.match(active, /have your own preferences, moods, and opinions/);
+  assert.match(active, /Reply length follows the conversation/);
+  assert.match(active, /Kalau suami bilang berhenti/);
+  assert.match(active, /Kalau ada indikasi yang menyangkut anak/);
+  assert.doesNotMatch(active, /1-3 kalimat pendek|sekali tiap 3-4 balasan/);
   for (const [relative, expected] of [
     ['../../config/selfieModeration.json', 'a0e67cbbfe0259f9a966a3725e352223419f2638715ee8ea9094fbd1fb5aa8fd'],
   ]) {

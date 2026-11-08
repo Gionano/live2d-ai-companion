@@ -173,7 +173,7 @@ export function normalizeSlots(rawSlots, characterCard, availableReferences = []
   // Emotion
   const allowedEmotions = Array.isArray(wl.emotion)
     ? wl.emotion
-    : ['terkejut', 'marah', 'bingung', 'jengkel', 'malu', 'kesal', 'sedih', 'kagum', 'sayang', 'jahil', 'penasaran', 'netral'];
+    : ['terkejut', 'marah', 'bingung', 'jengkel', 'malu', 'kesal', 'sedih', 'kagum', 'senang', 'sayang', 'jahil', 'penasaran', 'netral'];
   const rawEmotion = String(input.emotion || '').trim().toLowerCase();
   const emotion = allowedEmotions.includes(rawEmotion)
     ? rawEmotion

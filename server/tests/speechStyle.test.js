@@ -29,7 +29,7 @@ test('speech style appends spoken Indonesian instructions only for configured en
 });
 
 test('split LLM inline cues stay private while merged speech retains allowed cues', async () => {
-  const registry = replyRegistry({ inlineTags: { enabled: true }, expression: { emotionTagMap: { kagum: '' } } }, true,
+  const registry = replyRegistry({ inlineTags: { enabled: true }, expression: { sentencePauseMs: 0, emotionTagMap: { kagum: '' } } }, true,
     ['{"emotion":"kagum","text":"Wa', 'h! [lau', 'ghs] Aku senang! [unknown] Benar-benar senang. (bre', 'ak) Sampai nanti."}']);
   const events = await collect(generateReplyStream([], 'Halo', null, { registry }));
   const display = events.filter(event => event.type === 'delta').map(event => event.text).join('');

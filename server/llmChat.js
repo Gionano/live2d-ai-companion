@@ -11,7 +11,7 @@ import { logger as console } from '../src/logging.js';
 import { WAIFU_SYSTEM_PROMPT } from './personality.js';
 import { memoryManager } from './memoryManager.js';
 import { speechStylePrompt } from './speechStylePrompt.js';
-import { normalizeSpeechEmotion, speechEmotionPrompt } from './speechEmotionPrompt.js';
+import { normalizeSpeechEmotion, normalizeSpeechRegister, speechEmotionPrompt } from './speechEmotionPrompt.js';
 import { resolveTtsParams, StreamingTagSanitizer, SentenceMerger, spokenSentenceCount } from './ttsExpression.js';
 import { VALID_EMOTIONS } from '../src/expressionMap.js';
 export const HISTORY_MESSAGE_LIMIT = 8;
@@ -135,6 +135,8 @@ class LegacyReplyParser {
     this.emotion = null;
     this.speechEmotion = undefined;
     this.speechEmotionSeen = false;
+    this.register = undefined;
+    this.registerSeen = false;
     this.textStarted = false;
     this.textFinished = false;
     this.scanAt = 0;
@@ -166,6 +168,11 @@ class LegacyReplyParser {
           this.speechEmotionSeen = true;
           this.speechEmotion = normalizeSpeechEmotion(field.value);
           if (this.speechEmotion) events.push({ type: 'speechEmotion', speechEmotion: this.speechEmotion });
+        }
+        if (field.key === 'register' && !this.registerSeen) {
+          this.registerSeen = true;
+          this.register = normalizeSpeechRegister(field.value);
+          events.push({ type: 'register', register: this.register });
         }
       }
       if (header.textStart === undefined) return events;
@@ -286,7 +293,8 @@ export class StructuredReplyParser {
     if (!segment.started && segment.parser.textStarted) {
       segment.started = true;
       events.push({ type: 'segment_start', segmentId: segment.segmentId,
-        emotion: segment.parser.emotion || 'netral', speechEmotion: segment.parser.speechEmotion });
+        emotion: segment.parser.emotion || 'netral', speechEmotion: segment.parser.speechEmotion,
+        ...(segment.parser.register !== undefined && { register: segment.parser.register }) });
       events.push({ type: 'emotion', emotion: segment.parser.emotion || 'netral', segmentId: segment.segmentId });
     }
     for (const event of parsed) if (event.type === 'delta' && segment.started) {
@@ -308,7 +316,9 @@ export async function* generateReply(
   conversationHistory,
   userMessage,
   visionDescription,
-  { signal, registry = getProviderRegistry(), includeSpeechText = false, internalInstruction } = {},
+  { signal, registry = getProviderRegistry(), includeSpeechText = false, includeMetadata = false,
+    internalInstruction, role = 'llm', systemPrompt = WAIFU_SYSTEM_PROMPT, maxTokens,
+    memory = memoryManager, memoryBundle } = {},
 ) {
   signal?.throwIfAborted();
   if (!registry.getSlotStatus('llm').available) {
@@ -370,7 +380,11 @@ export async function* generateReply(
       ...(includeSpeechText && { speechText: ttsText }) };
   };
   const processEvent = function* (event) {
-    if (event.type === 'segment_start') {
+    if (event.type === 'reply_metadata') {
+      if (includeMetadata) yield event;
+    } else if (event.type === 'register') {
+      if (includeSpeechText) yield event;
+    } else if (event.type === 'segment_start') {
       sanitizer = new StreamingTagSanitizer(ttsParams);
       boundaryPending = Boolean(displayEnd);
       if (includeSpeechText) yield { ...event, speechEmotion: nativeSelection ? event.speechEmotion : undefined };
@@ -445,6 +459,7 @@ export async function* generateReplyStream(
 ) {
   let buf = '';
   let speechEmotion;
+  let register;
   let segment = null;
   let firstSentenceSent = false;
   let spokeAny = false;
@@ -489,7 +504,7 @@ export async function* generateReplyStream(
     if (event.type === 'segment_start') {
       yield* flushSegment();
       segment = { segmentId: event.segmentId, emotion: event.emotion,
-        speechEmotion: event.speechEmotion, emitted: false };
+        speechEmotion: event.speechEmotion, register: event.register, emitted: false };
       merger = new SentenceMerger(params);
       continue;
     }
@@ -500,6 +515,18 @@ export async function* generateReplyStream(
     }
     if (event.type === 'emotion') {
       yield event;
+      continue;
+    }
+    if (event.type === 'reply_metadata') {
+      yield event;
+      continue;
+    }
+    if (event.type === 'opening_suppressed' || event.type === 'generation_progress') {
+      yield event;
+      continue;
+    }
+    if (event.type === 'register') {
+      register = event.register;
       continue;
     }
     if (event.type === 'speechEmotion') {

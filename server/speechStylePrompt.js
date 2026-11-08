@@ -4,9 +4,10 @@ export function speechStylePrompt(params = {}) {
   const options = resolveTtsParams(params);
   if (!options.speechStyle.enabled) return '';
   const instructions = [
-    'Gaya bicara: tulis balasan untuk diucapkan dengan alami dalam bahasa Indonesia.',
-    'Gunakan kalimat singkat yang bervariasi, interjeksi alami, dan tanda baca ekspresif seperti !, ?, ..., koma, atau —.',
-    'Jangan gunakan emoji, markdown, atau URL. Pertahankan persona dan format JSON yang sudah ditentukan.',
+    'Gaya bicara: tulis balasan untuk diucapkan dengan alami. Follow the conversation language; Indonesian is the default.',
+    'Use varied natural sentences, occasional interjections, and expressive punctuation. Answer the actual point; a reply may end in a statement, and questions should express real curiosity rather than fill silence.',
+    'Avoid repeated pet names, stock apologies, automatic reassurance, and canned phrases. Show warmth, an independent opinion, or playful pushback when the context supports it.',
+    'Do not use emoji, Markdown, URLs, or spoken stage directions. Preserve the persona and JSON output format.',
   ];
   if (options.inlineTags.enabled) {
     const tags = options.inlineTags.allowList.map(tag => `[${tag}]`).join(', ');

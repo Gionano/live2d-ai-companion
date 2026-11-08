@@ -27,5 +27,5 @@ test('TTS form accepts every Fish emotion key without expanding the avatar emoti
     mergeEnabled: true, minChars: '25', maxChars: '180', inlineEnabled: false,
     inlineAllowList: '', inlineMaxPerSentence: '2', speechStyleEnabled: true, debug: false });
   assert.deepEqual(params.expression.emotionTagMap, emotionTagMap);
-  assert.equal(Object.keys(DEFAULT_TTS_PARAMS.expression.emotionTagMap).length, 12);
+  assert.equal(Object.keys(DEFAULT_TTS_PARAMS.expression.emotionTagMap).length, 13);
 });
