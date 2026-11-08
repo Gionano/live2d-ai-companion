@@ -24,6 +24,7 @@ import { analyzeSpeechRhythm } from './speechMotion.js';
 import { ProactiveVoiceGate } from './proactiveVoiceGate.js';
 import { ContinuousVisionCapture, captureSignature } from './continuousVision.js';
 import { handleBrowserSelfieModal } from './browserSelfieModal.js';
+import { ReplyParts } from './replyParts.js';
 import { scheduleAudioBuffer } from './audioClock.js';
 
 const isOverlay = new URLSearchParams(window.location.search).get('mode') === 'overlay';
@@ -68,6 +69,19 @@ function log(text, cls = '') {
   logEl.scrollTop = logEl.scrollHeight; // auto-scroll ke bawah
   return div;
 }
+
+const replyParts = new ReplyParts({
+  create: (stage) => {
+    const node = log('', 'assistant');
+    node.dataset.replyStage = stage;
+    return node;
+  },
+  update: (node, text) => {
+    node.textContent = `Amika: ${text}`;
+    logEl.scrollTop = logEl.scrollHeight;
+  },
+  onText: text => showOverlaySubtitle(text),
+});
 
 function setMicStatus(live, label, stateClass = '') {
   if (isMicMutedByDesktop) {
@@ -680,7 +694,10 @@ function connectWS() {
       case 'turn_cancelled':
       case 'input_rejected':
         currentConversationState = turnState.state;
-        if (msg.type === 'turn_cancelled') proactiveSpeechActive = false;
+        if (msg.type === 'turn_cancelled') {
+          proactiveSpeechActive = false;
+          replyParts.cancel(msg.turnId);
+        }
         updateUiForState(playbackState());
         break;
       case 'user_said':
@@ -690,8 +707,11 @@ function connectWS() {
         log(`👁️ ${msg.text}`, 'vision');
         break;
       case 'amika_replied':
-        log(`Amika: ${msg.text}`, 'assistant');
+        if (!replyParts.hasDisplayed(msg.turnId)) log(`Amika: ${msg.text}`, 'assistant');
         showOverlaySubtitle(msg.text);
+        break;
+      case 'reply_part':
+        replyParts.handle(msg);
         break;
       case 'emotion':
         speechPlayback.handle(msg);
@@ -784,6 +804,7 @@ function connectWS() {
     }
   });
   ws.addEventListener('close', () => {
+    replyParts.reset();
     continuousVision.disconnect();
     proactiveSpeechActive = false;
     currentConversationState = 'idle';

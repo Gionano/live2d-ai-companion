@@ -102,7 +102,7 @@ function readHeaderValue(raw, start) {
 
 // Scan JSON members, not text patterns, so nested objects and quoted prose cannot
 // change reply metadata. Stop at the opening quote of the top-level text field.
-function scanReplyHeader(raw) {
+function scanReplyHeader(raw, { stopAtSpeech = true } = {}) {
   const start = raw.indexOf('{');
   const fields = [];
   if (start < 0) return { fields };
@@ -116,8 +116,8 @@ function scanReplyHeader(raw) {
     while (/\s/.test(raw[index] ?? '') && index < raw.length) index++;
     if (raw[index++] !== ':') break;
     while (/\s/.test(raw[index] ?? '') && index < raw.length) index++;
-    if (key.value === 'text' && raw[index] === '"') return { fields, textStart: index + 1 };
-    if (key.value === 'segments' && raw[index] === '[') return { fields, segmentsStart: index + 1 };
+    if (stopAtSpeech && key.value === 'text' && raw[index] === '"') return { fields, textStart: index + 1 };
+    if (stopAtSpeech && key.value === 'segments' && raw[index] === '[') return { fields, segmentsStart: index + 1 };
     const value = readHeaderValue(raw, index);
     if (!value) break;
     fields.push({ key: key.value, value: value.value });
@@ -240,21 +240,42 @@ export class StructuredReplyParser {
     this.segmentIndex = 0;
     this.current = null;
     this.done = false;
+    this.metadata = {};
+    this.metadataSeen = new Set();
+  }
+
+  readMetadata(fields, final = false) {
+    const changed = {};
+    for (const { key, value } of fields) {
+      if (!['mode', 'status', 'reflectionRequest'].includes(key) || this.metadataSeen.has(key)
+        || key === 'reflectionRequest' && !final) continue;
+      this.metadataSeen.add(key);
+      if (key === 'mode' && ['say', 'say+think', 'think'].includes(value)
+        || key === 'status' && ['ok', 'unfinished', 'not-for-me'].includes(value)) changed[key] = value;
+      else if (key === 'reflectionRequest' && typeof value === 'string') {
+        const request = value.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 500);
+        if (request) changed.reflectionRequest = request;
+      }
+    }
+    Object.assign(this.metadata, changed);
+    return Object.keys(changed).length ? [{ type: 'reply_metadata', ...changed }] : [];
   }
 
   push(chunk) {
     this.raw += chunk;
+    const structured = /^[{`]/.test(this.raw.trimStart());
+    const metadata = structured ? this.readMetadata(scanReplyHeader(this.raw).fields) : [];
     if (!this.segmented) {
       const head = this.raw.trimStart();
-      if (head && head[0] !== '{' && head[0] !== '`') return this.legacy.push(chunk);
+      if (head && head[0] !== '{' && head[0] !== '`') return [...metadata, ...this.legacy.push(chunk)];
       const header = scanReplyHeader(this.raw);
       if (header.segmentsStart === undefined || this.legacy.textStarted || this.legacy.plain) {
-        return this.legacy.push(chunk);
+        return [...metadata, ...this.legacy.push(chunk)];
       }
       this.segmented = true;
       this.scanAt = header.segmentsStart;
     }
-    const events = [];
+    const events = [...metadata];
     while (this.scanAt < this.raw.length && !this.done) {
       if (!this.current) {
         while (this.scanAt < this.raw.length && /\s|,/.test(this.raw[this.scanAt])) this.scanAt++;
@@ -306,11 +327,19 @@ export class StructuredReplyParser {
   }
 
   finish() {
-    if (!this.segmented) return this.legacy.finish();
-    if (!this.current?.started) return [];
+    let metadata = [];
+    try {
+      const raw = this.raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        metadata = this.readMetadata(scanReplyHeader(raw, { stopAtSpeech: false }).fields, true);
+      }
+    } catch { /* Partial or plain replies have no final control metadata. */ }
+    if (!this.segmented) return [...this.legacy.finish(), ...metadata];
+    if (!this.current?.started) return metadata;
     const event = { type: 'segment_end', segmentId: this.current.segmentId };
     this.current = null;
-    return [event];
+    return [event, ...metadata];
   }
 }
 
@@ -323,7 +352,7 @@ export async function* generateReply(
     memory = memoryManager, memoryBundle } = {},
 ) {
   signal?.throwIfAborted();
-  if (!registry.getSlotStatus('llm').available) {
+  if (!registry.getSlotStatus(role).available) {
     yield { type: 'emotion', emotion: 'netral' };
     yield { type: 'delta', text: UNAVAILABLE_MESSAGES.llm };
     return;
@@ -367,7 +396,8 @@ export async function* generateReply(
       ` ~${context.estimatedTokens} tokens`,
   );
 
-  const stream = registry.getLlm().stream({ messages, json: true, signal });
+  const stream = registry.getLlm(role).stream({ messages, json: true, signal,
+    ...(maxTokens !== undefined && { maxTokens }) });
   const parser = new StructuredReplyParser();
   let sanitizer = new StreamingTagSanitizer(ttsParams);
   let gotText = false;
