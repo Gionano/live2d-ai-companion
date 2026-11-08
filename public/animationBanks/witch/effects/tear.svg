@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>Air mata</title>
+  <path d="M47 23c-4 21-25 38-25 59a25 25 0 0 0 50 0c0-21-20-38-25-59z" fill="#77b9f7" stroke="#ffffff" stroke-width="7" stroke-linejoin="round"/>
+  <path d="M96 13c-3 14-16 25-16 39a16 16 0 0 0 32 0c0-14-13-25-16-39z" fill="#9cd3ff" stroke="#ffffff" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M33 75q-5 10 2 20 M88 46q-3 6 1 12" fill="none" stroke="#e2f5ff" stroke-width="5" stroke-linecap="round"/>
+</svg>

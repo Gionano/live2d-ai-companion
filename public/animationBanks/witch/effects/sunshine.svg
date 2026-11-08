@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>Cahaya ceria</title>
+  <g fill="none" stroke-linecap="round">
+    <path d="M64 10v13 M64 105v13 M10 64h13 M105 64h13 M26 26l9 9 M93 93l9 9 M26 102l9-9 M93 35l9-9" stroke="#ffffff" stroke-width="11"/>
+    <path d="M64 10v13 M64 105v13 M10 64h13 M105 64h13 M26 26l9 9 M93 93l9 9 M26 102l9-9 M93 35l9-9" stroke="#ffc85d" stroke-width="6"/>
+  </g>
+  <circle cx="64" cy="64" r="28" fill="#ffda78" stroke="#ffffff" stroke-width="7"/>
+  <path d="M48 51q8-10 19-7" fill="none" stroke="#fff0bb" stroke-width="6" stroke-linecap="round"/>
+</svg>

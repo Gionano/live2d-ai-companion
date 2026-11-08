@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>Hati kecil</title>
+  <path d="M60 47c-16-22-40-2-29 15 7 12 21 21 29 29 9-9 22-18 29-29 11-17-13-37-29-15z" fill="#f386b4" stroke="#ffffff" stroke-width="7" stroke-linejoin="round"/>
+  <path d="M101 20c-8-11-20-1-15 7 4 6 11 11 15 15 4-4 11-9 15-15 5-8-7-18-15-7z" fill="#ffa4cb" stroke="#ffffff" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M23 99c-6-8-15-1-11 5 3 5 8 8 11 11 3-3 8-6 11-11 4-6-5-13-11-5z" fill="#ffd0e6" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M41 52q5-8 12-3" fill="none" stroke="#ffd9eb" stroke-width="5" stroke-linecap="round"/>
+</svg>

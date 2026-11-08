@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>Tanda seru</title>
+  <path d="M51 15q13-5 26 0l-4 66H55z" fill="#ffc75c" stroke="#ffffff" stroke-width="8" stroke-linejoin="round"/>
+  <circle cx="64" cy="105" r="12" fill="#ffc75c" stroke="#ffffff" stroke-width="7"/>
+  <path d="M61 25v41" stroke="#ffe9a8" stroke-width="5" stroke-linecap="round"/>
+  <g stroke="#fff0bc" stroke-width="5" stroke-linecap="round">
+    <path d="m30 31-10-8 M97 32l11-8 M24 64H12 M104 64h12"/>
+  </g>
+</svg>

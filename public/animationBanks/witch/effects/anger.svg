@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>Tanda marah</title>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M47 19v20q0 8-8 8H19 M81 19v20q0 8 8 8h20 M109 81H89q-8 0-8 8v20 M47 109V89q0-8-8-8H19" stroke="#ffffff" stroke-width="17"/>
+    <path d="M47 19v20q0 8-8 8H19 M81 19v20q0 8 8 8h20 M109 81H89q-8 0-8 8v20 M47 109V89q0-8-8-8H19" stroke="#ee5269" stroke-width="10"/>
+    <path d="M43 20v18q0 5-5 5H21 M85 20v18q0 5 5 5h17" stroke="#ff9f98" stroke-width="3"/>
+  </g>
+</svg>

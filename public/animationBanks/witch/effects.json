@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "effects": {
+    "angry": { "file": "effects/anger.svg", "label": "Tanda marah", "sizeScale": 1 },
+    "surprised": { "file": "effects/exclamation.svg", "label": "Tanda seru", "sizeScale": 0.9 },
+    "shy": { "file": "effects/sweatdrop.svg", "label": "Tetes malu", "sizeScale": 0.82 },
+    "sad": { "file": "effects/tear.svg", "label": "Air mata", "sizeScale": 0.86 },
+    "affectionate": { "file": "effects/hearts.svg", "label": "Hati kecil", "sizeScale": 1 },
+    "happy": { "file": "effects/sunshine.svg", "label": "Cahaya ceria", "sizeScale": 1 },
+    "playful": { "file": "effects/twinkles.svg", "label": "Kilau jahil", "sizeScale": 0.94 }
+  }
+}
