@@ -4,11 +4,12 @@
 // Exposes runtime getters/setters, change listeners, save/load, and reset.
 // ---------------------------------------------------------------------------
 import rawConfig from '../config/animationConfig.json';
+import { migrateConversationDefaults } from './conversationDefaults.js';
 
 class TuningStore {
   constructor() {
     // Deep clone raw config as default schema
-    this.schema = JSON.parse(JSON.stringify(rawConfig));
+    this.schema = migrateConversationDefaults(rawConfig);
     this.listeners = new Set();
     this.isLoaded = false;
   }
@@ -111,7 +112,7 @@ class TuningStore {
    */
   importValues(data) {
     if (!data || typeof data !== 'object') return;
-    for (const [group, entries] of Object.entries(data)) {
+    for (const [group, entries] of Object.entries(migrateConversationDefaults(data))) {
       if (!this.schema[group]) continue;
       if (!entries || typeof entries !== 'object') continue;
       for (const [key, val] of Object.entries(entries)) {

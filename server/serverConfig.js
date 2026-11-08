@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { migrateConversationDefaults } from '../src/conversationDefaults.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,7 +17,7 @@ let cachedConfig = null;
 function loadConfig() {
   try {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
-    cachedConfig = JSON.parse(raw);
+    cachedConfig = migrateConversationDefaults(JSON.parse(raw));
   } catch (err) {
     console.warn('[serverConfig] Could not read animationConfig.json:', err.message);
   }

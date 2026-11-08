@@ -607,7 +607,7 @@ tuning.onChange((group, key, value) => {
   }
   if (group === 'conversation' && ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'proactive_config', enabled: tuning.get('conversation.proactiveEnabled') === 'on',
-      delaySeconds: tuning.get('conversation.proactiveDelaySeconds') ?? 60 }));
+      delaySeconds: tuning.get('conversation.proactiveDelaySeconds') ?? 30 }));
   }
 });
 
@@ -654,7 +654,7 @@ function connectWS() {
     continuousVision.connect();
     for (const source of ['screen', 'webcam']) syncCaptureStatus(source, captureAvailability[source]);
     ws.send(JSON.stringify({ type: 'proactive_config', enabled: tuning.get('conversation.proactiveEnabled') === 'on',
-      delaySeconds: tuning.get('conversation.proactiveDelaySeconds') ?? 60 }));
+      delaySeconds: tuning.get('conversation.proactiveDelaySeconds') ?? 30 }));
   });
   ws.addEventListener('message', (e) => {
     let msg;

@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { migrateConversationDefaults } from '../../src/conversationDefaults.js';
 
 function store() {
   const rawConfig = JSON.parse(fs.readFileSync(new URL('../../config/animationConfig.json', import.meta.url), 'utf8'));
   const source = fs.readFileSync(new URL('../../src/tuningConfig.js', import.meta.url), 'utf8')
-    .replace(/^import rawConfig.*$/m, '').replace('export const tuning', 'globalThis.tuning');
-  const context = vm.createContext({ rawConfig, console });
+    .replace(/^import .*;\r?\n/gm, '').replace('export const tuning', 'globalThis.tuning');
+  const context = vm.createContext({ rawConfig, console, structuredClone, migrateConversationDefaults });
   vm.runInContext(source, context);
   return context.tuning;
 }
@@ -21,7 +22,7 @@ test('camera monitoring and quiet conversation start enabled on reload and reset
     tuning.resetAll();
     assert.equal(tuning.get(key), 'on');
   }
-  assert.equal(store().get('conversation.proactiveDelaySeconds'), 60);
+  assert.equal(store().get('conversation.proactiveDelaySeconds'), 30);
 });
 
 test('tuning loads the structured server response without introducing NaN', () => {
@@ -45,6 +46,12 @@ test('legacy flat settings remain readable and new controls keep defaults', () =
   assert.equal(tuning.get('talking.gestureStrength'), 1);
   assert.equal(tuning.get('talking.bodyGestureStrength'), 1);
   assert.equal(tuning.get('talking.l1SineFreqX'), undefined);
+  assert.equal(tuning.get('banks.enabled'), 'on');
+  assert.equal(tuning.get('banks.speechBlendWeight'), 0.35);
+  assert.equal(tuning.get('banks.symbolDurationMs'), 1500);
+  tuning.importValues({ banks: { symbolSize: 1.25, poseStrength: 0.7 } });
+  assert.equal(tuning.get('banks.symbolSize'), 1.25);
+  assert.equal(tuning.get('talking.lipSyncGain'), 2.4);
 });
 
 test('torso strength persists independently of head strength and retains valid slider values', () => {
