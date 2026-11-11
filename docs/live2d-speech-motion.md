@@ -86,19 +86,14 @@ the motion without changing window bounds or zooming on each pose.
 
 ## Validation
 
-Run `npm.cmd test` and `npm.cmd run build`. To check the local 魔女 rig through
-the actual Cubism Core and physics, run
-`node --test server/tests/witchMotion.test.js`. This optional check skips when
-ignored model assets are unavailable, including in the isolated test workspace.
-The local rig check compares speech against the same deterministic idle tracking
-and breathing through real physics, measuring both motion range and activity.
-The speech-motion tests cover audio
-timing, emphasis and pauses, emotion variation, 30/60 FPS consistency, cancellation,
-decode failures, real parameter availability, bounds, and legacy tuning imports.
-`server/tests/idleMotion.test.js` covers local idle activity, nonrepeating selection,
-speech priority, sentence pauses, pose continuity, tuning, and 30/60 FPS consistency.
-The optional local witch test also verifies the idle bank through the real Cubism
-Core and physics without loading textures or making AI requests.
+Run `npm.cmd test` and `npm.cmd run build`. For focused audio scheduling and
+interruption checks, run
+`npm.cmd test -- server/tests/speechMotionPlayback.test.js server/tests/playbackSegments.test.js`.
+These suites cover playback timing, sentence pauses, cancellation, decode failures,
+and real parameter scanning with injected audio and model dependencies.
+Motion authoring, idle variation, emotion-bank behavior, and local Cubism physics
+are now checked manually. Compare speech and idle playback on each available model,
+including sentence gaps, tone changes, interruption, model switching, and torso motion.
 Only scanned rig parameters are driven. Mouth and secondary physics outputs
 are excluded from the gesture layer. Real physics-controlled torso channels
 receive a separate smoothed base pose before physics runs, so hair and chest

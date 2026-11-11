@@ -449,7 +449,7 @@ for (const frontend of ['Vite', 'Electron']) {
       const vite = await createViteServer({ ...viteConfig, root: backend.directory,
         cacheDir: path.join(backend.directory, 'vite-cache'), configFile: false, logLevel: 'silent',
         optimizeDeps: { noDiscovery: true, include: [] }, css: { postcss: { plugins: [] } },
-        server: { ...viteConfig.server, port: 0, hmr: false, watch: null, fs: { allow: [backend.directory] },
+        server: { ...viteConfig.server, host: '127.0.0.1', port: 0, hmr: false, watch: null, fs: { allow: [backend.directory] },
           proxy: { '/api': { ...viteConfig.server.proxy['/api'], target: backend.baseUrl } } },
       });
       await vite.listen();

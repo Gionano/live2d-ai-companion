@@ -269,6 +269,7 @@ for (const frontend of ['Vite dev', 'Electron production']) {
         logLevel: 'silent',
         server: {
           ...viteConfig.server,
+          host: '127.0.0.1',
           port: 0,
           hmr: false,
           watch: null,

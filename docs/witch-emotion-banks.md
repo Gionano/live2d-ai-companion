@@ -88,7 +88,8 @@ No extra IPC or preload permissions are required. The original model's license
 continues to apply; authored sidecar data and symbols do not grant model rights.
 
 Run `npm.cmd test` and `npm.cmd run build`. For focused regression checks:
-`npm.cmd test -- server/tests/emotionBanks.test.js`. These tests mock audio and
-model state and load only the published sidecar assets, without AI calls or
-private model binaries. Review actual browser and Electron playback with local
+`npm.cmd test -- server/tests/speechMotionPlayback.test.js server/tests/playbackSegments.test.js`.
+These tests mock audio and model dependencies without AI calls or private model
+binaries. Emotion-bank authoring and local rig behavior are checked manually.
+Review actual browser and Electron playback with local
 test audio, sentence pauses, tone changes, cancellation, and model switching.

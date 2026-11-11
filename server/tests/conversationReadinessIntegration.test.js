@@ -10,6 +10,27 @@ const ensureAudio = source.slice(ensureStart, source.indexOf('// Amplitudo audio
 const listeningStart = source.indexOf('async function startListening() {');
 const startListening = source.slice(listeningStart, source.indexOf('// ---------------------------------------------------------------------------', listeningStart));
 
+test('audio readiness is resent after reconnect without a user message', () => {
+  const sent = [];
+  const readiness = new ConversationReadiness(message => sent.push(message));
+  readiness.connected();
+  readiness.setAudioReady(true);
+  readiness.disconnected();
+  readiness.connected();
+  assert.deepEqual(sent.at(-1), { type: 'conversation_ready', audioReady: true });
+  assert.equal(sent.length, 3);
+
+  readiness.disconnected();
+  readiness.setAudioReady(false);
+  assert.equal(sent.length, 3);
+  readiness.connected();
+  assert.deepEqual(sent.at(-1), { type: 'conversation_ready', audioReady: false });
+  readiness.setAudioReady(true);
+  readiness.setAudioReady(true);
+  assert.deepEqual(sent.at(-1), { type: 'conversation_ready', audioReady: true });
+  assert.equal(sent.length, 5);
+});
+
 for (const initialState of ['running', 'suspended']) {
   test(`actual muted startup publishes playback readiness with ${initialState} audio and no first message`, async () => {
     const sent = [];

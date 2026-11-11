@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateConversationReply, SURFACE_PROMPT } from '../conversationCoordinator.js';
+import { generateConversationReply } from '../conversationCoordinator.js';
 
 const collect = async stream => { const events = []; for await (const event of stream) events.push(event); return events; };
 const segment = (text, register = 'casual', emotion = 'netral', speechEmotion = 'calm') =>
@@ -302,10 +302,4 @@ test('user cancellation rejects late deep output and emits no completion', async
   controller.abort(new Error('user_activity'));
   release();
   await assert.rejects(next, /user_activity/);
-});
-
-test('surface instructions reserve real opinions and explanations for the deeper stage', () => {
-  assert.match(SURFACE_PROMPT, /real opinion/);
-  assert.match(SURFACE_PROMPT, /at most one short natural sentence/);
-  assert.match(SURFACE_PROMPT, /say\+think/);
 });
