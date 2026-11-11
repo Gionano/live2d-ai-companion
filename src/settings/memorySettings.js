@@ -13,12 +13,16 @@ const JOB_TYPE_KEYS = { extract: 'memory.jobExtract', write: 'memory.jobExtract'
 // Memory is fetched only for this settings panel and is never put in browser storage.
 export function mountMemorySettings(parent, { document = globalThis.document, api, t, fail = () => {},
   confirm = message => globalThis.confirm(message), onVersion = () => {}, pollMs = 2000,
-  setTimer = globalThis.setInterval, clearTimer = globalThis.clearInterval } = {}) {
+  onDirtyChange = () => {}, setTimer = globalThis.setInterval, clearTimer = globalThis.clearInterval } = {}) {
   let disposed = false;
   let busy = false;
   let loading = false;
   let snapshot;
   let configured = false;
+  let savedConfiguration;
+  let dirty = false;
+  let configCancel;
+  let manualCancel;
   let fieldId = 0;
   let facts = { items: [], nextCursor: null };
   let events = { items: [], nextCursor: null };
@@ -59,17 +63,25 @@ export function mountMemorySettings(parent, { document = globalThis.document, ap
   configForm.append(el('h3', t('memory.configuration')), el('p', t('memory.retention')));
   const managed = field(configForm, 'memory.managed', { type: 'checkbox' });
   const device = field(configForm, 'memory.device', { options: [['auto', 'memory.deviceAuto'], ['cuda', 'memory.deviceCuda'], ['cpu', 'memory.deviceCpu']] });
-  configForm.append(el('p', t('memory.setupHelp')), el('pre', 'npm.cmd run memory:plan\nnpm.cmd run setup:memory -- --accept-license=bge-m3 --accept-license=pytorch --accept-license=transformers --accept-license=huggingface-hub\nnpm.cmd run memory:doctor'),
+  for (const input of [managed, device]) for (const event of ['input', 'change']) input.addEventListener(event, updateDirty);
+  const setupDetails = el('details'); setupDetails.append(el('summary', t('slot.advanced'))); configForm.append(setupDetails);
+  setupDetails.append(el('p', t('memory.setupHelp')), el('pre', 'npm.cmd run memory:plan\nnpm.cmd run setup:memory -- --accept-license=bge-m3 --accept-license=pytorch --accept-license=transformers --accept-license=huggingface-hub\nnpm.cmd run memory:doctor'),
     el('p', t('memory.setupNoDownload')), el('a', t('memory.modelLink'), { href: 'https://huggingface.co/BAAI/bge-m3', target: '_blank', rel: 'noopener noreferrer' }));
   configForm.append(el('button', t('action.save'), { type: 'submit' }));
+  configCancel = button('action.cancelChanges', () => { resetConfiguration(); updateDirty(); }, configForm);
+  configCancel.disabled = true;
   configForm.addEventListener('submit', event => {
     event.preventDefault();
     if (disposed || busy || !snapshot) return;
+    const locked = [managed, device].map(input => [input, input.disabled]);
+    for (const [input] of locked) input.disabled = true;
     void change(async () => {
       const result = await api.write('/memory/config', { version: snapshot.version,
         memory: { managedEmbedding: managed.checked, embeddingDevice: device.value } });
       applySnapshot(result);
-    }).catch(error => { if (!disposed) fail(error); });
+    }).catch(error => { if (!disposed) fail(error); }).finally(() => {
+      for (const [input, disabled] of locked) input.disabled = disabled;
+    });
   });
   button('memory.retryEmbedding', () => mutate('/memory/embedding/retry', {}, 'POST'), configForm);
 
@@ -97,13 +109,38 @@ export function mountMemorySettings(parent, { document = globalThis.document, ap
   const manualForm = el('form', undefined, { class: 'settings-card' }); parent.append(manualForm);
   manualForm.append(el('h3', t('memory.manual')), el('p', t('memory.manualHelp')));
   const manual = field(manualForm, 'memory.factText', { type: 'textarea', rows: 3, maxlength: 4096, required: '' });
+  for (const event of ['input', 'change']) manual.addEventListener(event, updateDirty);
   manualForm.append(el('button', t('memory.saveFact'), { type: 'submit' }));
+  manualCancel = button('action.cancelChanges', () => { manual.value = ''; updateDirty(); }, manualForm);
+  manualCancel.disabled = true;
   manualForm.addEventListener('submit', event => {
     event.preventDefault();
     if (disposed || busy || !snapshot || !manual.value.trim()) return;
-    void mutate('/memory/fact', { text: manual.value.trim(), category: 'manual', memoryRevision: snapshot.status.revision }, 'POST')
-      .then(() => { if (!disposed) manual.value = ''; }).catch(error => { if (!disposed) fail(error); });
+    const submittedText = manual.value;
+    void mutate('/memory/fact', { text: submittedText.trim(), category: 'manual', memoryRevision: snapshot.status.revision }, 'POST')
+      .then(() => { if (!disposed) { if (manual.value === submittedText) manual.value = ''; updateDirty(); } })
+      .catch(error => { if (!disposed) fail(error); });
   });
+
+  function configurationDirty() {
+    return Boolean(configured && savedConfiguration && (managed.checked !== savedConfiguration.managedEmbedding
+      || device.value !== savedConfiguration.embeddingDevice));
+  }
+  function isDirty() { return configurationDirty() || Boolean(manual.value); }
+  function updateDirty() {
+    const next = isDirty();
+    if (configCancel) configCancel.disabled = !configurationDirty();
+    if (manualCancel) manualCancel.disabled = !manual.value;
+    if (next !== dirty) { dirty = next; onDirtyChange(next); }
+  }
+  function resetConfiguration() {
+    if (!savedConfiguration) return;
+    managed.checked = savedConfiguration.managedEmbedding; device.value = savedConfiguration.embeddingDevice;
+  }
+  function discardChanges() {
+    if (disposed || busy) return;
+    resetConfiguration(); manual.value = ''; updateDirty();
+  }
 
   const factsBox = section('memory.facts');
   const factRecords = el('div', undefined, { 'data-memory-facts': '' }); factsBox.append(factRecords);
@@ -126,7 +163,7 @@ export function mountMemorySettings(parent, { document = globalThis.document, ap
   }, removal);
 
   function renderFact(box, fact) {
-    const item = el('article', undefined, { class: 'settings-card', 'data-memory-fact': fact.id || '' });
+    const item = el('article', undefined, { class: 'settings-record', 'data-memory-fact': fact.id || '' });
     item.append(el('p', fact.text || [fact.subject, fact.predicate, fact.value].filter(Boolean).join(' — ')));
     const origin = fact.origin === 'legacy' || fact.legacy ? 'memory.legacy' : fact.origin === 'manual' ? 'memory.manualOrigin' : 'memory.verified';
     item.append(el('p', t(origin)));
@@ -142,7 +179,7 @@ export function mountMemorySettings(parent, { document = globalThis.document, ap
     box.append(item);
   }
   function renderEvent(box, event) {
-    const item = el('article', undefined, { class: 'settings-card', 'data-memory-event': event.id || event.eventId || '' });
+    const item = el('article', undefined, { class: 'settings-record', 'data-memory-event': event.id || event.eventId || '' });
     item.append(el('p', date(event.timestamp || event.createdAt) + ' · ' + t(event.origin === 'proactive' ? 'memory.proactive'
       : event.origin === 'vision' ? 'memory.visualCommentary' : 'memory.conversation')));
     if (event.userText) item.append(el('p', t('memory.user') + ': ' + event.userText));
@@ -167,6 +204,7 @@ export function mountMemorySettings(parent, { document = globalThis.document, ap
   }
   function applySnapshot(value) {
     if (disposed) return;
+    const preserveConfiguration = configurationDirty();
     snapshot = value; onVersion(value.version);
     const status = value.status || {};
     summary.replaceChildren(el('p', t(STATE_KEYS[value.embedding?.state] || 'memory.offline')),
@@ -179,13 +217,13 @@ export function mountMemorySettings(parent, { document = globalThis.document, ap
     if (status.retrieval) summary.append(el('p', t('memory.searchTiming', { method: status.retrieval.method || 'keyword',
       duration: Math.round(status.retrieval.durationMs || 0) })));
     if (value.embedding?.reason || value.embedding?.errorCode) summary.append(el('p', t('memory.actionableFailure')));
-    if (!configured) {
-      managed.checked = value.configuration?.managedEmbedding !== false;
-      device.value = value.configuration?.embeddingDevice || 'auto'; configured = true;
-    }
+    savedConfiguration = { managedEmbedding: value.configuration?.managedEmbedding !== false,
+      embeddingDevice: value.configuration?.embeddingDevice || 'auto' };
+    if (!configured || !preserveConfiguration) resetConfiguration();
+    configured = true; updateDirty();
     jobs.replaceChildren();
     for (const job of status.jobs || []) {
-      const item = el('article', undefined, { class: 'settings-card' });
+      const item = el('article', undefined, { class: 'settings-record' });
       item.append(el('p', t('memory.job', { type: t(JOB_TYPE_KEYS[job.type] || 'memory.jobOther'),
         state: t(JOB_STATE_KEYS[job.state] || 'memory.jobQueued'), attempt: job.attempt || 0 })));
       if (job.errorCode) item.append(el('p', t('memory.jobError', { code: job.errorCode })));
@@ -230,5 +268,5 @@ export function mountMemorySettings(parent, { document = globalThis.document, ap
   const ready = refresh(true).catch(error => { if (!disposed) fail(error); });
   const timer = setTimer(() => { if (!disposed && !busy) void refresh(false).catch(error => { if (!disposed) fail(error); }); }, pollMs);
   timer?.unref?.();
-  return { ready, refresh, dispose() { disposed = true; clearTimer(timer); } };
+  return { ready, refresh, isDirty, discardChanges, dispose() { disposed = true; clearTimer(timer); } };
 }

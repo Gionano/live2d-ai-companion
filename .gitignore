@@ -57,3 +57,6 @@ sd-cli/
 .test-*/
 .commit-test-*/
 docs/selfie-runs.md
+
+# Local visual review fixtures, screenshots, and test output
+.impeccable/review/

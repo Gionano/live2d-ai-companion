@@ -9,7 +9,7 @@ export class SettingsWindowManager {
     url.search = ''; url.hash = 'settings';
     if (this.window && !this.window.isDestroyed()) { this.window.show(); this.window.focus(); return; }
     const win = new this.BrowserWindow({ width: 1040, height: 800, minWidth: 360, minHeight: 480,
-      show: false, autoHideMenuBar: true, backgroundColor: '#161622',
+      show: false, autoHideMenuBar: true, backgroundColor: '#F7F4FC',
       webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false, partition: 'settings-ui' } });
     this.window = win;
     win.setContentProtection(true);

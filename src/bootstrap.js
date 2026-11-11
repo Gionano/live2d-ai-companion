@@ -9,6 +9,7 @@ import { node } from './settings/dom.js';
 const t = translator(detectLanguage(navigator.language), { id, en });
 const allowed = canOpenSettings({ hostname: location.hostname, mobile: navigator.userAgentData?.mobile || /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) });
 const settingsPage = location.hash === '#settings';
+const browserWorkspace = !window.desktopBridge && new URLSearchParams(location.search).get('mode') !== 'overlay';
 window.addEventListener('hashchange', () => { if ((location.hash === '#settings') !== settingsPage) location.reload(); });
 if (window.desktopBridge) document.documentElement.classList.add('electron-mode');
 if (new URLSearchParams(location.search).get('mode') === 'overlay') document.documentElement.classList.add('overlay-mode');
@@ -34,14 +35,19 @@ if (settingsPage) {
   }
   else if (firstRun) { location.hash = 'settings'; }
   else {
+    if (browserWorkspace) {
+      await import('./browserChat.css');
+      const { mountBrowserChat } = await import('./browserChat.js');
+      mountBrowserChat({ document, canOpenSettings: allowed, openSettings: () => { location.hash = 'settings'; } });
+    }
     const panel = document.querySelector('#companion-panel .panel-head');
-    if (allowed) {
+    if (allowed && !browserWorkspace) {
       const entry = node(document, 'button', '⚙', { type: 'button', 'aria-label': t('app.gear'), title: t('app.gear') });
       entry.addEventListener('click', () => {
         if (window.desktopBridge?.openSettings) void window.desktopBridge.openSettings();
         else location.hash = 'settings';
       }); panel?.append(entry);
-    } else panel?.append(node(document, 'p', t('app.hostOnly')));
+    } else if (!allowed && !browserWorkspace) panel?.append(node(document, 'p', t('app.hostOnly')));
     await Promise.all([import('./main.js'), import('./companion.js')]);
   }
 }

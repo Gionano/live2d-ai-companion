@@ -4,5 +4,6 @@
   { "id": "openai", "labelKey": "preset.openai", "adapter": "openaiCompatible", "baseUrl": "https://api.openai.com/v1", "maintainerVerificationRequired": true },
   { "id": "groq", "labelKey": "preset.groq", "adapter": "openaiCompatible", "baseUrl": "https://api.groq.com/openai/v1", "maintainerVerificationRequired": true },
   { "id": "anthropic", "labelKey": "preset.anthropic", "adapter": "anthropicNative", "baseUrl": "https://api.anthropic.com", "maintainerVerificationRequired": true },
-  { "id": "fish", "labelKey": "preset.fish", "adapter": "fishAudio", "baseUrl": "" }
+  { "id": "fish", "labelKey": "preset.fish", "adapter": "fishAudio", "baseUrl": "" },
+  { "id": "elevenlabs", "labelKey": "preset.elevenLabs", "adapter": "elevenLabs", "baseUrl": "https://api.elevenlabs.io/v1", "apiKeyEnv": "ELEVENLABS_API_KEY", "maintainerVerificationRequired": true }
 ]

@@ -1,0 +1,34 @@
+#settings-page,
+.browser-workspace {
+  --amika-bg: #F7F4FC;
+  --amika-surface: #FFFFFF;
+  --amika-primary: #6D4BC3;
+  --amika-primary-hover: #5936AC;
+  --amika-text: #30283D;
+  --amika-muted: #6F637D;
+  --amika-soft: #F0EAF8;
+  --amika-border: #DDD3EA;
+  --amika-control-border: #AFA1C3;
+  --amika-cyan: #DDF5F7;
+  --amika-cyan-ink: #28636B;
+  --amika-success: #27634C;
+  --amika-success-bg: #E9F4EC;
+  --amika-warning: #785319;
+  --amika-warning-bg: #FFF4DB;
+  --amika-error: #A0344C;
+  --amika-error-bg: #FCEEF1;
+  color-scheme: light;
+  accent-color: var(--amika-primary);
+  caret-color: var(--amika-primary);
+}
+
+#settings-page ::selection,
+.browser-workspace ::selection {
+  color: var(--amika-text);
+  background: #DFD2F7;
+}
+
+#settings-page,
+.browser-workspace * {
+  scrollbar-color: #AFA1C3 var(--amika-bg);
+}

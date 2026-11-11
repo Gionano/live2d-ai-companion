@@ -28,7 +28,7 @@ const walk = item => [item, ...item.children.flatMap(walk)];
 async function fixture({ provider = 'auto', installation = null, failWrite = false } = {}) {
   const parent = new Element('main');
   const document = { visibilityState: 'visible', createElement: tag => new Element(tag) };
-  const calls = []; const errors = []; const timers = new Map(); let timerId = 0;
+  const calls = []; const errors = []; const dirtyChanges = []; const timers = new Map(); let timerId = 0;
   const snapshot = { version: 4, ready: false, provider: null, pending: false, hasKey: false, installation,
     images: { provider, preset: 'cepat', comfyuiUrl: 'http://127.0.0.1:8188', variant: 'auto', cloud: { accountId: ACCOUNT, model: CLOUD_IMAGE_MODEL } },
     readiness: { active: null, reasons: {} } };
@@ -53,13 +53,52 @@ async function fixture({ provider = 'auto', installation = null, failWrite = fal
     },
   };
   const controller = mountImageSettings(parent, { document, api, t, fail: error => errors.push(error.code),
+    onDirtyChange: value => dirtyChanges.push(value),
     setTimer: callback => { const id = ++timerId; timers.set(id, callback); return id; }, clearTimer: id => timers.delete(id) });
   await controller.ready;
   const nodes = () => walk(parent);
   const input = key => nodes().find(node => ['input', 'select'].includes(node.tagName) && node.parent.ownText === labels[key]);
   const button = key => nodes().find(node => node.tagName === 'button' && node.textContent === labels[key]);
-  return { parent, document, calls, errors, snapshot, plan, nodes, input, button, controller, timers };
+  return { parent, document, calls, errors, dirtyChanges, snapshot, plan, nodes, input, button, controller, timers };
 }
+
+test('PAP dirty drafts survive polling and can be discarded without a write', async () => {
+  const page = await fixture({ provider: 'comfyui', installation: { id: 'active-job', state: 'running', phase: 'downloading' } });
+  assert.equal(page.controller.isDirty(), false);
+  const url = page.input('images.url'); url.value = 'http://127.0.0.1:9191'; url.fire('input');
+  assert.equal(page.controller.isDirty(), true); assert.deepEqual(page.dirtyChanges, [true]);
+  const [id, poll] = [...page.timers][0]; page.timers.delete(id); await poll();
+  assert.equal(page.input('images.url'), url);
+  assert.equal(url.value, 'http://127.0.0.1:9191');
+  assert.equal(page.controller.isDirty(), true);
+  page.controller.discardChanges();
+  assert.equal(page.input('images.url').value, 'http://127.0.0.1:8188');
+  assert.equal(page.controller.isDirty(), false); assert.deepEqual(page.dirtyChanges, [true, false]);
+  assert.equal(page.calls.some(call => call.method !== 'GET'), false);
+  page.controller.dispose();
+});
+
+test('PAP successful save resets dirty state and failure retains non-secret draft edits', async () => {
+  const saved = await fixture({ provider: 'comfyui' });
+  const url = saved.input('images.url'); url.value = 'http://127.0.0.1:9191'; url.fire('change');
+  url.parent.parent.fire('submit'); await settle();
+  assert.equal(saved.controller.isDirty(), false);
+  assert.deepEqual(saved.dirtyChanges, [true, false]);
+  assert.equal(saved.input('images.url').value, 'http://127.0.0.1:9191');
+  saved.controller.dispose();
+
+  const failed = await fixture({ provider: 'cloud', failWrite: true });
+  const account = failed.input('images.accountId'); account.value = 'b'.repeat(32); account.fire('input');
+  const key = failed.input('images.token'); key.value = SECRET; key.fire('input');
+  key.parent.parent.fire('submit'); await settle();
+  assert.equal(failed.controller.isDirty(), true);
+  assert.equal(failed.input('images.accountId').value, 'b'.repeat(32));
+  assert.equal(key.value, ''); assert.deepEqual(failed.errors, ['CONFLICT']);
+  failed.controller.discardChanges();
+  assert.equal(failed.controller.isDirty(), false);
+  assert.equal(failed.input('images.accountId').value, ACCOUNT);
+  failed.controller.dispose();
+});
 
 test('PAP settings validates provider-specific fields and excludes unsupported sampling controls', () => {
   const fields = { provider: 'cloud', preset: 'cepat', comfyuiUrl: 'http://127.0.0.1:8188', variant: 'auto',

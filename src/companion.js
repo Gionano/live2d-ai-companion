@@ -27,8 +27,10 @@ import { handleBrowserSelfieModal } from './browserSelfieModal.js';
 import { ConversationReadiness } from './conversationReadiness.js';
 import { ReplyParts } from './replyParts.js';
 import { scheduleAudioBuffer } from './audioClock.js';
+import { getBrowserChat } from './browserChat.js';
 
 const isOverlay = new URLSearchParams(window.location.search).get('mode') === 'overlay';
+const browserChat = getBrowserChat(document);
 // Wait for the main-process mute snapshot before opening the desktop microphone.
 let isMicMutedByDesktop = Boolean(window.desktopBridge);
 let micMuteRevision = -1;
@@ -62,7 +64,8 @@ function isMobile() {
   return window.innerWidth <= 768;
 }
 
-function log(text, cls = '') {
+function log(text, cls = '', options) {
+  if (browserChat) return browserChat.log(text, cls, options);
   const div = document.createElement('div');
   div.className = `log-line ${cls}`.trim();
   div.textContent = text;
@@ -73,11 +76,12 @@ function log(text, cls = '') {
 
 const replyParts = new ReplyParts({
   create: (stage) => {
-    const node = log('', 'assistant');
+    const node = log('', 'assistant', { streaming: true });
     node.dataset.replyStage = stage;
     return node;
   },
   update: (node, text) => {
+    if (browserChat) { browserChat.update(node, text); return; }
     node.textContent = `Amika: ${text}`;
     logEl.scrollTop = logEl.scrollHeight;
   },
@@ -283,7 +287,8 @@ async function startScreenShare() {
 
     if (screenShareBtn) {
       screenShareBtn.classList.add('active');
-      screenShareBtn.textContent = '🖥️ Screen On';
+      screenShareBtn.textContent = typeof browserChat !== 'undefined' && browserChat ? 'Layar aktif' : '🖥️ Screen On';
+      if (typeof browserChat !== 'undefined' && browserChat) screenShareBtn.setAttribute('aria-pressed', 'true');
     }
     log('🖥️ Share screen aktif.', 'muted');
 
@@ -311,7 +316,8 @@ function stopScreenShare() {
 
   if (screenShareBtn) {
     screenShareBtn.classList.remove('active');
-    screenShareBtn.textContent = '🖥️ Share Screen';
+    screenShareBtn.textContent = typeof browserChat !== 'undefined' && browserChat ? 'Bagikan layar' : '🖥️ Share Screen';
+    if (typeof browserChat !== 'undefined' && browserChat) screenShareBtn.setAttribute('aria-pressed', 'false');
   }
   log('🖥️ Share screen dimatikan.', 'muted');
 
@@ -400,9 +406,12 @@ function updateUiForState(state, isPttRecording = false) {
   if (chatInputEl && chatSendEl) {
     const busy = (state !== 'idle' || speechPlayback.busy) && !proactiveSpeechActive;
     const wasDisabled = chatInputEl.disabled;
-    chatInputEl.disabled = busy;
-    chatSendEl.disabled = busy;
-    chatInputEl.placeholder = busy ? 'Amika sedang merespons…' : 'Ketik pesan…';
+    if (typeof browserChat !== 'undefined' && browserChat) browserChat.setBusy(busy);
+    else {
+      chatInputEl.disabled = busy;
+      chatSendEl.disabled = busy;
+      chatInputEl.placeholder = busy ? 'Amika sedang merespons…' : 'Ketik pesan…';
+    }
     if (wasDisabled && !busy && !isMobile()) chatInputEl.focus();
   }
   const mobile = isMobile();
@@ -650,9 +659,11 @@ if (window.desktopBridge?.notifySelfieEvent) {
 }
 
 function connectWS() {
+  const chatView = typeof browserChat === 'undefined' ? null : browserChat;
   const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
   ws.addEventListener('open', () => {
+    chatView?.setConnection(true);
     conversationReadiness.connected();
     if (window.desktopBridge) {
       ws.send(JSON.stringify({ type: 'mic_mute', muted: isMicMutedByDesktop }));
@@ -711,17 +722,20 @@ function connectWS() {
         updateUiForState(playbackState());
         break;
       case 'user_said':
-        log(`Kamu: ${msg.text}`, 'user');
+        log(chatView ? msg.text : `Kamu: ${msg.text}`, 'user');
         break;
       case 'vision':
-        log(`👁️ ${msg.text}`, 'vision');
+        log(chatView ? `Penglihatan: ${msg.text}` : `👁️ ${msg.text}`, 'vision');
         break;
       case 'amika_replied':
-        if (!replyParts.hasDisplayed(msg.turnId)) log(`Amika: ${msg.text}`, 'assistant');
+        if (!replyParts.hasDisplayed(msg.turnId)) log(chatView ? msg.text : `Amika: ${msg.text}`, 'assistant');
         showOverlaySubtitle(msg.text);
         break;
       case 'reply_part':
         replyParts.handle(msg);
+        if (msg.status === 'done' && !replyParts.turns.get(msg.turnId)?.cancelled) {
+          chatView?.complete(replyParts.turns.get(msg.turnId)?.parts.get(msg.partId)?.node);
+        }
         break;
       case 'emotion':
         speechPlayback.handle(msg);
@@ -814,6 +828,7 @@ function connectWS() {
     }
   });
   ws.addEventListener('close', () => {
+    chatView?.setConnection(false);
     conversationReadiness.disconnected();
     replyParts.reset();
     continuousVision.disconnect();
@@ -964,7 +979,7 @@ let isPttScrolling = false;
 window.addEventListener('pointerdown', (e) => {
   if (!isMobile()) return;
   // Abaikan jika menekan tombol kontrol interaktif
-  if (e.target.closest('#screen-share-btn, #camera-switch-btn, button, select, a')) {
+  if (e.target.closest('#screen-share-btn, #camera-switch-btn, button, select, a, summary')) {
     return;
   }
   // Area sekitar UI: pada #companion-panel atau area layar sekitarnya (bagian bawah)
@@ -1306,6 +1321,7 @@ if (chatForm && chatInput) {
     if (isMobile()) return;
     const text = chatInput.value.trim();
     if (!text) return;
+    if (browserChat && text.length > 1000) return;
     if (proactiveSpeechActive) reportUserActivity('start');
     if (playbackState() !== 'idle') return;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -1324,6 +1340,7 @@ if (chatForm && chatInput) {
     clearTimeout(typingTimer);
     reportUserActivity('end');
     chatInput.value = '';
+    browserChat?.resetComposer();
     updateUiForState('processing');
   });
 }

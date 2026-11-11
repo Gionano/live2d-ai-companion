@@ -1,11 +1,13 @@
 import { validateBaseUrl } from '../../server/providers/baseUrl.js';
 import { DEFAULT_TTS_PARAMS } from '../../server/ttsExpression.js';
+import { DEFAULT_ELEVENLABS_PARAMS, ELEVENLABS_MODELS, isElevenLabsVoice, resolveElevenLabsParams } from '../../server/elevenLabsTts.js';
 import { FISH_EMOTION_GROUPS, FISH_EMOTION_NAMES, FISH_EMOTION_TAGS } from '../../server/fishEmotionTags.js';
 export { validateBaseUrl };
 export { DEFAULT_TTS_PARAMS };
+export { DEFAULT_ELEVENLABS_PARAMS, ELEVENLABS_MODELS };
 export { FISH_EMOTION_GROUPS, FISH_EMOTION_TAGS };
 export const SLOT_LABELS = { llm: 'slot.llm', surface: 'slot.surface', reflection: 'slot.reflection', router: 'slot.router', vision: 'slot.vision', stt: 'slot.stt', tts: 'slot.tts', planner: 'slot.planner', visionFilter: 'slot.visionFilter', memoryWriter: 'slot.memoryWriter', memoryEmbedding: 'slot.memoryEmbedding' };
-export const TAB_LABELS = { connections: 'tab.connections', images: 'tab.images', memory: 'tab.memory', status: 'tab.status', privacy: 'tab.privacy', diagnostics: 'tab.diagnostics', language: 'tab.language' };
+export const TAB_LABELS = { chat: 'tab.chat', voice: 'tab.voice', vision: 'tab.vision', images: 'tab.images', memory: 'tab.memory', connections: 'tab.connections', language: 'tab.language', status: 'tab.status', privacy: 'tab.privacy', diagnostics: 'tab.diagnostics' };
 export const ERROR_KEYS = { CONFLICT: 'error.conflict', ORIGIN_CHANGE: 'error.origin', IN_USE: 'error.inUse',
   FORBIDDEN: 'error.forbidden', AUTH: 'error.auth', RATE_LIMIT: 'error.rate', TIMEOUT: 'error.timeout',
   LOCK_BUSY: 'error.lockBusy', LOCK_UNKNOWN: 'error.lockUnknown', LOCK_RECOVERY: 'error.lockRecovery',
@@ -47,7 +49,7 @@ export function makeSlot(fields, previous = {}) {
   if (!fields.profile || !fields.model?.trim()) throw Object.assign(new Error(), { code: 'INVALID_SETTINGS' });
   const slot = { ...previous, profile: fields.profile, model: fields.model.trim(), params: { ...previous.params }, timeouts: {} };
   for (const [key, max] of [['temperature', 2], ['maxTokens', 1000000]]) {
-    if (fields[key] !== '') {
+    if (fields[key] !== '' && fields[key] !== undefined) {
       const number = Number(fields[key]);
       if (!Number.isFinite(number) || number < (key === 'maxTokens' ? 1 : 0) || number > max) throw Object.assign(new Error(), { code: 'INVALID_SETTINGS' });
       slot.params[key] = number;
@@ -58,12 +60,54 @@ export function makeSlot(fields, previous = {}) {
     throw Object.assign(new Error(), { code: 'INVALID_SETTINGS' });
   }
   if (fields.tts) Object.assign(slot.params, makeTtsParams(fields.tts, previous.params));
+  if (fields.ttsTiming) slot.params.expression = makeTtsTiming(fields.ttsTiming, previous.params?.expression);
+  if (fields.elevenLabs) {
+    if (!ELEVENLABS_MODELS.includes(slot.model) || fields.format !== 'mp3' || !isElevenLabsVoice(fields.voice)) {
+      throw Object.assign(new Error(), { code: 'INVALID_SETTINGS' });
+    }
+    slot.params.elevenLabs = makeElevenLabsParams(fields.elevenLabs, previous.params?.elevenLabs, slot.model);
+  }
+  if (fields.adapter === 'fishAudio' && fields.voice !== undefined) {
+    if (typeof fields.voice !== 'string') throw Object.assign(new Error(), { code: 'INVALID_SETTINGS' });
+    const voice = fields.voice.trim();
+    if (voice) slot.params.voice = voice;
+    else delete slot.params.voice;
+  }
   for (const key of ['firstByteMs', 'idleMs', 'totalMs']) {
     const value = Number(fields[key]);
     if (!Number.isFinite(value) || value < 0 || value > 300000) throw Object.assign(new Error(), { code: 'INVALID_SETTINGS' });
     slot.timeouts[key] = value;
   }
   return { ...slot, params: { ...slot.params, ...parseAdvanced(fields.advanced).value } };
+}
+export function makeElevenLabsParams(fields, previous = {}, model) {
+  const invalid = () => { throw Object.assign(new Error(), { code: 'INVALID_SETTINGS' }); };
+  const numeric = key => {
+    if (fields[key] === '' || fields[key] === undefined) invalid();
+    const value = Number(fields[key]);
+    if (!Number.isFinite(value)) invalid();
+    return value;
+  };
+  const overrides = { stability: numeric('stability'), emotionTags: fields.emotionTags };
+  for (const key of ['similarityBoost', 'speed']) if (fields[key] !== undefined) overrides[key] = numeric(key);
+  try { return resolveElevenLabsParams(previous, overrides, model); }
+  catch { return invalid(); }
+}
+export function makeTtsTiming(fields, previous = {}) {
+  const invalid = () => { throw Object.assign(new Error(), { code: 'INVALID_SETTINGS' }); };
+  const numeric = (key, min, max) => {
+    if (fields[key] === '' || fields[key] === undefined) invalid();
+    const value = Number(fields[key]);
+    if (!Number.isSafeInteger(value) || value < min || value > max) invalid();
+    return value;
+  };
+  if (typeof fields.earlyFirstSentence !== 'boolean' || typeof fields.mergeEnabled !== 'boolean') invalid();
+  const minChars = numeric('minChars', 1, 1000);
+  const maxChars = numeric('maxChars', 1, 4000);
+  if (minChars > maxChars) invalid();
+  return { ...previous, earlyFirstSentence: fields.earlyFirstSentence,
+    segmentPauseMs: numeric('segmentPauseMs', 0, 400), sentencePauseMs: numeric('sentencePauseMs', 0, 400),
+    mergeShortSentences: { ...previous.mergeShortSentences, enabled: fields.mergeEnabled, minChars, maxChars } };
 }
 export function makeTtsParams(fields, previous = {}) {
   const invalid = () => { throw Object.assign(new Error(), { code: 'INVALID_SETTINGS' }); };

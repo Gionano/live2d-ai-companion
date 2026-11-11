@@ -19,6 +19,7 @@ async function fixture(t, { confirmation = true, state = 'setup_required' } = {}
   const errors = [];
   const confirmations = [];
   const timers = [];
+  const dirtyChanges = [];
   let revision = 2;
   let version = 1;
   const configuration = { managedEmbedding: true, embeddingDevice: 'auto' };
@@ -48,10 +49,11 @@ async function fixture(t, { confirmation = true, state = 'setup_required' } = {}
   const controller = mountMemorySettings(parent, { document: dom.window.document, api,
     t: translator('id', { id: translations, en: english }), fail: error => errors.push(error.code),
     confirm: message => { confirmations.push(message); return confirmation; }, onVersion: value => versions.push(value),
+    onDirtyChange: value => dirtyChanges.push(value),
     setTimer: callback => { timers.push(callback); return 1; }, clearTimer: value => calls.push(['clearTimer', value]) });
   t.after(() => controller.dispose());
   await controller.ready;
-  return { dom, parent, calls, errors, confirmations, timers, controller, versions };
+  return { dom, parent, calls, errors, confirmations, timers, controller, versions, dirtyChanges, configuration, api };
 }
 
 test('memory panel uses Indonesian evidence labels, renders quotes safely and offers explicit setup only', async t => {
@@ -72,6 +74,8 @@ test('memory polling retains unsaved configuration and manual fact drafts', asyn
   const device = f.parent.querySelector('select');
   const manual = f.parent.querySelector('textarea');
   device.value = 'cpu'; manual.value = 'My unsaved preference.';
+  device.dispatchEvent(new f.dom.window.Event('change')); manual.dispatchEvent(new f.dom.window.Event('input'));
+  assert.equal(f.controller.isDirty(), true); assert.deepEqual(f.dirtyChanges, [true]);
   f.timers[0](); await turn();
   assert.equal(device.value, 'cpu'); assert.equal(manual.value, 'My unsaved preference.');
   const form = device.closest('form'); form.dispatchEvent(new f.dom.window.Event('submit', { bubbles: true, cancelable: true }));
@@ -80,6 +84,89 @@ test('memory polling retains unsaved configuration and manual fact drafts', asyn
   assert.deepEqual(saved, ['PUT', '/memory/config', { version: 1, memory: { managedEmbedding: true, embeddingDevice: 'cpu' } }]);
   assert.ok(f.versions.includes(2));
   assert.equal(manual.value, 'My unsaved preference.');
+  assert.equal(f.controller.isDirty(), true);
+});
+
+test('memory discard restores the latest saved configuration and clears only unsaved fact text', async t => {
+  const f = await fixture(t);
+  const device = f.parent.querySelector('select'); const manual = f.parent.querySelector('textarea');
+  device.value = 'cpu'; device.dispatchEvent(new f.dom.window.Event('change'));
+  manual.value = 'Unsaved fact'; manual.dispatchEvent(new f.dom.window.Event('input'));
+  f.configuration.embeddingDevice = 'cuda';
+  await f.controller.refresh(false);
+  assert.equal(device.value, 'cpu'); assert.equal(manual.value, 'Unsaved fact');
+  f.controller.discardChanges();
+  assert.equal(device.value, 'cuda'); assert.equal(manual.value, '');
+  assert.equal(f.controller.isDirty(), false); assert.deepEqual(f.dirtyChanges, [true, false]);
+  assert.ok(f.parent.querySelector('[data-memory-facts]').textContent.includes(XSS));
+  assert.equal(f.calls.some(([method]) => method === 'PUT' || method === 'POST'), false);
+});
+
+test('memory config save clears its dirty state without discarding a separate manual draft', async t => {
+  const f = await fixture(t);
+  const device = f.parent.querySelector('select'); const manual = f.parent.querySelector('textarea');
+  device.value = 'cpu'; device.dispatchEvent(new f.dom.window.Event('change'));
+  const form = device.closest('form'); form.dispatchEvent(new f.dom.window.Event('submit', { bubbles: true, cancelable: true }));
+  await turn(); await turn();
+  assert.equal(f.controller.isDirty(), false); assert.deepEqual(f.dirtyChanges, [true, false]);
+  manual.value = 'New manual fact'; manual.dispatchEvent(new f.dom.window.Event('input'));
+  assert.equal(f.controller.isDirty(), true);
+  const configCancel = [...form.querySelectorAll('button')].find(button => button.type === 'button');
+  assert.equal(configCancel.disabled, true);
+  f.timers[0](); await turn();
+  assert.equal(manual.value, 'New manual fact'); assert.equal(f.controller.isDirty(), true);
+});
+
+test('memory config save locks only submitted fields and restores their disabled state', async t => {
+  for (const scenario of [
+    { name: 'success', fails: false, deviceDisabled: false },
+    { name: 'failure', fails: true, deviceDisabled: false },
+    { name: 'previously disabled field', fails: false, deviceDisabled: true },
+  ]) await t.test(scenario.name, async child => {
+    const f = await fixture(child);
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    const write = f.api.write;
+    f.api.write = async (...args) => {
+      if (args[0] === '/memory/config') {
+        await pending;
+        if (scenario.fails) throw { code: 'BAD_RESPONSE' };
+      }
+      return write(...args);
+    };
+    const managed = f.parent.querySelector('input[type="checkbox"]');
+    const device = f.parent.querySelector('select');
+    const manual = f.parent.querySelector('textarea');
+    device.value = 'cpu'; device.dispatchEvent(new f.dom.window.Event('change'));
+    device.disabled = scenario.deviceDisabled;
+    device.closest('form').dispatchEvent(new f.dom.window.Event('submit', { bubbles: true, cancelable: true }));
+    assert.equal(managed.disabled, true); assert.equal(device.disabled, true);
+    managed.click(); assert.equal(managed.checked, true, 'The submitted checkbox cannot change while disabled');
+    assert.equal(manual.disabled, false);
+    manual.value = 'Separate fact draft'; manual.dispatchEvent(new f.dom.window.Event('input'));
+    release(); await turn(); await turn();
+    assert.equal(managed.disabled, false); assert.equal(device.disabled, scenario.deviceDisabled);
+    assert.equal(device.value, 'cpu'); assert.equal(manual.value, 'Separate fact draft');
+    assert.deepEqual(f.errors, scenario.fails ? ['BAD_RESPONSE'] : []);
+    if (!scenario.fails) assert.deepEqual(f.calls.find(([, path]) => path === '/memory/config')[2].memory,
+      { managedEmbedding: true, embeddingDevice: 'cpu' });
+  });
+});
+
+test('saving a manual fact does not clear newer text typed while the request is pending', async t => {
+  const f = await fixture(t);
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const write = f.api.write;
+  f.api.write = async (...args) => { if (args[0] === '/memory/fact') await pending; return write(...args); };
+  const manual = f.parent.querySelector('textarea');
+  manual.value = 'Submitted fact'; manual.dispatchEvent(new f.dom.window.Event('input'));
+  manual.closest('form').dispatchEvent(new f.dom.window.Event('submit', { bubbles: true, cancelable: true }));
+  await turn();
+  manual.value = 'Next fact draft'; manual.dispatchEvent(new f.dom.window.Event('input'));
+  release(); await turn(); await turn();
+  assert.equal(f.calls.find(([, path]) => path === '/memory/fact')[2].text, 'Submitted fact');
+  assert.equal(manual.value, 'Next fact draft'); assert.equal(f.controller.isDirty(), true);
 });
 
 test('memory deletion confirms supporting dialogue counts and uses reviewed memory revision', async t => {

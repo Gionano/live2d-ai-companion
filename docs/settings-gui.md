@@ -1,22 +1,39 @@
-# Settings GUI (P3)
+# Settings GUI
 
 Open the companion on the host at `http://localhost:5173/#settings`, use the gear
-in the debug panel, or choose **Settings…** in Electron's tray. The Electron
+in the companion panel, or choose **Settings…** in Electron's tray. The Electron
 window loads the same frontend origin. Mobile and non-loopback clients show a
 host-computer notice instead of an entry point; the API independently refuses
 remote access.
 
 ## Screens
 
+Settings use a light lavender and white theme with violet actions, shared by the
+browser and Electron settings window. The sidebar groups companion features under
+**Amika** and application controls under **Aplikasi**. Below 900px, a compact
+section selector replaces the sidebar and forms use a single column. Configured
+installations open on **Obrolan**; installations without an assigned Chat model
+open the first-run guide.
+
 | Screen | Contents |
 | --- | --- |
-| Connections | Provider list, add/edit/delete form, presets, write-only credentials and capability flags. LLM, Vision, STT and TTS editors; quick reaction, reflection, conversation router, planner, visionFilter, memory writer and memory embeddings appear under Advanced. |
+| Obrolan | Main Chat provider/model assignment. Quick reaction, reflection, conversation router and planner assignments appear under **Lanjutan**. |
+| Suara & Pendengaran | TTS provider, model, voice and format; STT provider, model and language. Detailed voice tuning appears under **Lanjutan**. |
+| Penglihatan | Vision provider/model assignment and advanced visionFilter assignment. |
 | Foto / PAP | Persistent image-provider selection, connection checks, Cloudflare credentials, and reviewed local setup with licenses, progress, and cancellation. |
-| Memori | Local embedding readiness and device selection, CLI setup instructions, original dialogue and quoted facts, corrections, manual/legacy records, search, deletion impact, failed-job retry, and index rebuild. Dialogue is never saved in browser storage. |
+| Memori | Local embedding readiness and device selection, original dialogue and quoted facts, corrections, manual/legacy records, search, deletion impact, failed-job retry, and index rebuild. CLI setup instructions, memory writer and memory embedding assignments appear under **Lanjutan**. Dialogue is never saved in browser storage. |
+| Penyedia | Provider list, add/edit/delete form, presets, write-only credentials and capability flags. Saving a profile does not assign it to a feature. |
+| Bahasa | Indonesian or English. The saved choice takes precedence over browser language detection. |
 | Status | Per-slot availability with an icon and text, storage backend/version and transport/storage warnings. |
-| Privacy | Current origin-only destinations for microphone audio, chat/memory text, router messages and visual descriptions, camera/screen frames and spoken text; local image-provider disclosure and links back to existing feature controls. |
-| Diagnostics | Backend name, safe file-location labels, writability, permission notes, locks, backup count and a dummy-key self-test. |
-| Language | Indonesian or English. The saved choice takes precedence over browser language detection. |
+| Privasi | Current origin-only destinations for microphone audio, chat/memory text, router messages and visual descriptions, camera/screen frames and spoken text; local image-provider disclosure and links back to existing feature controls. |
+| Diagnostik | Backend name, safe file-location labels, writability, permission notes, locks, backup count and a dummy-key self-test. |
+
+Each form has an explicit **Simpan** action and **Batalkan perubahan**. Editing a
+field or a configuration switch does not save it. Saving a form retains edits in
+other forms, and status polling does not discard configuration or manual-memory
+drafts. Cancelling restores that form's saved settings. Navigation, refresh and
+setup transitions warn before discarding unsaved edits. Form drafts and secrets
+are never persisted in browser storage.
 
 The existing desktop tray contains **Mute Mikrofon**, **Screen Vision** and
 **Pap feature** controls. The companion also has **Share Screen**. Privacy links
@@ -32,12 +49,16 @@ The wizard starts when no slot is assigned or Chat is unassigned. Its order is:
 3. Voice: configure TTS voice ID/format or skip for text-only replies.
 4. Hearing: configure STT, initially Indonesian, or skip and type messages.
 5. Vision: optionally assign an image-capable model, or skip.
-6. Images: use the same **Foto / PAP** controls as the settings tab. Choose and save
+6. Images: use the same **Foto / PAP** controls as its settings page. Choose and save
    a provider, check its connection, or review missing local components before setup.
 7. Privacy: review which configured hosts receive each kind of data.
-8. Finish: close the wizard and return to Connections or the companion.
+8. Finish: close the wizard and return to the settings workspace or the companion.
 
-Each Save writes immediately. Only the step and completion flag are kept in
+The guide shows all eight steps and highlights the current one. Each **Simpan**
+applies that form immediately; **Lanjut**, **Kembali** and **Lewati** change
+only the guide's progress. Save the required Chat assignment before advancing.
+Unsaved edits trigger the same discard warning as normal settings navigation.
+Only the step and completion flag are kept in
 localStorage; provider form values and secrets are not. Reload resumes progress.
 The wizard can be restarted from Settings. An unassigned Chat requires setup
 again on the next load. The Electron settings partition is temporary, so wizard
@@ -57,13 +78,17 @@ permitted last-four suffix are displayed. A credential-bearing profile changing
 origin requires a replacement key or the explicit delete-old-credentials option
 and confirmation. Deleting a provider confirms that its slots will be unassigned.
 
-Each slot has a provider dropdown, manually editable model, temperature and token
-limit. STT adds language; TTS adds voice ID and format. Advanced includes request
-timeouts and a validated JSON editor for bodyExtras/omitParams. Credential-like
-entries trigger a warning and clear on submission; the backend separates private
-values. Quick reaction (`surface`), conversation reflection (`reflection`), planner
+Each slot has a provider dropdown and manually editable model. STT adds language;
+TTS adds voice ID and format. **Lanjutan** contains sampling controls, temperature,
+token limits, request timeouts and a validated JSON editor for bodyExtras/omitParams.
+Credential-like entries trigger a warning and clear on submission; the backend
+separates private values. Quick reaction (`surface`), conversation reflection (`reflection`), planner
 and visionFilter can follow LLM or use independent assignments. Surface and
-reflection follow Chat by default. A fast surface model can reduce initial
+reflection follow Chat by default. **Ikuti obrolan** is a draft-only switch:
+changing it updates the form, and **Simpan** persists either inheritance or an
+independent assignment. Inherited controls are read-only until the switch is
+turned off. The conversation router always has its own assignment.
+A fast surface model can reduce initial
 latency; using the main model for both stages may take longer.
 Unassign requires confirmation.
 
@@ -184,8 +209,9 @@ the key itself; interpolation replaces named placeholders without HTML parsing.
 
 To add a third language, create its dictionary, import/register it in
 `src/bootstrap.js` and `src/settings/page.js`, extend detection/choices and the
-language allowlist in `server/settings/schema.js`, and extend parity/reference
-tests in `server/tests/settingsGui.test.js` plus schema/API coverage. A dictionary
+language allowlist in `server/settings/schema.js`, and extend translated interaction
+tests in `server/tests/settingsGui.test.js` plus schema/API coverage. Manually compare
+dictionary keys and check translated labels and fallback behavior. A dictionary
 alone does not expand the backend's accepted language values.
 
 ## Adding a preset
@@ -193,7 +219,8 @@ alone does not expand the backend's accepted language values.
 Add a unique ID, translated labelKey, supported adapter and baseUrl to
 `src/settings/presets.json`. Keep Custom available, put labels in both dictionaries
 and validate the URL through the existing validator. Never include a key, model
-selection or credential-bearing URL in a preset. Extend preset tests.
+selection or credential-bearing URL in a preset. Verify its labels, URL validation,
+and provider selection in the settings page.
 
 These bundled example endpoints are **not release-verified**. The maintainer must
 check each against its official documentation before release and record the date:

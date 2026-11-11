@@ -43,7 +43,7 @@ export function imageBytes(value) {
 
 // This controller owns its polling lifetime and never keeps a token in draft state.
 export function mountImageSettings(parent, { document, api, t, onVersion = () => {}, fail = () => {},
-  setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
+  onDirtyChange = () => {}, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
   const el = (tag, text, attributes) => node(document, tag, text, attributes);
   let disposed = false;
   let busy = false;
@@ -57,15 +57,42 @@ export function mountImageSettings(parent, { document, api, t, onVersion = () =>
   let progressNode;
   let testNode;
   let keyInput;
-  const box = el('section', undefined, { class: 'settings-card', 'data-pap-settings': '' }); parent.append(box);
+  let fields = [];
+  let savedDraft;
+  let dirty = false;
+  let cancelChanges;
+  const box = el('section', undefined, { class: 'settings-image-section', 'data-pap-settings': '' }); parent.append(box);
   box.append(el('p', t('app.loading')));
   const formatBytes = value => imageBytes(value) ?? t('images.unknownSize');
   const active = () => ACTIVE_STATES.has(job?.state);
+  const isDirty = () => Boolean(draft && JSON.stringify(draft) !== JSON.stringify(savedDraft) || keyInput?.value);
+  const updateDirty = () => {
+    const next = isDirty();
+    if (cancelChanges) cancelChanges.disabled = !next;
+    if (next !== dirty) { dirty = next; onDirtyChange(next); }
+  };
+  const draftFromSnapshot = () => {
+    const images = snapshot?.images || {};
+    return { provider: images.provider || snapshot?.provider || 'auto', preset: images.preset || 'cepat',
+      comfyuiUrl: images.comfyuiUrl || 'http://127.0.0.1:8188', variant: images.variant || 'auto',
+      cloud: { accountId: images.cloud?.accountId || '', model: CLOUD_IMAGE_MODEL } };
+  };
+  function discardChanges() {
+    if (disposed || busy || !snapshot) return;
+    if (keyInput) keyInput.value = '';
+    draft = draftFromSnapshot(); savedDraft = structuredClone(draft); plan = undefined;
+    render(); updateDirty();
+  }
   const action = async operation => {
     if (busy || disposed) return;
     busy = true; box.setAttribute('aria-busy', 'true');
+    const disabled = fields.map(input => [input, input.disabled]);
+    for (const [input] of disabled) input.disabled = true;
     try { await operation(); } catch (error) { if (!disposed) fail(error); }
-    finally { busy = false; box.removeAttribute('aria-busy'); }
+    finally {
+      for (const [input, previous] of disabled) input.disabled = previous;
+      busy = false; box.removeAttribute('aria-busy'); if (!disposed) updateDirty();
+    }
   };
   const button = (target, label, operation) => {
     const item = el('button', t(label), { type: 'button' }); target.append(item);
@@ -77,6 +104,8 @@ export function mountImageSettings(parent, { document, api, t, onVersion = () =>
     label.setAttribute('for', input.id);
     if (options) for (const [name, labelText] of options) input.append(el('option', labelText, { value: name }));
     else input.type = type;
+    if (type === 'password') for (const event of ['input', 'change']) input.addEventListener(event, updateDirty);
+    fields.push(input);
     input.value = value ?? ''; label.append(input); target.append(label); return input;
   };
   const externalLink = (target, label, href) => {
@@ -169,10 +198,12 @@ export function mountImageSettings(parent, { document, api, t, onVersion = () =>
   }
   function render() {
     if (disposed) return;
-    keyInput && (keyInput.value = '');
+    if (keyInput) keyInput.value = '';
+    keyInput = undefined;
+    fields = [];
     box.replaceChildren(el('h2', t('tab.images')), el('p', t('images.intro')));
     statusNode = el('div', undefined, { role: 'status', 'aria-live': 'polite' }); box.append(statusNode);
-    const form = el('form', undefined, { autocomplete: 'off' }); box.append(form);
+    const form = el('form', undefined, { autocomplete: 'off', class: 'settings-card', 'data-image-config': '' }); box.append(form);
     const provider = field(form, 'images.provider', draft.provider, { options: [
       ...(draft.provider === 'auto' ? [['auto', t('images.legacyAuto')]] : []),
       ...Object.entries(IMAGE_PROVIDER_LABELS).map(([name, label]) => [name, t(label)]),
@@ -180,37 +211,45 @@ export function mountImageSettings(parent, { document, api, t, onVersion = () =>
     if (draft.provider === 'auto') {
       provider.children[0].disabled = true; form.append(el('p', t('images.legacyHelp')));
     }
-    provider.addEventListener('change', () => { draft.provider = provider.value; plan = undefined; render(); });
+    provider.addEventListener('change', () => { draft.provider = provider.value; plan = undefined; render(); updateDirty(); });
     const preset = field(form, 'images.preset', draft.preset, { options: [['cepat', t('images.fast')], ['kualitas', t('images.quality')], ['hemat', t('images.economy')]] });
-    preset.disabled = draft.provider === 'cloud'; preset.addEventListener('change', () => { draft.preset = preset.value; });
+    preset.disabled = draft.provider === 'cloud';
+    for (const event of ['input', 'change']) preset.addEventListener(event, () => { draft.preset = preset.value; updateDirty(); });
     if (draft.provider === 'comfyui') {
       const url = field(form, 'images.url', draft.comfyuiUrl, { required: '', maxlength: 2048 });
-      url.addEventListener('input', () => { draft.comfyuiUrl = url.value; });
+      for (const event of ['input', 'change']) url.addEventListener(event, () => { draft.comfyuiUrl = url.value; updateDirty(); });
       form.append(el('p', t('images.externalHelp')));
     } else if (draft.provider === 'comfyui-managed') form.append(el('p', t('images.managedHelp')));
     else if (draft.provider === 'sdcpp') {
       const variant = field(form, 'images.variant', draft.variant, { options: [['auto', t('images.detect')], ['cuda12', 'CUDA12'], ['vulkan', 'Vulkan']] });
-      variant.addEventListener('change', () => { draft.variant = variant.value; plan = undefined; render(); });
+      variant.addEventListener('change', () => { draft.variant = variant.value; plan = undefined; render(); updateDirty(); });
       form.append(el('p', t('images.sdcppHelp')));
     } else if (draft.provider === 'cloud') {
       const account = field(form, 'images.accountId', draft.cloud.accountId, { required: '', maxlength: 32, pattern: '[a-fA-F0-9]{32}', autocomplete: 'off', spellcheck: 'false' });
-      account.addEventListener('input', () => { draft.cloud.accountId = account.value; });
+      for (const event of ['input', 'change']) account.addEventListener(event, () => { draft.cloud.accountId = account.value; updateDirty(); });
       keyInput = field(form, 'images.token', '', { type: 'password', maxlength: 8192, autocomplete: 'off', spellcheck: 'false' });
       form.append(el('p', t(snapshot.hasKey ? 'images.tokenPresent' : 'images.tokenAbsent')), el('p', t('images.cloudHelp')),
         el('p', t('images.cloudFixed')), el('p', t('images.cloudUpload')));
       externalLink(form, t('images.pricing'), 'https://developers.cloudflare.com/workers-ai/platform/pricing/');
       if (snapshot.hasKey) button(form, 'images.deleteToken', async () => {
-        await api.write('/images/secret', { version: snapshot.version }, 'DELETE'); await readSnapshot(); render();
+        await api.write('/images/secret', { version: snapshot.version }, 'DELETE'); await readSnapshot(); render(); updateDirty();
       });
     }
     const save = el('button', t('images.save'), { type: 'submit' }); form.append(save); save.disabled = draft.provider === 'auto';
+    cancelChanges = el('button', t('action.cancelChanges'), { type: 'button' }); form.append(cancelChanges);
+    cancelChanges.addEventListener('click', discardChanges);
+    cancelChanges.disabled = !isDirty();
     form.addEventListener('submit', event => {
       event.preventDefault();
       action(() => withSecret(keyInput || { value: '' }, async key => {
         const images = imageSettingsInput(draft);
         const result = await api.write('/images', { version: snapshot.version, images });
+        snapshot.version = result.version;
         if (key && images.provider === 'cloud') await api.write('/images/secret', { version: result.version, key }, 'PUT');
-        await readSnapshot(); render(); schedule();
+        await readSnapshot();
+        if (disposed) return;
+        draft = draftFromSnapshot(); savedDraft = structuredClone(draft);
+        render(); updateDirty(); schedule();
       }));
     });
     testNode = el('div', undefined, { role: 'status', 'aria-live': 'polite' }); box.append(testNode);
@@ -237,12 +276,11 @@ export function mountImageSettings(parent, { document, api, t, onVersion = () =>
     try {
       await readSnapshot();
       if (disposed) return;
-      const images = snapshot.images || {};
-      draft = { provider: images.provider || snapshot.provider || 'auto', preset: images.preset || 'cepat',
-        comfyuiUrl: images.comfyuiUrl || 'http://127.0.0.1:8188', variant: images.variant || 'auto',
-        cloud: { accountId: images.cloud?.accountId || '', model: CLOUD_IMAGE_MODEL } };
+      draft = draftFromSnapshot(); savedDraft = structuredClone(draft);
       render(); schedule();
     } catch (error) { if (!disposed) { box.replaceChildren(el('p', t('status.unavailable'))); fail(error); } }
   })();
-  return { ready, dispose() { disposed = true; if (timer) clearTimer(timer); if (keyInput) keyInput.value = ''; } };
+  return { ready, isDirty, discardChanges, get savedProvider() { return snapshot?.images?.provider || snapshot?.provider; }, dispose() {
+    disposed = true; if (timer) clearTimer(timer); if (keyInput) keyInput.value = '';
+  } };
 }
