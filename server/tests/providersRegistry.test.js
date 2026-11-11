@@ -7,7 +7,7 @@ import { loadProvidersConfig, DEFAULT_CONFIG, validateConfig } from '../provider
 import { ProviderRegistry, UNAVAILABLE_MESSAGES } from '../providers/registry.js';
 import { generateReplyStream } from '../llmChat.js';
 import { transcribeAudio } from '../sttTranscribe.js';
-import { generateSpeech, withFishEmotion } from '../ttsGenerate.js';
+import { generateSpeech, isSpeechConfigured, withFishEmotion } from '../ttsGenerate.js';
 import { getVoiceId } from '../voiceConfig.js';
 import { describeFrame } from '../visionCapture.js';
 import { StreamingVisionManager } from '../streamingVisionManager.js';
@@ -66,10 +66,10 @@ test('public templates default router and local embeddings without assigning con
   const config = loadProvidersConfig({ repoRoot, env: {
     EXPLABS_BASE_URL: 'https://example.invalid/v1', EXPLABS_MODEL: 'fixture-model',
     GROQ_BASE_URL: 'https://example.invalid', EXPLABS_API_KEY: SECRET,
-    GROQ_API_KEY: SECRET, NINEINFERENCE_API_KEY: SECRET, FISH_API_KEY: SECRET,
+    GROQ_API_KEY: SECRET, NINEINFERENCE_API_KEY: SECRET, FISH_API_KEY: SECRET, ELEVENLABS_API_KEY: SECRET,
   } });
   assert.deepEqual(config, DEFAULT_CONFIG);
-  assert.deepEqual(Object.keys(config.profiles).sort(), ['anthropic-native', 'fish-audio', 'groq', 'localBge', 'openai-compatible']);
+  assert.deepEqual(Object.keys(config.profiles).sort(), ['anthropic-native', 'elevenlabs', 'fish-audio', 'groq', 'localBge', 'openai-compatible']);
   for (const [id, profile] of Object.entries(config.profiles)) {
     if (id === 'groq') {
       assert.equal(profile.baseUrl, 'https://api.groq.com/openai/v1');
@@ -79,6 +79,12 @@ test('public templates default router and local embeddings without assigning con
     if (id === 'localBge') {
       assert.equal(profile.baseUrl, 'http://127.0.0.1:8011');
       assert.equal(profile.apiKeyEnv, undefined);
+      continue;
+    }
+    if (id === 'elevenlabs') {
+      assert.equal(profile.adapter, 'elevenLabs');
+      assert.equal(profile.baseUrl, 'https://api.elevenlabs.io/v1');
+      assert.equal(profile.apiKeyEnv, 'ELEVENLABS_API_KEY');
       continue;
     }
     assert.match(profile.baseUrl, /^REPLACE_WITH_/);
@@ -256,6 +262,21 @@ test('Fish adapter uses the dynamic voice configuration when no override is requ
   assert.equal(state.frames[1].text, '[calm] [warm] Halo');
 });
 
+for (const voice of ['', '   ']) {
+  test('saved Drama 3 slot with a blank voice remains ready and streams the configured Fish voice: ' + JSON.stringify(voice), async t => {
+    const { profile, state } = await fixture(t, ADAPTER_CASES[2]);
+    const registry = new ProviderRegistry({ config: {
+      profiles: { fish: { ...profile, adapter: 'fishAudio' } },
+      slots: { tts: { profile: 'fish', model: 'drama-3', params: { voice } } },
+    }, secretResolver: { resolve: () => SECRET } });
+    assert.equal(isSpeechConfigured({ registry }), true);
+    const audio = await collect(generateSpeech('Halo sayang.', 'happy', { registry }));
+    assert.ok(audio.length > 0);
+    assert.equal(state.requests[0].headers.model, 'drama-3');
+    assert.equal(state.frames[0].request.reference_id, getVoiceId());
+  });
+}
+
 test('unconfigured slots degrade gracefully without calling an adapter', async () => {
   const registry = new ProviderRegistry({ config: { profiles: {}, slots: {} } });
   const replies = await collect(generateReplyStream([], 'Halo', null, { registry }));
@@ -320,12 +341,17 @@ test('testSlot runs all slot probes against local fixtures and keeps overrides e
     assert.ok(result.latencyMs >= 0);
     if (slot !== 'stt') assert.ok(result.ttftMs >= 0);
     assert.equal(JSON.stringify(result).includes(SECRET), false);
+    if (slot === 'vision') {
+      const request = JSON.parse(httpFixture.state.requests.at(-1).body);
+      const imageUrl = request.messages[0].content.find(part => part.type === 'image_url').image_url.url;
+      const image = Buffer.from(imageUrl.split(',')[1], 'base64');
+      assert.ok(image.readUInt32BE(16) >= 32, 'Vision probes must meet the provider minimum width');
+      assert.ok(image.readUInt32BE(20) >= 32, 'Vision probes must meet the provider minimum height');
+    }
   }
   const override = await testSlot('llm', { registry, profile: 'local', model: 'override' });
   assert.equal(override.details.model, 'override');
   assert.equal(registry.getSlotStatus('llm').model, 'fixture');
-  assert.equal(tinyPng().readUInt32BE(16), 8);
-  assert.equal(tinyPng().readUInt32BE(20), 8);
   assert.equal(shortWav().subarray(0, 4).toString(), 'RIFF');
 });
 

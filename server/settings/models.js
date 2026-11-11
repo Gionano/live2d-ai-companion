@@ -2,6 +2,7 @@ import { providerFetch } from '../providers/resilience.js';
 import { validateBaseUrl, validateProviderHeaders } from '../providers/baseUrl.js';
 import { normalizeProviderError, httpProviderError } from '../providers/errors.js';
 import { looksLikeLocalPath, looksLikeSecret } from './schema.js';
+import { ELEVENLABS_MODELS } from '../elevenLabsTts.js';
 
 export async function listModels(service, { profile: id, apiKey, signal, fetchImpl = fetch }) {
   try {
@@ -13,12 +14,14 @@ export async function listModels(service, { profile: id, apiKey, signal, fetchIm
     const base = validateBaseUrl(profile.baseUrl);
     const credentials = service.resolver().profileSecrets(id, profile);
     const key = apiKey || credentials.apiKey;
+    if (profile.adapter === 'elevenLabs' && !key) return { models: [], reason: 'AUTH' };
     const headers = { ...credentials.headers, ...(key && (profile.adapter === 'anthropicNative'
       ? { 'x-api-key': key, 'anthropic-version': profile.anthropicVersion || '2023-06-01' }
-      : { Authorization: 'Bearer ' + key })) };
+      : profile.adapter === 'elevenLabs' ? { 'xi-api-key': key } : { Authorization: 'Bearer ' + key })) };
     validateProviderHeaders(headers);
     const response = await providerFetch(base.url.replace(/\/$/, '') + '/models', { method: 'GET', headers, signal }, { baseUrl: base.url, fetchImpl });
     if (!response.ok) { await response.body?.cancel(); throw httpProviderError(response); }
+    if (!response.body?.getReader) return { models: [], reason: 'BAD_RESPONSE' };
     const reader = response.body.getReader();
     const chunks = [];
     let size = 0;
@@ -32,9 +35,13 @@ export async function listModels(service, { profile: id, apiKey, signal, fetchIm
       }
     } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    if (!Array.isArray(body.data)) return { models: [], reason: 'BAD_RESPONSE' };
+    const entries = profile.adapter === 'elevenLabs' ? body : body?.data;
+    if (!Array.isArray(entries)) return { models: [], reason: 'BAD_RESPONSE' };
     const hidden = [key, ...Object.values(credentials.headers || {})].filter(Boolean);
-    const models = [...new Set(body.data.slice(0, 1000).map(item => item?.id).filter(name => typeof name === 'string'
+    const models = [...new Set(entries.slice(0, 1000)
+      .filter(item => profile.adapter !== 'elevenLabs' || item?.can_do_text_to_speech === true)
+      .map(item => profile.adapter === 'elevenLabs' ? item?.model_id : item?.id).filter(name => typeof name === 'string'
+      && (profile.adapter !== 'elevenLabs' || ELEVENLABS_MODELS.includes(name))
       && name.length > 0 && name.length <= 128 && /^[\p{L}\p{N}_.:/@ -]+$/u.test(name)
       && !looksLikeSecret(name) && !looksLikeLocalPath(name) && !hidden.some(secret => name.includes(secret))
       && !service.secrets.containsSecret(name)))].slice(0, 200);

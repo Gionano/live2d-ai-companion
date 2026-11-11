@@ -14,7 +14,8 @@
  * @typedef {{text: string, segments?: SttSegment[], durationMs?: number}} SttResult
  * @typedef {{capabilities: Capabilities, transcribe: (request: {audio: Buffer, mime: string, filename: string, language?: string, signal?: AbortSignal}) => Promise<SttResult>}} SttProvider
  * @typedef {{type: 'audio', data: Buffer, format: string}} TtsEvent
- * @typedef {{capabilities: Capabilities, stream: (request: {text: string, emotion?: string, speechEmotion?: string, voice?: string, format?: string, temperature?: number, topP?: number, latency?: string, prosody?: {speed?: number, volume?: number}, sentenceIndex?: number, tag?: string, signal?: AbortSignal}) => AsyncIterable<TtsEvent>}} TtsProvider
+ * @typedef {{stability?: number, similarityBoost?: number, speed?: number, emotionTags?: boolean}} ElevenLabsVoiceParams
+ * @typedef {{capabilities: Capabilities, stream: (request: {text: string, emotion?: string, speechEmotion?: string, voice?: string, format?: string, temperature?: number, topP?: number, latency?: string, prosody?: {speed?: number, volume?: number}, elevenLabs?: ElevenLabsVoiceParams, sentenceIndex?: number, tag?: string, signal?: AbortSignal}) => AsyncIterable<TtsEvent>}} TtsProvider
  * @typedef {{resolve: (apiKeyEnv: string) => string|undefined|Promise<string|undefined>}} SecretResolver
  * @typedef {{texts: string[], taskType?: 'query'|'document', signal?: AbortSignal, timeouts?: Timeouts}} EmbeddingRequest
  * @typedef {{model: string, dimensions: number, vectors: number[][]}} EmbeddingResult

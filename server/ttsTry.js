@@ -7,10 +7,12 @@ import { getProviderRegistry } from './providers/registry.js';
 
 const VALUE_FLAGS = ['--text', '--emotion', '--tag', '--temperature', '--latency', '--top-p', '--speed', '--voice', '--out'];
 const FORMATS = new Set(['mp3', 'wav', 'pcm', 'ogg', 'opus', 'flac']);
-export const TTS_TRY_USAGE = 'npm run tts:try -- --text "Halo, sayang!" [--emotion E] [--tag "[excited]"] [--temperature X] [--latency normal|balanced|low] [--top-p X] [--speed X] [--voice ID] [--variants] [--out DIR]';
+export const TTS_TRY_USAGE = 'npm run tts:try -- --text "Halo, sayang!" [--emotion E] [--speed X] [--voice ID] [--variants] [--out DIR]\nFish Audio only: [--tag "[excited]"] [--temperature X] [--latency normal|balanced|low] [--top-p X]\nElevenLabs: --speed accepts 0.7–1.2 for Flash/Turbo/Multilingual; v3 uses the configured stability. Variants use two requests, or three for v3.';
 
-function invalidOptions() {
-  throw new Error('Invalid TTS options. See --help.');
+class TtsOptionsError extends Error {}
+
+function invalidOptions(message = 'Invalid TTS options. See --help.') {
+  throw new TtsOptionsError(message);
 }
 
 export function parseArgs(args) {
@@ -52,7 +54,26 @@ function expressivePunctuation(text) {
   return trimmed.replace(/[.\u2026]+$/, '') + '!';
 }
 
-export function makeVariants(options) {
+export function makeVariants(options, { adapter, model } = {}) {
+  if (adapter === 'elevenLabs') {
+    if (['tag', 'temperature', 'topP', 'latency'].some(key => options[key] !== undefined)) {
+      invalidOptions('ElevenLabs does not accept --tag, --temperature, --top-p or --latency. Configure emotion tags in Settings.');
+    }
+    if (options.speed !== undefined) {
+      if (model === 'eleven_v3') invalidOptions('ElevenLabs v3 does not accept --speed. Configure its stability in Settings.');
+      if (!Number.isFinite(options.speed) || options.speed < 0.7 || options.speed > 1.2) invalidOptions('ElevenLabs --speed must be between 0.7 and 1.2.');
+    }
+    const request = { text: options.text, emotion: options.emotion ?? 'netral',
+      ...(options.voice !== undefined && { voice: options.voice }),
+      ...(options.speed !== undefined && { elevenLabs: { speed: options.speed } }) };
+    if (!options.variants) return [{ name: 'tts', request }];
+    return [
+      { name: 'plain', request: { ...request, elevenLabs: { ...request.elevenLabs, emotionTags: false } } },
+      ...(model === 'eleven_v3' ? [{ name: 'emotion', request: { ...request,
+        elevenLabs: { ...request.elevenLabs, emotionTags: true } } }] : []),
+      { name: 'punctuation', request: { ...request, text: expressivePunctuation(request.text) } },
+    ];
+  }
   const request = { text: options.text, emotion: options.emotion ?? 'netral' };
   for (const key of ['tag', 'temperature', 'topP', 'latency', 'voice']) {
     if (options[key] !== undefined) request[key] = options[key];
@@ -73,14 +94,20 @@ export function makeVariants(options) {
 export async function runCli(args, { registry, print = console.log, signal, now = () => performance.now(), tempDir = os.tmpdir() } = {}) {
   const options = parseArgs(args);
   if (options.help) { print(TTS_TRY_USAGE); return []; }
-  const active = registry ?? getProviderRegistry();
-  if (!active.getSlotStatus('tts').available) throw new Error('Configure an available TTS slot before running tts:try.');
+  const configured = registry ?? getProviderRegistry();
+  const active = options.voice !== undefined && configured.withSlotOverride
+    ? configured.withSlotOverride('tts', { voice: options.voice }) : configured;
+  const status = active.getSlotStatus('tts');
+  if (!status.available) throw new Error('Configure an available TTS slot before running tts:try.');
   const adapter = active.getTts();
   if (!adapter) throw new Error('Configure an available TTS slot before running tts:try.');
+  const variants = makeVariants(options, { adapter: status.adapter ?? adapter.profile?.adapter,
+    model: status.model ?? adapter.model });
+  signal?.throwIfAborted();
   const outputDir = options.out ? path.resolve(options.out) : await fs.mkdtemp(path.join(tempDir, 'waifu-tts-'));
   await fs.mkdir(outputDir, { recursive: true });
   const results = [];
-  for (const variant of makeVariants(options)) {
+  for (const variant of variants) {
     signal?.throwIfAborted();
     const startedAt = now();
     let firstChunkMs;
@@ -124,8 +151,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     parseArgs(args);
     if (!args.includes('--help')) await import('dotenv/config');
     await runCli(args, { signal: controller.signal });
-  } catch {
-    console.error('TTS trial could not finish. Check --help and your configured TTS slot.');
+  } catch (error) {
+    console.error(error instanceof TtsOptionsError ? error.message : 'TTS trial could not finish. Check --help and your configured TTS slot.');
     process.exitCode = 1;
   }
 }

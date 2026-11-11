@@ -16,15 +16,16 @@ function pngChunk(type, data) {
   return chunk;
 }
 
-// A built-in 8x8 RGB PNG, containing no user image data.
+// A built-in 64x64 RGB PNG, meeting providers' minimum image size without user data.
 export function tinyPng() {
+  const size = 64;
   const header = Buffer.alloc(13);
-  header.writeUInt32BE(8, 0);
-  header.writeUInt32BE(8, 4);
+  header.writeUInt32BE(size, 0);
+  header.writeUInt32BE(size, 4);
   header[8] = 8;
   header[9] = 2;
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-    pngChunk('IHDR', header), pngChunk('IDAT', deflateSync(Buffer.alloc(8 * 25))), pngChunk('IEND', Buffer.alloc(0))]);
+    pngChunk('IHDR', header), pngChunk('IDAT', deflateSync(Buffer.alloc(size * (size * 3 + 1)))), pngChunk('IEND', Buffer.alloc(0))]);
 }
 
 export function shortWav() {

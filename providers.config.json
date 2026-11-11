@@ -29,6 +29,11 @@
       "baseUrl": "REPLACE_WITH_WSS_BASE_URL",
       "model": "REPLACE_WITH_MODEL",
       "apiKeyEnv": "FISH_API_KEY"
+    },
+    "elevenlabs": {
+      "adapter": "elevenLabs",
+      "baseUrl": "https://api.elevenlabs.io/v1",
+      "apiKeyEnv": "ELEVENLABS_API_KEY"
     }
   },
   "slots": {

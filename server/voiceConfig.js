@@ -10,6 +10,12 @@ export function getVoiceId() {
   return getServerTuning('models', 'voiceId', DEFAULT_VOICE_ID);
 }
 
+// A blank Settings field selects the existing Fish voice, just like an omitted ID.
+export function resolveFishVoiceId(voice) {
+  const value = typeof voice === 'string' ? voice.trim() : voice;
+  return value === undefined || value === null || value === '' ? getVoiceId() : value;
+}
+
 // Backward compatible export (reads dynamically)
 export const WAIFU_VOICE_REFERENCE_ID = DEFAULT_VOICE_ID;
 

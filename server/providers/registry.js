@@ -2,11 +2,12 @@ import { loadProvidersConfig, resolveSlot, effectiveProfile, slotProblem } from 
 import { OpenAiCompatible } from './adapters/openaiCompatible.js';
 import { AnthropicNative } from './adapters/anthropicNative.js';
 import { FishAudio } from './adapters/fishAudio.js';
+import { ElevenLabs } from './adapters/elevenLabs.js';
 import { LocalEmbedding } from './adapters/localEmbedding.js';
 import { validateBaseUrl } from './baseUrl.js';
 import { getSettingsService } from '../settings/service.js';
 
-export const ADAPTERS = { openaiCompatible: OpenAiCompatible, anthropicNative: AnthropicNative, fishAudio: FishAudio, localEmbedding: LocalEmbedding };
+export const ADAPTERS = { openaiCompatible: OpenAiCompatible, anthropicNative: AnthropicNative, fishAudio: FishAudio, elevenLabs: ElevenLabs, localEmbedding: LocalEmbedding };
 export const envSecretResolver = { resolve: name => process.env[name] };
 
 export class ProviderRegistry {
@@ -52,14 +53,20 @@ export class ProviderRegistry {
   getStt() { return this.get('stt'); }
   getTts() { return this.get('tts'); }
 
-  withSlotOverride(slot, { profile, model } = {}) {
+  withSlotOverride(slot, { profile, model, voice } = {}) {
     const settings = resolveSlot(this.config, slot) ?? {};
     const params = profile && profile !== settings.profile
       ? { ...settings.params, bodyExtras: null, omitParams: null } : settings.params;
+    const sourceAdapter = effectiveProfile(this.config, settings)?.adapter;
+    const targetAdapter = this.config.profiles?.[profile]?.adapter;
+    const voiceParams = slot === 'tts' && (voice !== undefined || profile && targetAdapter !== sourceAdapter)
+      ? { ...params } : params;
+    if (slot === 'tts' && profile && targetAdapter !== sourceAdapter) delete voiceParams.voice;
+    if (slot === 'tts' && voice !== undefined) voiceParams.voice = voice;
     const config = structuredClone(this.config);
     config.slots ||= {};
     config.slots[slot] = {
-      ...settings, params, ...(profile && { profile }), ...(model && { model }),
+      ...settings, params: voiceParams, ...(profile && { profile }), ...(model && { model }),
     };
     return new ProviderRegistry({ config, secretResolver: this.secretResolver, adapterOptions: this.adapterOptions });
   }

@@ -52,8 +52,12 @@ export function validateBaseUrl(value, { websocket = false } = {}) {
 
 export function validateRequestUrl(baseUrl, requestUrl, options) {
   const base = validateBaseUrl(baseUrl, options);
-  const request = validateBaseUrl(requestUrl, options);
+  // Request queries carry API options; the configured base still forbids them.
+  if (typeof requestUrl !== 'string' || /[\s\\#]/.test(requestUrl)) throw new TypeError(INVALID_URL);
+  const queryIndex = requestUrl.indexOf('?');
+  const request = validateBaseUrl(queryIndex < 0 ? requestUrl : requestUrl.slice(0, queryIndex), options);
   if (base.origin !== request.origin) throw new TypeError('Provider request must remain on the configured baseUrl origin.');
+  if (queryIndex >= 0) request.url += requestUrl.slice(queryIndex);
   return request;
 }
 

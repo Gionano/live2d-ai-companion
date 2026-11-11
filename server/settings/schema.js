@@ -5,7 +5,7 @@ import { FOLLOW_LLM_SLOTS } from '../providers/config.js';
 
 export const SETTINGS_LIMIT = 64 * 1024;
 export const SLOT_NAMES = ['llm', 'surface', 'reflection', 'router', 'planner', 'vision', 'visionFilter', 'stt', 'tts', 'memoryWriter', 'memoryEmbedding'];
-export const ADAPTER_NAMES = ['openaiCompatible', 'anthropicNative', 'fishAudio', 'localEmbedding'];
+export const ADAPTER_NAMES = ['openaiCompatible', 'anthropicNative', 'fishAudio', 'elevenLabs', 'localEmbedding'];
 export const PROFILE_FIELDS = ['id', 'adapter', 'baseUrl', 'apiKeyEnv', 'flags', 'headerNames',
   'bodyExtras', 'omitParams', 'capabilities', 'anthropicVersion', 'defaultMaxTokens', 'models'];
 export const MODEL_FIELDS = ['flags', 'capabilities', 'bodyExtras', 'omitParams', 'anthropicVersion', 'defaultMaxTokens'];
@@ -13,7 +13,7 @@ export const FLAGS = ['supportsImages', 'supportsStt', 'supportsVerboseStt', 'su
 export const CAPABILITIES = ['llm', 'images', 'jsonMode', 'stt', 'tts', 'embeddings'];
 export const DEFAULT_MEMORY_SETTINGS = Object.freeze({ managedEmbedding: true, embeddingDevice: 'auto' });
 export const PARAMS = ['temperature', 'maxTokens', 'json', 'language', 'prompt', 'voice', 'format', 'bodyExtras', 'omitParams',
-  'topP', 'latency', 'prosody', 'expression', 'inlineTags', 'speechStyle', 'debug'];
+  'topP', 'latency', 'prosody', 'expression', 'inlineTags', 'speechStyle', 'debug', 'elevenLabs'];
 const TTS_EMOTIONS = [...new Set(['terkejut', 'marah', 'bingung', 'jengkel', 'malu', 'kesal', 'sedih', 'kagum',
   'sayang', 'jahil', 'penasaran', 'netral', 'senang', 'shy', 'neutral', ...FISH_EMOTION_NAMES])];
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype', 'safety', 'moderation', 'selfiemoderation',
@@ -97,6 +97,13 @@ function integer(value, min, max) {
 }
 
 export function validateTtsParams(params) {
+  if (params.elevenLabs !== undefined) {
+    const voice = object(params.elevenLabs, ['stability', 'similarityBoost', 'speed', 'emotionTags']);
+    if (voice.stability !== undefined) number(voice.stability, 0, 1);
+    if (voice.similarityBoost !== undefined) number(voice.similarityBoost, 0, 1);
+    if (voice.speed !== undefined) number(voice.speed, 0.7, 1.2);
+    if (voice.emotionTags !== undefined && typeof voice.emotionTags !== 'boolean') invalid();
+  }
   if (params.topP !== undefined) { number(params.topP, 0, 1); if (params.topP === 0) invalid(); }
   if (params.format !== undefined && !['mp3', 'wav', 'pcm', 'opus'].includes(params.format)) invalid();
   if (params.latency !== undefined && !['normal', 'balanced', 'low'].includes(params.latency)) invalid();
@@ -218,6 +225,8 @@ export function validateSlot(value, { allowSecrets = false } = {}) {
   object(params, PARAMS);
   if (params.temperature != null) number(params.temperature, 0, 2);
   validateTtsParams(params);
+  if (value.model === 'eleven_v3' && params.elevenLabs?.stability !== undefined
+    && ![0, 0.5, 1].includes(params.elevenLabs.stability)) invalid();
   if (params.maxTokens != null) number(params.maxTokens, 1, 1000000);
   if (params.json !== undefined && typeof params.json !== 'boolean') invalid();
   for (const key of ['language', 'prompt', 'voice', 'format']) if (params[key] !== undefined) text(params[key], key === 'prompt' ? 2048 : 256);

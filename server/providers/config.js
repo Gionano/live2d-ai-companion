@@ -6,10 +6,12 @@ import { providerCapabilities } from './contracts.js';
 import { capabilities as openai } from './adapters/openaiCompatible.js';
 import { capabilities as anthropic } from './adapters/anthropicNative.js';
 import { capabilities as fish } from './adapters/fishAudio.js';
+import { capabilities as elevenLabs } from './adapters/elevenLabs.js';
+import { ELEVENLABS_MODELS, isElevenLabsVoice, resolveElevenLabsParams } from '../elevenLabsTts.js';
 import { capabilities as embedding, validateLocalEmbeddingUrl } from './adapters/localEmbedding.js';
 import { validateBaseUrl, validateProviderHeaders } from './baseUrl.js';
 
-export const ADAPTER_CAPABILITIES = { openaiCompatible: openai, anthropicNative: anthropic, fishAudio: fish, localEmbedding: embedding };
+export const ADAPTER_CAPABILITIES = { openaiCompatible: openai, anthropicNative: anthropic, fishAudio: fish, elevenLabs, localEmbedding: embedding };
 export const FOLLOW_LLM_SLOTS = ['planner', 'visionFilter', 'surface', 'reflection', 'memoryWriter'];
 export const SLOT_CAPABILITIES = { llm: 'llm', surface: 'llm', reflection: 'llm', router: 'llm', planner: 'llm', visionFilter: 'llm', memoryWriter: 'llm', memoryEmbedding: 'embeddings', vision: 'images', stt: 'stt', tts: 'tts' };
 export const DEFAULT_CONFIG = JSON.parse(fs.readFileSync(new URL('../../providers.config.json', import.meta.url), 'utf8'));
@@ -72,7 +74,7 @@ export function slotProblem(config, slot, resolver = { resolve: name => process.
   if (!settings?.profile) return 'Slot is unconfigured. Set its profile and model in providers.config.local.json.';
   const profile = effectiveProfile(config, settings);
   if (!profile) return 'Unknown profile. Add the referenced profile to providers.config.local.json.';
-  if (!Object.hasOwn(ADAPTER_CAPABILITIES, profile.adapter)) return 'Unknown adapter. Use openaiCompatible, anthropicNative, fishAudio or localEmbedding.';
+  if (!Object.hasOwn(ADAPTER_CAPABILITIES, profile.adapter)) return 'Unknown adapter. Use openaiCompatible, anthropicNative, fishAudio, elevenLabs or localEmbedding.';
   if (typeof settings.model !== 'string' || !settings.model.trim() || settings.model.startsWith('REPLACE_WITH_')) {
     return 'Missing model. Replace the template value in slots.<slot>.model.';
   }
@@ -86,11 +88,23 @@ export function slotProblem(config, slot, resolver = { resolve: name => process.
   if (!implementsOperation || !capabilities[SLOT_CAPABILITIES[slot]] || (slot === 'vision' && !capabilities.llm)) {
     return 'Adapter or model lacks the required slot capability. Choose a compatible profile or enable its supported capability flag.';
   }
+  if (profile.adapter === 'elevenLabs') {
+    if (!ELEVENLABS_MODELS.includes(settings.model)) return 'ElevenLabs supports only Flash v2.5, Turbo v2.5, Multilingual v2 and v3 in this version.';
+    if (!isElevenLabsVoice(settings.params?.voice)) return 'Missing ElevenLabs Voice ID. Paste a voice ID from your ElevenLabs account into the TTS settings.';
+    if (settings.params?.format != null && settings.params.format !== 'mp3') return 'ElevenLabs supports MP3 output only in this version.';
+    try { resolveElevenLabsParams(settings.params?.elevenLabs, {}, settings.model); }
+    catch { return 'Invalid ElevenLabs voice settings. Check stability, similarity, speed and emotion tags.'; }
+  }
   if (profile.apiKeyEnv != null) {
     if (typeof profile.apiKeyEnv !== 'string' || !/^[A-Z_][A-Z0-9_]*$/i.test(profile.apiKeyEnv)) return 'apiKeyEnv must name an environment variable.';
     try {
       const hasKey = resolver.hasKey ? resolver.hasKey(settings.profile, profile) : resolver.resolve(profile.apiKeyEnv);
       if (!hasKey) return `Missing key environment variable ${profile.apiKeyEnv}. Set it in the backend environment or settings secret store.`;
+    } catch { return 'The secret resolver could not read the configured key. Check the backend environment.'; }
+  }
+  if (profile.adapter === 'elevenLabs' && profile.apiKeyEnv == null) {
+    try {
+      if (!resolver.hasKey?.(settings.profile, profile)) return 'Missing ElevenLabs API key. Save it in the backend settings secret store or reference ELEVENLABS_API_KEY.';
     } catch { return 'The secret resolver could not read the configured key. Check the backend environment.'; }
   }
   try {

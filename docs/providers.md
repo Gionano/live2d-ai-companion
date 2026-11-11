@@ -152,7 +152,7 @@ by the selfie provider resolver.
 
 `server/providers/baseUrl.js` exports the reusable `validateBaseUrl` and
 `validateRequestUrl` helpers. HTTP adapters require an explicit HTTP(S) URL;
-Fish requires WS(S). URLs cannot contain credentials, a query, a fragment,
+Fish requires WS(S). Configured base URLs cannot contain credentials, a query, a fragment,
 whitespace, or backslashes. Validation returns a canonical URL and normalized
 origin. There is no implicit Anthropic endpoint.
 
@@ -166,6 +166,8 @@ metadata address. Validation is lexical; it does not resolve or pin DNS.
 
 Every HTTP request passes through the resilience helper's `providerFetch`, which
 validates the request against the configured origin and forces `redirect: 'error'`.
+Request URLs may include API query options, such as ElevenLabs' `output_format`,
+while retaining the same origin and transport restrictions.
 Fish explicitly disables WebSocket redirects. Both same-origin and cross-origin
 redirects fail; authentication and custom key headers are never forwarded to a
 redirect destination. Host-routing header overrides are rejected. The existing
@@ -195,6 +197,7 @@ safe provider errors omit response bodies and credentials.
 | `openaiCompatible` | yes | profile flag | profile flag | profile flag | no |
 | `anthropicNative` | yes | yes | prompt-only in P1 | no | no |
 | `fishAudio` | no | no | no | no | yes |
+| `elevenLabs` | no | no | no | no | yes |
 
 OpenAI-compatible servers differ: use `supportsJsonMode`, `supportsStreamUsage`,
 `supportsImages`, `supportsStt` and `supportsVerboseStt` flags to describe their
@@ -215,8 +218,8 @@ cumulative usage and stop/error handling were checked against the official
 ProviderError codes are AUTH, RATE_LIMIT, TIMEOUT, BAD_REQUEST, SERVER, NETWORK,
 UNSUPPORTED, ABORTED and BAD_RESPONSE. Errors retain safe status/Retry-After
 metadata and fixed messages; provider response bodies are never included.
-Only RATE_LIMIT/SERVER/NETWORK may retry, at most twice, with exponential backoff
-and jitter. Retry-After is a lower bound. Any yielded event, including usage,
+Except for ElevenLabs synthesis, RATE_LIMIT/SERVER/NETWORK may retry, at most
+twice, with exponential backoff and jitter. Retry-After is a lower bound. Any yielded event, including usage,
 disables replay. Caller abort and deadlines cancel fetch bodies or terminate the
 Fish socket; consumer early return also closes the transport.
 
@@ -224,6 +227,96 @@ Adding an adapter requires one adapter file, registration in the registry and
 capability table, and an entry in the shared contract suite. Use the shared
 resilience/error helpers and canonical events. Do not add a second vendor
 interface to business logic.
+
+## ElevenLabs voice provider
+
+ElevenLabs is an optional TTS provider. Adding its profile does not change the
+active TTS slot or assign any other slot. In local Settings, choose the
+ElevenLabs preset, save your API key, and select that profile under Voice. Paste
+a Voice ID from your ElevenLabs account; the Fish reference ID is never used as
+an ElevenLabs default. The key can also be supplied as `ELEVENLABS_API_KEY` in the
+backend `.env` when the profile references that environment name.
+
+For a file-based configuration, merge this example into ignored
+`providers.config.local.json` and replace the Voice ID:
+
+```json
+{
+  "slots": {
+    "tts": {
+      "profile": "elevenlabs",
+      "model": "eleven_flash_v2_5",
+      "params": {
+        "voice": "YOUR_ELEVENLABS_VOICE_ID",
+        "format": "mp3",
+        "elevenLabs": {
+          "stability": 0.5,
+          "similarityBoost": 0.75,
+          "speed": 1,
+          "emotionTags": true
+        }
+      },
+      "timeouts": { "firstByteMs": 20000, "idleMs": 20000, "totalMs": 60000 }
+    }
+  }
+}
+```
+
+The preset uses `https://api.elevenlabs.io/v1`. Synthesis calls
+`POST /text-to-speech/{voiceId}/stream?output_format=mp3_44100_128` with
+`xi-api-key`; nonempty MP3 chunks use the existing speech/playback boundary.
+Cancel, interruption, timeout and early return close the response reader.
+Synthesis is not retried automatically, avoiding duplicate billable requests.
+Failure preserves text replies through the existing speech controller.
+
+New ElevenLabs slot configurations default to `eleven_flash_v2_5` for fast,
+lower-cost Indonesian speech. The supported model IDs are `eleven_flash_v2_5`,
+`eleven_turbo_v2_5`, `eleven_multilingual_v2` and `eleven_v3`. The official models
+guide recommends Flash over the legacy Turbo model. Model suggestions use
+`GET /models`, include only supported TTS models, and never synthesize audio.
+v4 requires a different integration and is not supported here.
+
+Stability and similarity accept 0–1; speed accepts 0.7–1.2. Defaults are 0.5,
+0.75 and 1 respectively. Flash/Turbo/Multilingual request style 0 and speaker
+boost disabled. v3 sends only stability, with values 0 (creative), 0.5 (natural),
+or 1 (robust); its unavailable similarity/speed controls are hidden. Shared
+sentence-merging and pause settings are retained; Fish-specific controls remain
+available when Fish is selected.
+
+All models receive text with old speech tags removed. When v3 emotion tags are
+enabled, a recognized native `speechEmotion` takes precedence; otherwise avatar
+emotion supplies at most one tag per sentence. Captions never include these tags:
+
+| Avatar emotion | v3 tag |
+| --- | --- |
+| `senang`, `kagum` | `[excited]` |
+| `terkejut` | `[surprised]` |
+| `marah` | `[angry]` |
+| `bingung`, `penasaran` | `[curious]` |
+| `jengkel`, `kesal` | `[frustrated]` |
+| `sedih` | `[sad]` |
+| `sayang` | `[warmly]` |
+| `malu` | `[whispers]` |
+| `jahil` | `[mischievously]` |
+| Neutral or unknown | No tag |
+
+Flash/Turbo/Multilingual always use clean text, even with emotion tags enabled.
+The v3 tag setting defaults to enabled; the voice and model determine how
+strongly tags affect actual audio. No automatic provider fallback, voice browsing,
+voice cloning or usage dashboard is included. MP3 is the only output format.
+
+The Settings connection test and `npm run tts:try -- --text "Halo, sayang!"`
+perform real generation and consume credits. Supply `--voice YOUR_VOICE_ID`
+for a transient voice override; ElevenLabs speed overrides must be 0.7–1.2.
+`--tag`, `--temperature`, `--latency` and `--top-p` are Fish-specific options and
+are rejected for ElevenLabs. Automated tests use mocked/synthetic audio.
+Free-plan allowances and model access depend on your account; this integration
+does not grant free or unlimited synthesis.
+
+References verified on 2026-11-09:
+[streaming API](https://elevenlabs.io/docs/api-reference/text-to-speech/stream),
+[models](https://elevenlabs.io/docs/overview/models), and
+[API pricing](https://elevenlabs.io/pricing/api).
 
 ## TTS expressiveness
 

@@ -44,14 +44,14 @@ Only these fields are accepted:
 | --- | --- |
 | Profile | Optional matching `id`; required `adapter`, `baseUrl`; optional `apiKeyEnv`, `flags`, `headerNames`, `capabilities`, `bodyExtras`, `omitParams`, `anthropicVersion`, `defaultMaxTokens`, `models` |
 | Slot | `profile`, `model`, optional `params`, `timeouts`; null to unassign; or `{followLlm:true}` for planner/visionFilter/surface/reflection |
-| Params | `temperature`, `maxTokens`, `json`, `language`, `prompt`, `voice`, `format`, `bodyExtras`, `omitParams` |
+| Params | `temperature`, `maxTokens`, `json`, `language`, `prompt`, `voice`, `format`, `bodyExtras`, `omitParams`, TTS controls (`topP`, `latency`, `prosody`, `expression`, `inlineTags`, `speechStyle`, `debug`, `elevenLabs`) |
 | Timeouts | `firstByteMs`, `idleMs`, `totalMs`, each 0–300000 ms; zero disables that deadline outside API probes |
 | UI | `language`: `id` or `en` |
 
 Profile IDs contain letters, digits, underscores or hyphens and are at most
 64 characters. At most 32 profiles are stored. Slots are `llm`, `surface`,
 `reflection`, `router`, `planner`, `vision`, `visionFilter`, `stt` and `tts`. Adapters are `openaiCompatible`,
-`anthropicNative` and `fishAudio`. A slot's model is a nonempty string of at most
+`anthropicNative`, `fishAudio`, `elevenLabs` and `localEmbedding`. A slot's model is a nonempty string of at most
 256 characters; template placeholders cannot be selected.
 
 Surface provides the quick reaction; `llm` supplies the deeper continuation.
@@ -71,6 +71,18 @@ TTS `params.expression.sentencePauseMs` defaults to 200 and
 boundaries playback uses the greater pause instead of stacking them. Registers
 and Fish speech tones are selected per sentence; the GUI preserves other saved
 TTS parameters when editing timing.
+
+ElevenLabs adds `params.elevenLabs` without changing `schemaVersion: 1`:
+`stability` and `similarityBoost` are numbers from 0 to 1, `speed` is a number
+from 0.7 to 1.2, and `emotionTags` is boolean. Fields may be omitted; runtime
+defaults are `{stability: 0.5, similarityBoost: 0.75, speed: 1, emotionTags: true}`.
+v3 stability accepts only 0, 0.5 or 1. The namespace survives persistence,
+registry reload and export/import alongside shared pause/merge settings.
+ElevenLabs requires an explicit `params.voice`, a supported model and MP3 output;
+invalid or missing configuration is reported locally without an API call.
+The model-list action uses `xi-api-key` and filters the ElevenLabs array response
+to supported TTS model IDs. Voice selection uses a manually pasted ID.
+See [ElevenLabs setup and limitations](providers.md#elevenlabs-voice-provider).
 
 Flags are `supportsImages`, `supportsStt`, `supportsVerboseStt`,
 `supportsJsonMode` and `supportsStreamUsage`. Capability overrides are booleans
@@ -226,6 +238,11 @@ responses to 256 KiB, examines at most 1000 entries and returns at most 200 uniq
 names of 128 characters or fewer, filtering markup, paths and recognizable or
 known secrets. Unsupported adapters, empty lists and provider errors return an
 empty list with a reason code; manual model entry remains available.
+
+Fish Audio accepts manually entered synthesis model IDs such as `drama-3`.
+Leaving its Voice ID blank uses the configured default Fish voice, including
+settings saved before blank values were normalized. ElevenLabs still requires
+an explicit Voice ID from its own account.
 
 Export omits invalid/unconfigured templates and includes no credential values or
 local filesystem paths. Import strictly validates the portable schema, replaces

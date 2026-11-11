@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 import { encode, decode } from '@msgpack/msgpack';
-import { getVoiceId } from '../../voiceConfig.js';
+import { resolveFishVoiceId } from '../../voiceConfig.js';
 import { Adapter } from './shared.js';
 import { ProviderError, httpProviderError } from '../errors.js';
 import { validateBaseUrl, validateProviderHeaders } from '../baseUrl.js';
@@ -44,7 +44,7 @@ export class FishAudio extends Adapter {
       const key = credentials.apiKey;
       const params = resolveTtsParams(this.params, request);
       const format = params.format ?? 'mp3';
-      const voice = params.voice ?? getVoiceId();
+      const voice = resolveFishVoiceId(params.voice);
       if (!Number.isFinite(params.temperature) || params.temperature < 0 || params.temperature > 2
         || !Number.isFinite(params.topP) || params.topP <= 0 || params.topP > 1
         || !['normal', 'balanced', 'low'].includes(params.latency)
