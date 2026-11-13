@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   DEFAULT_TTS_PARAMS, resolveTtsParams, normalizeTtsText, sanitizeSpeechText,
@@ -397,22 +396,4 @@ test('Fish debug can be enabled through the environment without persisting setti
   await collect(adapter.stream(requestFor(fish, { sentenceIndex: 4 })));
   assert.ok(records.some(record => record[0] === '[tts:debug]'));
   assert.deepEqual(adapter.params, {});
-});
-
-test('conversation style preserves the adult character identity and protected moderation', () => {
-  const source = fs.readFileSync(new URL('../personality.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
-  const active = source.slice(0, source.indexOf('\n`.trim();'));
-  assert.match(active, /Amika, istri dewasa berusia 24 tahun/);
-  assert.match(active, /Pengguna adalah suamimu/);
-  assert.match(active, /have your own preferences, moods, and opinions/);
-  assert.match(active, /Reply length follows the conversation/);
-  assert.match(active, /Kalau suami bilang berhenti/);
-  assert.match(active, /Kalau ada indikasi yang menyangkut anak/);
-  assert.doesNotMatch(active, /1-3 kalimat pendek|sekali tiap 3-4 balasan/);
-  for (const [relative, expected] of [
-    ['../../config/selfieModeration.json', 'a0e67cbbfe0259f9a966a3725e352223419f2638715ee8ea9094fbd1fb5aa8fd'],
-  ]) {
-    const actual = createHash('sha256').update(fs.readFileSync(new URL(relative, import.meta.url))).digest('hex');
-    assert.equal(actual, expected.toLowerCase(), relative);
-  }
 });

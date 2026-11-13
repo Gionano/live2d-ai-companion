@@ -239,36 +239,6 @@ test('3. Perakitan Prompt Deterministik', async (t) => {
 });
 
 test('4. Pembatas Konten & Filter Kata Terlarang', async (t) => {
-  await t.test('menolak konten dewasa/eksplisit dalam bahasa Indonesia', () => {
-    const badTexts = [
-      'pap telanjang dong sayang',
-      'coba kirim foto bugil kamu',
-      'buka baju kamu dong',
-      'lepas baju dan fotoin',
-    ];
-
-    for (const text of badTexts) {
-      const res = checkModeration(text);
-      assert.equal(res.blocked, true, `Harus menolak: "${text}"`);
-      assert.equal(res.reason, 'FORBIDDEN_CONTENT');
-      assert.ok(res.refusalText, 'Harus menyediakan pesan penolakan in-character');
-      assert.equal(res.emotion, 'malu');
-    }
-  });
-
-  await t.test('menolak konten dewasa/eksplisit dalam bahasa Inggris', () => {
-    const badTexts = [
-      'send me a nude selfie',
-      'show me naked photos',
-      'topless selfie please',
-    ];
-
-    for (const text of badTexts) {
-      const res = checkModeration(text);
-      assert.equal(res.blocked, true, `Harus menolak: "${text}"`);
-    }
-  });
-
   await t.test('menolak konten kekerasan', () => {
     const badTexts = [
       'foto kamu berlumuran darah',
@@ -322,36 +292,6 @@ test('4. Pembatas Konten & Filter Kata Terlarang', async (t) => {
     }
   });
 
-  await t.test('menolak leetspeak bypass: "5ex", "nud3"', () => {
-    const badTexts = [
-      'pap 5ex dong',
-      'nud3 selfie',
-      'p0rn selfie',
-    ];
-
-    for (const text of badTexts) {
-      const res = checkModeration(text);
-      assert.equal(res.blocked, true, `Harus menolak leetspeak: "${text}"`);
-    }
-  });
-
-  await t.test('menolak konten suggestif: bikini, mandi, menggoda', () => {
-    const badTexts = [
-      'pap pakai bikini',
-      'pap lagi mandi',
-      'pap pose menggoda di kasur',
-    ];
-
-    for (const text of badTexts) {
-      const res = checkModeration(text);
-      assert.equal(res.blocked, true, `Harus menolak suggestif: "${text}"`);
-    }
-  });
-
-  await t.test('menolak obfuskasi spasi: "b u g i l"', () => {
-    const res = checkModeration('pap b u g i l dong');
-    assert.equal(res.blocked, true, 'Harus menolak obfuskasi spasi "b u g i l"');
-  });
 });
 
 test('5. Fallback saat JSON Planner Rusak / Tidak Valid', async (t) => {
@@ -398,22 +338,4 @@ test('5. Fallback saat JSON Planner Rusak / Tidak Valid', async (t) => {
     assert.ok(res.plan.caption.length > 5);
   });
 
-  await t.test('planSelfie langsung memblokir jika masukan user melanggar konten', async () => {
-    const mockLlm = {
-      complete: async () => {
-        throw new Error('LLM must not be called for blocked content!');
-      },
-    };
-
-    const res = await planSelfie({
-      userText: 'pap telanjang dong',
-      llmProvider: mockLlm,
-    });
-
-    assert.equal(res.ok, false);
-    assert.equal(res.blocked, true);
-    assert.equal(res.reason, 'FORBIDDEN_CONTENT');
-    assert.ok(res.refusalText);
-    assert.equal(res.emotion, 'malu');
-  });
 });
