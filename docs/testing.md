@@ -49,7 +49,7 @@ deleted. It was not part of `npm test`.
 ## Manual checks
 
 After changing motion or expression authoring, check speech, idle transitions,
-tone changes, cancellation, and model switching in the browser or Electron app.
+tone changes, cancellation, and Witch reloads in the browser or Electron app.
 After changing secondary forms, check draft/save/cancel behavior and translated
 labels. Exercise diagnostic commands and the auxiliary dashboard directly when
 changing those features. Core automated tests do not replace these manual checks.

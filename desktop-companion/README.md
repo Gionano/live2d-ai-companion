@@ -9,12 +9,11 @@ Aplikasi desktop Windows pendamping (*desktop companion*) berbasis Electron untu
 1. **Overlay Avatar Transparan Melayang (`?mode=overlay`)**:
    - `transparent: true`, `frame: false`, `alwaysOnTop: true` (level `screen-saver`), `skipTaskbar: true`.
    - Latar belakang tembus pandang tanpa kotak hitam atau border sistem operasi.
-   - Live2D Fit-to-Bounds adaptif yang menjaga proporsi model penuh dari mahkota hingga sepatu.
+   - Live2D Fit-to-Bounds adaptif yang menjaga proporsi model penuh for the Witch hat, outfit, and motion margins.
    - Pembatasan FPS rendering hemat daya (default 30 FPS).
 
-2. **Dua Preset Tampilan**:
-   - **Dengan Sayap (`with-wings`)**: Tampilan landscape mengikuti rasio sayap es (lebar ~1138 px, tinggi ~937 px).
-   - **Tanpa Sayap (`without-wings`)**: Tampilan portrait ramping (~420×640 px) dengan sayap dinonaktifkan otomatis melalui parameter Live2D `Param41 = 1.0`.
+2. **Witch Framing Preset**:
+   - **Penyihir (`witch`)** uses a 420×640 portrait window by default. The renderer fits the Witch rig and motion margins without overriding ear or accessory parameters.
 
 3. **Click-Through & Mode Edit Fleksibel**:
    - **Mode Normal (Click-Through ON)**: Klik mouse tembus ke game, browser, atau aplikasi di balik avatar.
@@ -131,9 +130,8 @@ Untuk membuat paket installer Windows standalone (.exe installer NSIS):
 
 ## 🙏 Credits & Attribution
 
-1. **Model Live2D — IceGirl**:
-   - Dibuat oleh **tianyelulu** dan tersedia secara gratis di [BOOTH (IceGirl Model)](https://tianyelulu.booth.pm/items/5975192).
-   - Seluruh hak cipta, desain karakter, dan hak kekayaan intelektual model Live2D tetap menjadi milik kreator aslinya (**tianyelulu**).
+1. **Witch (魔女) Live2D model**:
+   - The companion bundles only Witch. Character art and model rights remain with the original creator; retain and follow the asset license.
 
 2. **Live2D Cubism SDK**:
    - Ditenagai oleh [Live2D Cubism SDK for Web](https://www.live2d.com/en/sdk/about/) dari **Live2D Inc.**

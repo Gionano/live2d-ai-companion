@@ -6,7 +6,7 @@
 - `server/` contains the Express/WebSocket backend and AI integrations. Selfie generation lives in `server/selfie/`; automated tests live in `server/tests/`.
 - `desktop-companion/` is a separate Electron package; `src/main/` manages windows and capture, while `src/preload/` exposes renderer bridges.
 - `vision-monitor/` is a separate Vite dashboard with a Node WebSocket bridge.
-- `public/models/live2d/` holds model assets; `vendor/live2d/` holds the Cubism framework. `config/`, `workflows/`, and `docs/` contain configuration, image-generation workflows, and documentation.
+- `public/models/魔女/` holds the Witch model assets; `vendor/live2d/` holds the Cubism framework. `config/`, `workflows/`, and `docs/` contain configuration, image-generation workflows, and documentation.
 
 ## Build, Test, and Development Commands
 

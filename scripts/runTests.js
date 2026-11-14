@@ -12,7 +12,8 @@ const directories = ['server/', 'src/', 'config/', 'workflows/', 'setup/', 'scri
   'desktop-companion/src/', 'desktop-companion/scripts/', 'vision-monitor/src/', 'vision-monitor/server/',
   'public/animationBanks/witch/'];
 const files = new Set(['.gitignore', 'package.json', 'index.html', 'providers.config.json', 'selfie.config.json',
-  'selfie.mapping.json', 'vite.config.js', 'desktop-companion/package.json', 'vision-monitor/vite.config.js']);
+  'selfie.mapping.json', 'vite.config.js', 'desktop-companion/package.json', 'vision-monitor/vite.config.js',
+  'public/models/魔女/魔女.model3.json']);
 
 try {
   const eligible = committableFiles(repoRoot);

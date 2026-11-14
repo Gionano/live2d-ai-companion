@@ -68,7 +68,7 @@ remain unmeasured. See the [memory guide](memory.md) for explicit setup.
   safe errors, streaming deadlines/retries, lazy registry, capability gating,
   migrated AI call sites and manual provider-test CLI. See the P1 record below.
 - Live2D Cubism rendering, physics, blinking, breathing, synthetic tracking, and emotion controls.
-- Live2D model discovery/upload/switching, persistent framing presets, and configuration-based animation tuning.
+- Witch-only Live2D assets, a persistent Witch framing preset, and configuration-based animation tuning.
 - WebSocket voice/text chat, VAD, mobile push-to-talk, STT, streaming chat/TTS, and turn-taking.
 - Webcam/screen vision routing, continuous capture, and a monitor bridge/dashboard with remote settings.
 - Persistent JSON memory extraction, user facts, and episodic recall.
@@ -1015,7 +1015,7 @@ Manual check: run `npm.cmd run dev:all`, then `npm.cmd --prefix desktop-companio
 
 ## Decisions
 - Shared provider configuration contains templates only; all slots start unassigned.
-- Existing provider selections remain in the ignored machine override. STT's prior `whisper-large-v3` selection is preserved; avatar: IceGirl.
+- Existing provider selections remain in the ignored machine override. STT's prior `whisper-large-v3` selection is preserved.
 - Selfies: default `auto`, external ComfyUI at `http://127.0.0.1:8188` first, managed ComfyUI second, sd.cpp third; explicit modes do not fall back. Managed installation paths must be configured. Default preset `cepat` (768 px, 12 steps, cfg 3); workflow model `qwen-image-2.1-UC-Q5_K_M.gguf`.
 - sd.cpp: GPU required by default; CPU and insufficient-memory overrides are explicit. `hemat` starts with empty preset args/modelArgs; telemetry is enabled, and optional tuning flags must be verified against the installed binary's help.
 - AI keys/provider access stay backend-only; image generation uses ImageProvider; selfie tuning lives in `selfie.config.json`.

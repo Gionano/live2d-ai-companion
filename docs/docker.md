@@ -64,11 +64,11 @@ See [provider settings](settings-gui.md) for endpoint/key mappings.
 | `app-data` | `/app/data` | Dialogue evidence, memory jobs/vectors, PAP limits and duration history |
 | `app-local` | `/app/local` | Settings, optional stored keys, BGE runtime/weights, PAP outputs, selected-model record |
 | `app-config` | `/app/config` | Animation tuning and shared character/PAP configuration |
-| `app-models` | `/app/public/models` | Live2D assets and models uploaded through the companion |
+| `app-models` | `/app/public/models` | Bundled Witch Live2D assets |
 | `app-references` | `/app/assets/references` | Bundled Witch reference and personal references added explicitly |
 
 New config/model/reference volumes are seeded from the image. The proxy serves Live2D files
-directly from the model volume, so uploads work without rebuilding the frontend.
+directly from the model volume. Only the Witch character is supported.
 Rebuilds preserve existing volumes: new shared config/model files do not replace
 their saved copies automatically. Back up the volumes and manually merge those
 updates when upgrading. Stop the app before backing up memory or runtime files.
@@ -139,7 +139,7 @@ Cloudflare here, or run the companion on Windows for managed image engines.
 
 After building, verify the container reports healthy, Settings loads and saves,
 chat/audio work with configured providers, and opening/closing Vision Monitor
-starts/stops capture. Upload/switch a Live2D model and confirm its files load.
+starts/stops capture. Confirm Witch textures, physics, and emotion banks load.
 Restart/recreate the container and confirm model selection, settings and
 completed memory evidence persist. Check that cross-origin Settings mutations
 remain forbidden and localhost bindings remain in place.

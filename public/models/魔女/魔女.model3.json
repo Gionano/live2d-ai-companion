@@ -1,29 +1,103 @@
 {
-	"Version": 3,
-	"FileReferences": {
-		"Moc": "魔女.moc3",
-		"Textures": [
-			"魔女.8192/texture_00.png",
-			"魔女.8192/texture_01.png"
-		],
-		"Physics": "魔女.physics3.json",
-		"DisplayInfo": "魔女.cdi3.json"
-	},
-	"Groups": [
-		{
-			"Target": "Parameter",
-			"Name": "EyeBlink",
-			"Ids": [
-				"ParamEyeLOpen",
-				"ParamEyeROpen"
-			]
-		},
-		{
-			"Target": "Parameter",
-			"Name": "LipSync",
-			"Ids": [
-				"ParamMouthOpenY"
-			]
-		}
-	]
+  "Version": 3,
+  "FileReferences": {
+    "Moc": "魔女.moc3",
+    "Textures": [
+      "魔女.8192/texture_00.png",
+      "魔女.8192/texture_01.png"
+    ],
+    "Physics": "魔女.physics3.json",
+    "DisplayInfo": "魔女.cdi3.json",
+    "Expressions": [
+      {
+        "Name": "bright-smile",
+        "File": "../../animationBanks/witch/expressions/bright-smile.exp3.json"
+      },
+      {
+        "Name": "cheek-puff",
+        "File": "../../animationBanks/witch/expressions/cheek-puff.exp3.json"
+      },
+      {
+        "Name": "furrowed-brows",
+        "File": "../../animationBanks/witch/expressions/furrowed-brows.exp3.json"
+      },
+      {
+        "Name": "heart-eyes",
+        "File": "../../animationBanks/witch/expressions/heart-eyes.exp3.json"
+      },
+      {
+        "Name": "hesitant-smile",
+        "File": "../../animationBanks/witch/expressions/hesitant-smile.exp3.json"
+      },
+      {
+        "Name": "neutral",
+        "File": "../../animationBanks/witch/expressions/neutral.exp3.json"
+      },
+      {
+        "Name": "sad-eyes",
+        "File": "../../animationBanks/witch/expressions/sad-eyes.exp3.json"
+      },
+      {
+        "Name": "shy-glance",
+        "File": "../../animationBanks/witch/expressions/shy-glance.exp3.json"
+      },
+      {
+        "Name": "shy-pout",
+        "File": "../../animationBanks/witch/expressions/shy-pout.exp3.json"
+      },
+      {
+        "Name": "side-smile",
+        "File": "../../animationBanks/witch/expressions/side-smile.exp3.json"
+      },
+      {
+        "Name": "small-frown",
+        "File": "../../animationBanks/witch/expressions/small-frown.exp3.json"
+      },
+      {
+        "Name": "small-gasp",
+        "File": "../../animationBanks/witch/expressions/small-gasp.exp3.json"
+      },
+      {
+        "Name": "smiling-eyes",
+        "File": "../../animationBanks/witch/expressions/smiling-eyes.exp3.json"
+      },
+      {
+        "Name": "soft-smile",
+        "File": "../../animationBanks/witch/expressions/soft-smile.exp3.json"
+      },
+      {
+        "Name": "star-eyes",
+        "File": "../../animationBanks/witch/expressions/star-eyes.exp3.json"
+      },
+      {
+        "Name": "tongue-tease",
+        "File": "../../animationBanks/witch/expressions/tongue-tease.exp3.json"
+      },
+      {
+        "Name": "wide-eyes",
+        "File": "../../animationBanks/witch/expressions/wide-eyes.exp3.json"
+      },
+      {
+        "Name": "wink",
+        "File": "../../animationBanks/witch/expressions/wink.exp3.json"
+      }
+    ]
+  },
+  "Groups": [
+    {
+      "Target": "Parameter",
+      "Name": "EyeBlink",
+      "Ids": [
+        "ParamEyeLOpen",
+        "ParamEyeROpen"
+      ]
+    },
+    {
+      "Target": "Parameter",
+      "Name": "LipSync",
+      "Ids": [
+        "ParamMouthOpenY"
+      ]
+    }
+  ]
 }

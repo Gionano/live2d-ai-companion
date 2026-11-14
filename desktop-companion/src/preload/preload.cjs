@@ -20,7 +20,7 @@ const desktopBridge = Object.freeze({
   getOverlayState: () => ipcRenderer.invoke('desktop:get-overlay-state'),
 
   /**
-   * Mengganti preset tampilan overlay ('with-wings' | 'without-wings').
+   * Apply the Witch overlay framing preset.
    */
   setOverlayPreset: (presetId) => ipcRenderer.invoke('desktop:set-overlay-preset', presetId),
 

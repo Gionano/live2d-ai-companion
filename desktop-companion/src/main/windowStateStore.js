@@ -194,7 +194,7 @@ export function clampBoundsToWorkArea(rawBounds, presetId, lockAspect = true, ex
 
 /**
  * State Store untuk menyimpan:
- * - Preset aktif ('with-wings' | 'without-wings')
+ * - Preset aktif ('witch')
  * - Monitor aktif (activeDisplayId)
  * - Ukuran & posisi per monitor DAN per preset (byDisplay[displayId].presets[presetId])
  * - Status clickThrough & editMode
@@ -328,7 +328,7 @@ class WindowStateStore {
 
   getActivePresetConfig() {
     const id = this.getActivePresetId();
-    return CONFIG.overlay.presets[id] || CONFIG.overlay.presets['with-wings'];
+    return CONFIG.overlay.presets[id] || CONFIG.overlay.presets[CONFIG.overlay.defaultPreset];
   }
 
   getPresetBounds(presetId = this.getActivePresetId(), targetDisplayId = null) {
@@ -460,8 +460,6 @@ class WindowStateStore {
       screenVision: this.state.screenVision,
       selfieEnabled: this.state.selfieEnabled,
       fitPadding: CONFIG.overlay.fitPadding,
-      wingExpressionName: CONFIG.overlay.wingExpressionName,
-      wingParameterId: CONFIG.overlay.wingParameterId,
       hiddenHalfBodyPartIds: CONFIG.overlay.hiddenHalfBodyPartIds,
       editShortcut: CONFIG.shortcuts.toggleEditMode.preferred,
     };

@@ -20,9 +20,6 @@ const POSE_CHANNELS = { ParamAngleX: 'headX', ParamAngleY: 'headY', ParamAngleZ:
 export function cueIdentity(cue) {
   return JSON.stringify([cue.speechId, cue.segmentId, cue.stage, cue.partId, cue.startAt, cue.endAt]);
 }
-export function isWitchModel(path) {
-  try { return decodeURIComponent(path).split('/').includes('魔女'); } catch { return false; }
-}
 
 // All paths are application assets. This loader never touches the standalone lab.
 export async function loadEmotionBundle({ base = '/animationBanks/witch/', fetcher = fetch, signal } = {}) {

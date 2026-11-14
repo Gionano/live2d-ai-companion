@@ -350,7 +350,7 @@ export function resolveMotionParameters(available, physicsOutputs = new Set()) {
     [key, ids.map(id => available.get(id)).find(param => param && !physicsOutputs.has(param.id)) ?? null]));
 }
 
-export function resolveModelCapabilities(available, { blinkIds = [], wingExpressionRegistered = false } = {}) {
+export function resolveModelCapabilities(available, { blinkIds = [] } = {}) {
   const declaredBlinkIds = [...new Set(blinkIds)].filter(id => available.has(id));
   return {
     // Physics-driven torso controls still provide a rig, even when gestures
@@ -358,7 +358,6 @@ export function resolveModelCapabilities(available, { blinkIds = [], wingExpress
     hasBodyRig: ['bodyX', 'bodyY', 'bodyZ'].some(key => PARAMETER_IDS[key].some(id => available.has(id))),
     blinkIds: declaredBlinkIds.length ? declaredBlinkIds
       : ['ParamEyeLOpen', 'ParamEyeROpen'].filter(id => available.has(id)),
-    wingParameterIndex: wingExpressionRegistered ? available.get('Param41')?.index ?? -1 : -1,
   };
 }
 

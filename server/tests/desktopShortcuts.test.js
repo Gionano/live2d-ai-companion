@@ -138,7 +138,7 @@ function desktopHarness(t, outcomes = {}) {
     screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display },
     Menu: { buildFromTemplate: items => items }, Tray: FakeTray, Notification: FakeNotification,
     nativeImage: { createFromBitmap: () => ({}) }, loadShortcutConfig, registerShortcuts,
-    windowStateStore: { state, getActivePresetId: () => 'with-wings', getSnapshot: () => ({ ...state }),
+    windowStateStore: { state, getActivePresetId: () => 'witch', getSnapshot: () => ({ ...state }),
       setMuteMic(enabled) { state.muteMic = Boolean(enabled); return state.muteMic; } },
     assertTrustedSender(event) { if (!event.trusted) throw new Error('Untrusted sender'); },
   });

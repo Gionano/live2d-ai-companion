@@ -72,14 +72,13 @@ camera framing, or the authored physics.
    local test tone through the same scheduling path as TTS without an AI request.
 4. Check head and gaze variation, then stop or interrupt a spoken response to
    verify that its gesture fades out.
-5. Run `npm.cmd --prefix desktop-companion run dev` to check the overlay. Try both
-   wing presets and resize the window while speech is playing.
+5. Run `npm.cmd --prefix desktop-companion run dev` to check the overlay. Use the Witch framing preset and resize the window while speech is playing.
 
 **Kekuatan gerak** controls gesture size. **Frekuensi gestur** controls scheduling
 of new gestures; setting it to zero also fades an active gesture out.
 **Kehalusan gerak (ms)** controls transitions. **Kekuatan gestur badan** separately
 controls speech movement on real torso parameters. **Kemiringan seluruh model** controls
-the render-only lean used by IceGirl, whose rig has no torso parameters.
+the render-only fallback for rigs without torso parameters.
 Leans are capped at 1.5 degrees, horizontal shifts at 1% of visible width, and
 vertical shifts at 0.4% of visible height. Fixed overlay margins reserve room for
 the motion without changing window bounds or zooming on each pose.
@@ -93,22 +92,17 @@ These suites cover playback timing, sentence pauses, cancellation, decode failur
 and real parameter scanning with injected audio and model dependencies.
 Motion authoring, idle variation, emotion-bank behavior, and local Cubism physics
 are now checked manually. Compare speech and idle playback on each available model,
-including sentence gaps, tone changes, interruption, model switching, and torso motion.
+including sentence gaps, tone changes, interruption, Witch reloads, and torso motion.
 Only scanned rig parameters are driven. Mouth and secondary physics outputs
 are excluded from the gesture layer. Real physics-controlled torso channels
 receive a separate smoothed base pose before physics runs, so hair and chest
 rigs that depend on the torso also receive its movement.
 
-## Compare models
+## Witch motion verification
 
-The active model is `/models/魔女/魔女.model3.json`. IceGirl remains available
-in the model selector. Keep the existing tuning values when comparing them.
-
-| Control | 魔女 | IceGirl |
-| --- | --- | --- |
-| Torso | Smoothed real torso tracking plus secondary physics | Bounded render lean |
-| Wing preset | Does not write `Param41`, which controls an ear | Uses the registered wing expression and `Param41` |
-| Blinking | Declared eye controls, or scanned eye-open controls if groups are absent | Same detection |
+The only supported model is `/models/魔女/魔女.model3.json`. Its torso uses
+smoothed tracking plus secondary physics; blinking uses the declared eye controls.
+The overlay uses the `witch` preset and leaves ear and accessory parameters alone.
 
 For real physics-controlled torso axes, the base follows head rotation at one
 third of its angle and adds a stronger authored body gesture. Each body variant
@@ -122,16 +116,14 @@ so stopping cannot abruptly clip a large held pose.
 Only those torso outputs use 35% of their original physics weight, preserving
 the tracked base; other physics outputs retain their original weight. This is
 the companion's blend, not an interpretation of VTube's physics-strength value.
-IceGirl continues to use its render lean and the existing gesture tuning.
 
 For an identical gesture sequence as well as identical preview audio, run this
-in the browser console for each model. It temporarily seeds gesture selection
+in the browser console. It temporarily seeds gesture selection
 for each emotion and restores the normal random selector afterward:
 
 ```js
-async function compareSpeechMotion(modelPath) {
+async function previewWitchSpeechMotion() {
   const adapter = window.__live2dCompanion;
-  await adapter.switchModel(modelPath);
   const controller = adapter.model.speechMotion;
   const originalRandom = controller.random;
   try {
@@ -150,11 +142,9 @@ async function compareSpeechMotion(modelPath) {
   }
 }
 
-await compareSpeechMotion('/models/live2d/IceGirl.model3.json');
-await compareSpeechMotion('/models/魔女/魔女.model3.json');
+await previewWitchSpeechMotion();
 ```
 
 Check torso follow-through, head and gaze coordination, transitions after
-speech, held head poses between phrases, and hat/hair/wing clipping while resizing. Repeat in overlay mode with
-both wing presets. The final call leaves 魔女 displayed; the saved active model
-remains 魔女 because this local comparison does not change server settings.
+speech, held head poses between phrases, and hat/hair clipping while resizing.
+Repeat in overlay mode using the Witch framing preset.

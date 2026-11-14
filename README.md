@@ -64,7 +64,7 @@ Vite serves the browser frontend on port `5173`. The Express/WebSocket backend b
     tests/                         node:test regression tests and synthetic fixtures
   desktop-companion/               Electron package, native capture, and popup
   vision-monitor/                  Separate Vite dashboard and WebSocket bridge
-  public/models/live2d/            Live2D assets
+  public/models/魔女/              Witch Live2D assets
   vendor/live2d/                   Cubism framework
   config/                         Character, intent, moderation, and animation settings
   workflows/                      ComfyUI API workflows
@@ -330,7 +330,7 @@ locally installed engines/models retain their own terms. See
 
 ## Credits and licenses
 
-- **IceGirl Live2D model:** created by **tianyelulu**, available on [BOOTH](https://tianyelulu.booth.pm/items/5975192). Model art and intellectual property remain with the creator; use the assets according to the published license.
+- **Witch (魔女) Live2D model:** the only bundled character. Model art and intellectual property remain with the original creator; retain and follow the asset license.
 - **Live2D Cubism SDK for Web:** by [Live2D Inc.](https://www.live2d.com/en/sdk/about/). The Framework uses the [Live2D Open Software License](https://www.live2d.com/eula/live2d-open-software-license-agreement_en.html); Core uses the [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_en.html). Obtain Cubism Core from the [official SDK download](https://www.live2d.com/en/sdk/download/web/).
 - **AI services:** [Experiential Labs](https://experientiallabs.ai), [Groq](https://groq.com), [Fish Audio](https://fish.audio), and [9inference](https://9inference.cloud).
 

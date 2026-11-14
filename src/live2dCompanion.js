@@ -11,12 +11,13 @@ import { BreathParameterData, CubismBreath } from '@framework/effect/cubismbreat
 import { CubismMatrix44 } from '@framework/math/cubismmatrix44';
 import { CubismMotionManager } from '@framework/motion/cubismmotionmanager';
 import { EMOTION_MAP } from './expressionMap.js';
+import { WITCH_MODEL_PATH } from './characterModel.js';
 import { SpeechMotionController, resolveMotionParameters, resolveModelCapabilities, applyMotionOffsets, bodyLeanTransform, bodyLeanMargin } from './speechMotion.js';
 import { BodyMotionController, resolvePhysicsBodyParameters, prepareBodyPhysics } from './bodyMotion.js';
 import { SyntheticTracker } from './syntheticTracking.js';
 import { IdleMotionController, IDLE_MOTION_BANK, composeIdlePose, applyIdlePhysicsBodyOffsets } from './idleMotion.js';
 import { tuning } from './tuningConfig.js';
-import { EmotionBankController, loadEmotionBundle, isWitchModel, authoredIdleClips } from './emotionBanks.js';
+import { EmotionBankController, loadEmotionBundle, authoredIdleClips } from './emotionBanks.js';
 import { ComicEffects } from './comicEffects.js';
 
 // Konfigurasi Framing Half Body (Langsung & Permanen)
@@ -37,7 +38,6 @@ export function getHalfBodyConfig() {
   return window.innerWidth <= 768 ? HALF_BODY_FRAMING.mobile : HALF_BODY_FRAMING.desktop;
 }
 
-const MODEL_URL = '/models/live2d/IceGirl.model3.json';
 const SHADER_PATH = '/vendor/live2d/shaders/';
 const PRIORITY_IDLE = 1;
 const PRIORITY_TALKING = 3;
@@ -131,12 +131,9 @@ class CompanionCubismModel extends CubismUserModel {
 
     // --- Overlay Fit-to-Bounds & Preset state (?mode=overlay only) ---
     this.isOverlay = isOverlayMode();
-    this.wingParamIndex = -1;
-    this.wingExpressionName = '翅膀';
     this.hiddenHalfBodyPartIds = [];
     this.hiddenHalfBodyPartIndices = [];
-    this.overlayPresetId = 'with-wings';
-    this.overlayShowWings = true;
+    this.overlayPresetId = 'witch';
     this.overlayPresetConfig = null;
     this.measuredPresetBounds = new Map();
     this.lastOverlayFitSummary = null;
@@ -188,7 +185,6 @@ class CompanionCubismModel extends CubismUserModel {
     }
     const capabilities = resolveModelCapabilities(this.availableParams, {
       blinkIds: declaredBlinkIds,
-      wingExpressionRegistered: this.expressions.has(this.wingExpressionName),
     });
     const idMgr = CubismFramework.getIdManager();
     const blinkIds = capabilities.blinkIds.map(id => idMgr.getId(id));
@@ -215,8 +211,7 @@ class CompanionCubismModel extends CubismUserModel {
       Object.entries(this.motionParameters).map(([key, param]) => [key, param?.id ?? null]),
     ));
 
-    // Resolve wing parameter (Param41 / 翅膀.exp3.json) & half-body hidden leg parts for overlay mode
-    this.wingParamIndex = capabilities.wingParameterIndex;
+    // Resolve optional hidden parts for overlay framing.
     this.hiddenHalfBodyPartIndices = [];
     for (const partIdStr of this.hiddenHalfBodyPartIds) {
       const pIdx = this._model.getPartIndex(idMgr.getId(partIdStr));
@@ -243,7 +238,6 @@ class CompanionCubismModel extends CubismUserModel {
   }
 
   async loadBanks() {
-    if (!isWitchModel(this.homeDir)) return;
     try {
       const bundle = await loadEmotionBundle({ signal: this.bankAbort.signal });
       if (this.bankAbort.signal.aborted) return;
@@ -606,17 +600,6 @@ class CompanionCubismModel extends CubismUserModel {
     this._expressionManager.updateMotion(this._model, delta);
     if (bankEnabled) this.banks.applyFace(this._model, blink);
 
-    // Di mode overlay, pastikan arah ekspresi sayap (翅膀.exp3.json / Param41)
-    // tetap konsisten meskipun emosi netral memanggil stopAllMotions():
-    // Param41 = 0.0 -> MENAMPILKAN sayap (preset "Dengan sayap")
-    // Param41 = 1.0 -> MENYEMBUNYIKAN sayap (preset "Tanpa sayap")
-    if (this.isOverlay && this.wingParamIndex >= 0) {
-      this._model.setParameterValueByIndex(
-        this.wingParamIndex,
-        this.overlayShowWings ? 0.0 : 1.0,
-      );
-    }
-
     if (this.breath) this.breath.updateParameters(this._model, delta);
 
     // Lip sync smoothing.
@@ -649,8 +632,7 @@ class CompanionCubismModel extends CubismUserModel {
       }
     }
 
-    // Di mode overlay half-body, sembunyikan part kaki bawah rok (Part29, Part30, Part74)
-    // supaya batas bawah model adalah ujung rok (ArtMesh79) tanpa potongan paha.
+    // Apply optional hidden parts after physics and before updating the mesh.
     if (this.isOverlay && this.hiddenHalfBodyPartIndices.length > 0) {
       for (const partIdx of this.hiddenHalfBodyPartIndices) {
         this._model.setPartOpacityByIndex(partIdx, 0.0);
@@ -660,11 +642,7 @@ class CompanionCubismModel extends CubismUserModel {
     this._model.update();
   }
 
-  /**
-   * Mengukur bounding box mesh visible pada pose diam (rest pose) untuk kedua preset overlay:
-   * - 'with-wings' (Param41 = 0.0, sayap tampil)
-   * - 'without-wings' (Param41 = 1.0, sayap disembunyikan via arah 翅膀.exp3.json)
-   */
+  // Measure the Witch rest pose without modifying expression parameters.
   measureRestPoseOverlayBounds() {
     const coreModel = this._model?._model;
     if (!coreModel) return;
@@ -741,76 +719,27 @@ class CompanionCubismModel extends CubismUserModel {
       };
     };
 
-    // 1. Ukur preset 'with-wings' (Param41 = 0.0 -> sayap tampil)
-    if (this.wingParamIndex >= 0) {
-      this._model.setParameterValueByIndex(this.wingParamIndex, 0.0);
-    }
     this._model.update();
-    this.measuredPresetBounds.set('with-wings', measureCurrentVisibleMesh());
-
-    // 2. Ukur preset 'without-wings' (Param41 = 1.0 -> sayap disembunyikan)
-    if (this.wingParamIndex >= 0) {
-      this._model.setParameterValueByIndex(this.wingParamIndex, 1.0);
-    }
-    this._model.update();
-    this.measuredPresetBounds.set('without-wings', measureCurrentVisibleMesh());
-
-    // Kembalikan parameter ke kondisi awal
-    this._model.loadParameters();
-    for (const partIdx of this.hiddenHalfBodyPartIndices) {
-      this._model.setPartOpacityByIndex(partIdx, 0.0);
-    }
-    if (this.wingParamIndex >= 0) {
-      this._model.setParameterValueByIndex(
-        this.wingParamIndex,
-        this.overlayShowWings ? 0.0 : 1.0,
-      );
-    }
-    this._model.update();
+    const bounds = measureCurrentVisibleMesh();
+    this.measuredPresetBounds.set('witch', bounds);
+    this.measuredPresetBounds.set(this.overlayPresetId, bounds);
   }
 
-  /**
-   * Menerapkan konfigurasi preset overlay ('with-wings' | 'without-wings') dan toggle sayap.
-   */
   applyOverlayState(overlayState) {
     if (!overlayState) return;
-    if (overlayState.wingExpressionName) {
-      this.wingExpressionName = overlayState.wingExpressionName;
-    }
     if (Array.isArray(overlayState.hiddenHalfBodyPartIds) && this._model) {
       const idMgr = CubismFramework.getIdManager();
       this.hiddenHalfBodyPartIds = overlayState.hiddenHalfBodyPartIds;
       this.hiddenHalfBodyPartIndices = [];
-      for (const partIdStr of this.hiddenHalfBodyPartIds) {
-        const pIdx = this._model.getPartIndex(idMgr.getId(partIdStr));
-        if (pIdx >= 0) this.hiddenHalfBodyPartIndices.push(pIdx);
+      for (const partId of this.hiddenHalfBodyPartIds) {
+        const index = this._model.getPartIndex(idMgr.getId(partId));
+        if (index >= 0) this.hiddenHalfBodyPartIndices.push(index);
       }
     }
-
-    const presetId = overlayState.activePreset || 'with-wings';
-    const presetConfig = overlayState.presetConfig || null;
-    const showWings = presetConfig ? Boolean(presetConfig.showWings) : presetId !== 'without-wings';
-
-    this.overlayPresetId = presetId;
-    this.overlayPresetConfig = presetConfig;
-    this.overlayShowWings = showWings;
-
-    // Terapkan ekspresi 翅膀.exp3.json ketika sayap dimatikan (Param41 = 1.0 menyembunyikan sayap)
-    if (this.ready && this._model) {
-      if (!showWings) {
-        if (this.currentEmotion === 'netral' && this.expressions.has(this.wingExpressionName)) {
-          this.setExpression(this.wingExpressionName);
-        }
-      } else if (this.currentEmotion === 'netral') {
-        this._expressionManager?.stopAllMotions();
-      }
-
-      if (this.wingParamIndex >= 0) {
-        this._model.setParameterValueByIndex(this.wingParamIndex, showWings ? 0.0 : 1.0);
-      }
-    }
-
-    this.invalidateOverlayFit(overlayState.reason || `preset:${presetId}`);
+    this.overlayPresetId = 'witch';
+    this.overlayPresetConfig = overlayState.presetConfig || null;
+    if (this.ready) this.measureRestPoseOverlayBounds();
+    this.invalidateOverlayFit(overlayState.reason || 'preset:witch');
   }
 
   invalidateOverlayFit(reason = 'recalculate') {
@@ -821,8 +750,8 @@ class CompanionCubismModel extends CubismUserModel {
   /**
    * Menghitung matriks MVP Fit-to-Bounds untuk mode overlay (?mode=overlay):
    * - Menggunakan rasio aspek canvas sebenarnya (width / height)
-   * - Memastikan seluruh bagian model (sayap, mahkota, ujung rok) muat penuh
-   *   di dalam canvas dengan padding ~4% di setiap sisi tanpa distorsi rasio.
+   * - Fit the Witch hat, hair, outfit, and motion margins within the canvas
+   *   with 4% padding and no aspect distortion.
    */
   computeOverlayFitProjection(width, height) {
     const projection = new CubismMatrix44();
@@ -832,7 +761,7 @@ class CompanionCubismModel extends CubismUserModel {
 
     const restBounds =
       this.measuredPresetBounds.get(this.overlayPresetId) ||
-      this.measuredPresetBounds.get('with-wings') || {
+      this.measuredPresetBounds.get('witch') || {
         minX: -0.5025,
         maxX: 0.5014,
         minY: -0.1851,
@@ -882,9 +811,6 @@ class CompanionCubismModel extends CubismUserModel {
 
     this.lastOverlayFitSummary = {
       presetId: this.overlayPresetId,
-      showWings: this.overlayShowWings,
-      wingExpressionName: this.wingExpressionName,
-      wingParamValue: this.overlayShowWings ? 0.0 : 1.0,
       padding,
       usableNdcSpan: +usableNdc.toFixed(4),
       canvasAspect: +canvasAspect.toFixed(4),
@@ -1055,17 +981,6 @@ class CompanionCubismModel extends CubismUserModel {
       phase: 'AFTER_FIX_FIT_TO_BOUNDS',
       reason,
       presetId: this.overlayPresetId,
-      showWings: this.overlayShowWings,
-      wingExpression: {
-        file: `${this.wingExpressionName}.exp3.json`,
-        parameterId: 'Param41',
-        directionExplanation:
-          'File 翅膀.exp3.json mengatur Param41 = 1.0 (MENYEMBUNYIKAN sayap); Param41 = 0.0 MENAMPILKAN sayap.',
-        appliedParam41Value:
-          this.wingParamIndex >= 0
-            ? +this._model.getParameterValueByIndex(this.wingParamIndex).toFixed(4)
-            : null,
-      },
       windowInner: {
         innerWidth: window.innerWidth,
         innerHeight: window.innerHeight,
@@ -1184,19 +1099,7 @@ export class Live2DCompanion {
 
     requestAnimationFrame((time) => this.frame(time));
 
-    // Fetch active model from server config (Requirement 5)
-    let targetModelPath = MODEL_URL;
-    try {
-      const res = await fetch('/api/models/active');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.activeModelPath) targetModelPath = data.activeModelPath;
-      }
-    } catch (e) {
-      console.warn('[Live2D] Gagal fetch active model, menggunakan default:', e);
-    }
-
-    await this.switchModel(targetModelPath);
+    await this.switchModel(WITCH_MODEL_PATH);
   }
 
   setupOverlayEditControls() {
@@ -1284,7 +1187,7 @@ export class Live2DCompanion {
     if (footerEl) {
       const presetLabel =
         this.overlayState?.presetConfig?.label ||
-        (this.overlayState?.activePreset === 'without-wings' ? 'Tanpa sayap' : 'Dengan sayap');
+        'Penyihir';
       footerEl.textContent = `${presetLabel} • ${w}×${h} px • Bebas tembus tepi layar • Esc / Ctrl+Alt+E selesai`;
     }
 
@@ -1338,7 +1241,12 @@ export class Live2DCompanion {
     }
   }
 
-  async switchModel(modelPath) {
+  async switchModel(modelPath = WITCH_MODEL_PATH) {
+    const requestedPath = new URL(modelPath, location.href);
+    if (requestedPath.origin !== location.origin || decodeURIComponent(requestedPath.pathname) !== WITCH_MODEL_PATH) {
+      throw new Error('Only the Witch model is supported.');
+    }
+    modelPath = WITCH_MODEL_PATH;
     const session = this._modelSession = (this._modelSession ?? 0) + 1;
     this._pendingModel?.bankAbort.abort();
     if (this.status) this.status.textContent = 'Memuat model...';

@@ -287,11 +287,11 @@ function applyBoundsToOverlayWindow(targetBounds, presetConfig) {
 }
 
 /**
- * Mengganti preset tampilan ('with-wings' | 'without-wings'):
+ * Apply the Witch overlay framing preset:
  * 1. Simpan posisi/ukuran preset sebelumnya
  * 2. Ambil & validasi posisi/ukuran preset baru agar tetap di dalam workArea monitor
  * 3. Terapkan ukuran, kunci rasio aspek, dan pertahankan click-through, always-on-top, contentProtection
- * 4. Beritahu renderer agar mengganti status sayap & menghitung ulang Fit-to-Bounds
+ * 4. Notify the renderer to recalculate the fitted bounds
  */
 function switchOverlayPreset(newPresetId, reason = 'preset-switched') {
   if (!CONFIG.overlay.presets[newPresetId]) {
@@ -312,8 +312,6 @@ function switchOverlayPreset(newPresetId, reason = 'preset-switched') {
   logger.info('Main', 'Preset tampilan overlay diubah', {
     presetId,
     label: presetConfig.label,
-    showWings: presetConfig.showWings,
-    wingParamValue: presetConfig.wingParamValue,
     bounds,
     aspectRatio: presetConfig.aspectRatio,
   });

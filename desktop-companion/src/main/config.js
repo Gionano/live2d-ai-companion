@@ -3,19 +3,10 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/**
- * Rasio aspek model IceGirl dengan sayap (half-body: mahkota s/d ujung rok):
- * Lebar rentang sayap (dengan margin gerak idle): ~1.034 unit
- * Tinggi mahkota s/d ujung rok (dengan margin gerak idle): ~0.8515 unit
- * Rasio landscape = 1.034 / 0.8515 ≈ 1.2143
- */
-const WITH_WINGS_DEFAULT_HEIGHT = 560;
-const WITH_WINGS_ASPECT_RATIO = +(1.034 / 0.8515).toFixed(4); // 1.2143
-const WITH_WINGS_DEFAULT_WIDTH = Math.round(WITH_WINGS_DEFAULT_HEIGHT * WITH_WINGS_ASPECT_RATIO); // 680
-
-const WITHOUT_WINGS_DEFAULT_WIDTH = 420;
-const WITHOUT_WINGS_DEFAULT_HEIGHT = 640;
-const WITHOUT_WINGS_ASPECT_RATIO = +(WITHOUT_WINGS_DEFAULT_WIDTH / WITHOUT_WINGS_DEFAULT_HEIGHT).toFixed(4); // 0.6563
+// Portrait defaults for Witch; the renderer measures the rig for fitting.
+const WITCH_DEFAULT_WIDTH = 420;
+const WITCH_DEFAULT_HEIGHT = 640;
+const WITCH_ASPECT_RATIO = WITCH_DEFAULT_WIDTH / WITCH_DEFAULT_HEIGHT;
 
 /**
  * Konfigurasi terpusat untuk Amika Desktop Companion.
@@ -40,9 +31,9 @@ export const CONFIG = {
 
   // Konfigurasi Jendela Overlay & Preset Tampilan (Fase 1 & 2)
   overlay: {
-    defaultPreset: process.env.OVERLAY_PRESET || 'with-wings',
-    defaultWidth: WITH_WINGS_DEFAULT_WIDTH,
-    defaultHeight: WITH_WINGS_DEFAULT_HEIGHT,
+    defaultPreset: 'witch',
+    defaultWidth: WITCH_DEFAULT_WIDTH,
+    defaultHeight: WITCH_DEFAULT_HEIGHT,
     minWidth: 260,
     minHeight: 340,
     marginRight: 16,
@@ -52,57 +43,24 @@ export const CONFIG = {
     alwaysOnTopLevel: 'screen-saver',
     contentProtection: true,
 
-    // Parameter Fit-to-Bounds & Kontrol Sayap Model IceGirl
-    fitPadding: 0.04, // 4% padding di setiap sisi canvas
-    wingExpressionName: '翅膀', // File: 翅膀.exp3.json (Param41 = 1.0 -> MENYEMBUNYIKAN sayap)
-    wingParameterId: 'Param41', // 0.0 = sayap tampil, 1.0 = sayap disembunyikan
+    // Fit the Witch rig without overriding its ear or accessory controls.
+    fitPadding: 0.04,
     hiddenHalfBodyPartIds: [],
-
     presets: {
-      'with-wings': {
-        id: 'with-wings',
-        label: 'Dengan sayap',
-        showWings: true,
-        wingParamValue: 0.0,
-        defaultWidth: WITH_WINGS_DEFAULT_WIDTH, // 680 px (dihitung dari defaultHeight * aspectRatio)
-        defaultHeight: WITH_WINGS_DEFAULT_HEIGHT, // 560 px (konstanta tinggi default)
-        aspectRatio: WITH_WINGS_ASPECT_RATIO, // ~1.2143 (landscape)
-        minWidth: Math.round(340 * WITH_WINGS_ASPECT_RATIO),
-        minHeight: 340,
-        framing: {
-          padding: 0.04,
-          scaleMultiplier: 1.0,
-          offsetX: 0.0,
-          offsetY: 0.0,
-          motionMargin: {
-            left: 0.016,
-            right: 0.016,
-            top: 0.022,
-            bottom: 0.010,
-          },
-        },
-      },
-      'without-wings': {
-        id: 'without-wings',
-        label: 'Tanpa sayap',
-        showWings: false,
-        wingParamValue: 1.0, // Mengaktifkan arah ekspresi 翅膀.exp3.json untuk menyembunyikan sayap
-        defaultWidth: WITHOUT_WINGS_DEFAULT_WIDTH, // 420 px
-        defaultHeight: WITHOUT_WINGS_DEFAULT_HEIGHT, // 640 px (portrait)
-        aspectRatio: WITHOUT_WINGS_ASPECT_RATIO, // 0.6563 (portrait)
+      witch: {
+        id: 'witch',
+        label: 'Penyihir',
+        defaultWidth: WITCH_DEFAULT_WIDTH,
+        defaultHeight: WITCH_DEFAULT_HEIGHT,
+        aspectRatio: WITCH_ASPECT_RATIO,
         minWidth: 260,
-        minHeight: Math.round(260 / WITHOUT_WINGS_ASPECT_RATIO),
+        minHeight: Math.round(260 / WITCH_ASPECT_RATIO),
         framing: {
           padding: 0.04,
           scaleMultiplier: 1.0,
           offsetX: 0.0,
           offsetY: 0.0,
-          motionMargin: {
-            left: 0.014,
-            right: 0.014,
-            top: 0.022,
-            bottom: 0.010,
-          },
+          motionMargin: { left: 0.016, right: 0.016, top: 0.022, bottom: 0.010 },
         },
       },
     },

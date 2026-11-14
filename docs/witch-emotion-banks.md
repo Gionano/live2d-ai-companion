@@ -92,4 +92,4 @@ Run `npm.cmd test` and `npm.cmd run build`. For focused regression checks:
 These tests mock audio and model dependencies without AI calls or private model
 binaries. Emotion-bank authoring and local rig behavior are checked manually.
 Review actual browser and Electron playback with local
-test audio, sentence pauses, tone changes, cancellation, and model switching.
+test audio, sentence pauses, tone changes, cancellation, and Witch reloads.
