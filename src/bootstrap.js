@@ -13,6 +13,8 @@ const browserWorkspace = !window.desktopBridge && new URLSearchParams(location.s
 window.addEventListener('hashchange', () => { if ((location.hash === '#settings') !== settingsPage) location.reload(); });
 if (window.desktopBridge) document.documentElement.classList.add('electron-mode');
 if (new URLSearchParams(location.search).get('mode') === 'overlay') document.documentElement.classList.add('overlay-mode');
+// Keep the legacy panel hidden from the first paint until browser styling is ready.
+if (!browserWorkspace && !settingsPage) document.getElementById('companion-panel').hidden = false;
 
 async function boot() {
 if (settingsPage) {
@@ -39,6 +41,7 @@ if (settingsPage) {
       await import('./browserChat.css');
       const { mountBrowserChat } = await import('./browserChat.js');
       mountBrowserChat({ document, canOpenSettings: allowed, openSettings: () => { location.hash = 'settings'; } });
+      document.getElementById('companion-panel').hidden = false;
     }
     const panel = document.querySelector('#companion-panel .panel-head');
     if (allowed && !browserWorkspace) {

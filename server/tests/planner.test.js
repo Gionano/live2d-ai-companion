@@ -178,10 +178,10 @@ test('3. Perakitan Prompt Deterministik', async (t) => {
     assert.match(built.positivePrompt, /living room/i);
     assert.match(built.positivePrompt, /natural.*daylight/i);
 
-    // Negative prompt mengandung tag keselamatan
-    assert.match(built.negativePrompt, /nsfw/i);
-    assert.match(built.negativePrompt, /nude/i);
+    // Negative prompt retains general safety and image quality tags.
+    assert.doesNotMatch(built.negativePrompt, /\b(nsfw|nude|naked|cleavage|sexual|suggestive|explicit|nipples|exposed breasts|lingerie|bikini|underwear)\b/i);
     assert.match(built.negativePrompt, /violence/i);
+    assert.match(built.negativePrompt, /blurry/i);
 
     // Reference image disetel sesuai pakaian
     assert.equal(built.referenceImage, 'default.jpg');

@@ -1,5 +1,14 @@
 # Status
 
+Windows Python migration requested (2026-11-13): all Amika-authored application
+code is to move to Python, including the GUI, backend, audio/vision/memory/PAP,
+and Live2D animation controllers. Third-party SDKs and packages retain their
+implementations. The target is one Windows installer with an install, native
+setup, and start flow, requiring no separately installed Python or Node.js.
+The [migration plan](windowsPythonMigration.md) proposes PySide6, native Cubism
+bindings, a bundled Python runtime, and Inno Setup. This is planned work only;
+native rendering compatibility and installer behavior remain unverified.
+
 Current companion behavior is documented in the [continuous vision and conversation guide](continuous-vision-conversation.md), [conversation stages](conversation-behavior.md), [vision routing](vision-routing.md), [memory](memory.md), and [Live2D speech movement guide](live2d-speech-motion.md). Historical sections below retain the implementation and verification evidence recorded during their original work. Automated verification uses mocked providers, HTTP/WS, desktop IPC, speech, local-process fixtures, and memory/telemetry tests.
 
 Docker/documentation refresh (2026-11-08): the container now builds the companion
